@@ -3,66 +3,109 @@ import { ref, reactive, watch } from 'vue'
 import ModuleToolbar from './ModuleToolbar.vue'
 import ModulePaper from './ModulePaper.vue'
 import ModulePropertyPanel from './ModulePropertyPanel.vue'
-// Ref vers le paper
+
+/* --------------------
+ * Refs
+ * -------------------- */
 const paperRef = ref(null)
 
-// Patch JSON global
+/* --------------------
+ * Patch JSON (source de vérité)
+ * -------------------- */
 const patch = reactive({
   modules: [],
   connections: []
 })
 
-// Module actuellement sélectionné
-const selectedModule = ref(null)
+/* --------------------
+ * Sélection
+ * -------------------- */
+const selectedModuleId = ref(null)
 
-// ------------------------
-// ⚡ Handlers d'événements
-// ------------------------
-
-// Toolbar émet 'add-module'
+/* =========================================================
+ * TOOLBAR
+ * ========================================================= */
 const handleAddModule = (type) => {
-  // Ajouter module sur le paper
   const id = paperRef.value.addModule(type, 150, 100)
-  // Ajouter au patch JSON
+
   patch.modules.push({
     id,
     type,
     params: { ...paperRef.value.modulesById.get(id).params }
   })
+
+  selectedModuleId.value = id
 }
 
-// Paper émet 'module-selected'
+/* =========================================================
+ * MODULE SELECTION
+ * ========================================================= */
 const handleModuleSelected = (module) => {
-  selectedModule.value = module
+  selectedModuleId.value = module.id
 }
 
-// Paper émet 'module-removed'
+/* =========================================================
+ * MODULE REMOVAL
+ * ========================================================= */
 const handleModuleRemoved = (module) => {
-  // Supprimer du patch JSON
-  const idx = patch.modules.findIndex(m => m.id === module.id)
-  if (idx !== -1) patch.modules.splice(idx, 1)
+  // modules
+  const mIdx = patch.modules.findIndex(m => m.id === module.id)
+  if (mIdx !== -1) patch.modules.splice(mIdx, 1)
 
-  // Supprimer les connexions liées
-  patch.connections = patch.connections.filter(
-    c => c.from !== module.id && c.to !== module.id
-  )
+  // connections (mutation, pas réassignation)
+  for (let i = patch.connections.length - 1; i >= 0; i--) {
+    const c = patch.connections[i]
+    if (
+      c.from.moduleId === module.id ||
+      c.to.moduleId === module.id
+    ) {
+      patch.connections.splice(i, 1)
+    }
+  }
 
-  if (selectedModule.value?.id === module.id) selectedModule.value = null
+  if (selectedModuleId.value === module.id) {
+    selectedModuleId.value = null
+  }
 }
 
-// Paper émet 'connection-added'
+/* =========================================================
+ * CONNECTIONS
+ * ========================================================= */
 const handleConnectionAdded = (conn) => {
   patch.connections.push(conn)
 }
 
-// Paper émet 'connection-removed'
 const handleConnectionRemoved = (conn) => {
-  patch.connections = patch.connections.filter(
-    c => !(c.from === conn.from && c.to === conn.to)
+  const idx = patch.connections.findIndex(c =>
+    c.from.moduleId === conn.from.moduleId &&
+    c.from.port === conn.from.port &&
+    c.to.moduleId === conn.to.moduleId &&
+    c.to.port === conn.to.port
   )
+  if (idx !== -1) patch.connections.splice(idx, 1)
 }
 
-// Debug : observer le patch JSON
+/* =========================================================
+ * MODULE PROPERTIES
+ * ========================================================= */
+const handleParamChanged = ({ key, value }) => {
+  if (!selectedModuleId.value) return
+
+  const module = patch.modules.find(m => m.id === selectedModuleId.value)
+  if (!module) return
+
+  module.params[key] = value
+}
+
+/* =========================================================
+ * Derived selected module (pour le panel)
+ * ========================================================= */
+const selectedModule = () =>
+  patch.modules.find(m => m.id === selectedModuleId.value) || null
+
+/* =========================================================
+ * Debug
+ * ========================================================= */
 watch(patch, (newPatch) => {
   console.log('Patch JSON:', JSON.stringify(newPatch, null, 2))
 }, { deep: true })
@@ -82,29 +125,20 @@ watch(patch, (newPatch) => {
       @connection-removed="handleConnectionRemoved"
     />
 
+    <!-- Properties -->
     <ModulePropertyPanel
-    :module="selectedModule"
-    @param-changed="(data) => {
-        if (selectedModule.value) {
-        // Mettre à jour le module sélectionné
-        selectedModule.value.params[data.key] = data.value
-
-        // Mettre à jour patch JSON
-        const idx = patch.modules.findIndex(m => m.id === selectedModule.value.id)
-        if(idx !== -1) patch.modules[idx].params[data.key] = data.value
-        }
-    }"
+      :module="selectedModule()"
+      @param-changed="handleParamChanged"
     />
 
-
-
-    <!-- Infos debug sélection -->
-    <div v-if="selectedModule" style="margin-top:8px;">
-      <strong>Selected:</strong> {{ selectedModule.type }} (ID: {{ selectedModule.id }})
+    <!-- Debug sélection -->
+    <div v-if="selectedModule()" style="margin-top:8px;">
+      <strong>Selected:</strong>
+      {{ selectedModule().type }} (ID: {{ selectedModule().id }})
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Optionnel : styling simple */
+/* styling optionnel */
 </style>
