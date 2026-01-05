@@ -1,350 +1,184 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { dia, shapes } from '@joint/core'
-import { useModuleCatalog } from '../composables/useModuleCatalog'
+import { ref, onMounted, onBeforeUnmount } from "vue";
+import { dia, shapes } from "@joint/core";
+import { useModuleCatalog } from "../composables/useModuleCatalog";
 
-/* --------------------
- * Emits
- * -------------------- */
 const emit = defineEmits([
-  'module-selected',
-  'module-removed',
-  'connection-added',
-  'connection-removed'
-])
+  "module-selected",
+  "module-removed",
+  "connection-added",
+  "connection-removed",
+]);
 
-/* --------------------
- * Refs / state
- * -------------------- */
-const paperEl = ref(null)
+const paperEl = ref(null);
+let graph;
+let paper;
 
-let graph = null
-let paper = null
+const modulesById = new Map();
+const selectedModule = ref(null);
+const { getModuleByType } = useModuleCatalog();
 
-const modulesById = new Map()
-const selectedModule = ref(null)
+/* =========================
+ * PORT GROUPS (Community Edition)
+ * ========================= */
+const portGroups = {
+  in: {
+    position: { name: "left" },
+    attrs: {
+      circle: { r: 6, magnet: true, fill: "#fff", stroke: "#000" },
+      text: { fill: "#000", fontSize: 10, textAnchor: "end", y: 0 },
+    },
+  },
+  out: {
+    position: { name: "right" },
+    attrs: {
+      circle: { r: 6, magnet: true, fill: "#000", stroke: "#000" },
+      text: { fill: "#000", fontSize: 10, textAnchor: "start", y: 0 },
+    },
+  },
+};
 
-/* --------------------
- * Zoom
-证明
- * -------------------- */
-const zoom = ref(1)
-const ZOOM_STEP = 0.1
-const ZOOM_MIN = 0.3
-const ZOOM_MAX = 2
-
-/* --------------------
- * Catalog
- * -------------------- */
-const { getModuleByType } = useModuleCatalog()
-
-/* =========================================================
- * 🔴 MODULE CREATION (ports support)
- * ========================================================= */
+/* =========================
+ * ADD MODULE
+ * ========================= */
 const addModule = (type, x = 100, y = 100) => {
-  const def = getModuleByType(type)
-  if (!def) return
+  const def = getModuleByType(type);
+  if (!def) return;
 
-  const id = crypto.randomUUID()
+  const id = crypto.randomUUID();
+
+  const ports = [
+    ...def.ports.inputs.map((p, i) => ({
+      id: `in:${p.id}`,
+      group: "in",
+      attrs: {
+        circle: { "data-port": p.id, "data-kind": p.kind },
+        text: { text: p.label ?? p.id, y: i * 20 - 10 },
+      },
+    })),
+    ...def.ports.outputs.map((p, i) => ({
+      id: `out:${p.id}`,
+      group: "out",
+      attrs: {
+        circle: { "data-port": p.id, "data-kind": p.kind },
+        text: { text: p.label ?? p.id, y: i * 20 - 10 },
+      },
+    })),
+  ];
+
+  const height = Math.max(60, ports.length * 20);
 
   const shape = new shapes.standard.Rectangle({
     id,
     position: { x, y },
-    size: { width: 140, height: 80 },
+    size: { width: 160, height },
     attrs: {
-      body: {
-        fill: def.color,
-        rx: 6,
-        ry: 6
-      },
-      label: {
-        text: def.label,
-        fill: 'white',
-        fontSize: 13
-      }
+      body: { fill: def.color, strokeWidth: 2 },
+      label: { text: def.label, fill: "#fff" },
     },
+    ports: { groups: portGroups, items: ports },
+  });
 
-    // 🔴 Ports definition
-    ports: {
-      groups: {
-        in: {
-          position: 'left',
-          attrs: {
-            circle: {
-              r: 6,
-              magnet: 'passive',
-              fill: '#FFD166',
-              stroke: '#000'
-            }
-          }
-        },
-        out: {
-          position: 'right',
-          attrs: {
-            circle: {
-              r: 6,
-              magnet: true,
-              fill: '#06D6A0',
-              stroke: '#000'
-            }
-          }
-        }
-      }
-    }
-  })
-
-  // 🔴 Add ports from catalog
-  shape.addPorts([
-    ...def.inputs.map(p => ({
-      id: p.id,
-      group: 'in',
-      data: { kind: p.kind }
-    })),
-    ...def.outputs.map(p => ({
-      id: p.id,
-      group: 'out',
-      data: { kind: p.kind }
-    }))
-  ])
-
-  shape.addTo(graph)
+  shape.addTo(graph);
 
   modulesById.set(id, {
     id,
     type,
-    params: Object.fromEntries(
-      Object.entries(def.params).map(([k, v]) => [k, v.default])
-    ),
-    shape
-  })
+    params: Object.fromEntries(Object.entries(def.params).map(([k, v]) => [k, v.default])),
+    shape,
+  });
 
-  return id
-}
+  // Mettre à jour la position des labels quand le module bouge
+  shape.on("change:position", () => {
+    const pos = shape.position();
+    shape.getPorts().forEach((port, idx) => {
+      const textAttr = shape.portProp(port.id, "attrs/text");
+      if (!textAttr) return;
+      // x position à gauche ou droite du rectangle
+      const xOffset = port.group === "in" ? -10 : shape.size().width + 10;
+      const yOffset = 15 + idx * 20; // alignement vertical
+      shape.portProp(port.id, "attrs/text/x", xOffset);
+      shape.portProp(port.id, "attrs/text/y", yOffset);
+    });
+  });
 
-/* =========================================================
- * 🗑️ REMOVE MODULE + LINKS
- * ========================================================= */
-const removeModule = (id) => {
-  const module = modulesById.get(id)
-  if (!module) return
+  return id;
+};
 
-  graph.getLinks().forEach(link => {
-    const s = link.get('source')
-    const t = link.get('target')
-
-    if (s.id === id || t.id === id) {
-      emit('connection-removed', {
-        from: s,
-        to: t
-      })
-      link.remove()
-    }
-  })
-
-  module.shape.remove()
-  modulesById.delete(id)
-
-  emit('module-removed', module)
-}
-
-/* =========================================================
- * 🖱️ SELECTION
- * ========================================================= */
+/* =========================
+ * SELECT MODULE
+ * ========================= */
 const selectModule = (id) => {
-  if (selectedModule.value) {
-    selectedModule.value.shape.attr('body/stroke', null)
-  }
+  if (selectedModule.value) selectedModule.value.shape.attr("body/stroke", null);
+  const module = modulesById.get(id);
+  if (!module) return;
+  selectedModule.value = module;
+  module.shape.attr("body/stroke", "#FF0000");
+  emit("module-selected", module);
+};
 
-  const module = modulesById.get(id)
-  if (!module) return
-
-  selectedModule.value = module
-  module.shape.attr('body/stroke', '#FF0000')
-
-  emit('module-selected', module)
-}
-
-/* =========================================================
- * 🔗 CONNECTION HANDLING
- * ========================================================= */
-const setupConnections = () => {
-  paper.on('link:connect', (linkView) => {
-    const link = linkView.model
-    const source = link.get('source')
-    const target = link.get('target')
-
-    emit('connection-added', {
-      from: {
-        moduleId: source.id,
-        port: source.port
-      },
-      to: {
-        moduleId: target.id,
-        port: target.port
-      }
-    })
-  })
-
-  graph.on('remove', (cell) => {
-    if (!cell.isLink()) return
-
-    const source = cell.get('source')
-    const target = cell.get('target')
-
-    emit('connection-removed', {
-      from: {
-        moduleId: source.id,
-        port: source.port
-      },
-      to: {
-        moduleId: target.id,
-        port: target.port
-      }
-    })
-  })
-}
-
-/* =========================================================
- * 🔍 VALIDATE CONNECTIONS
- * ========================================================= */
-const validateConnection = (srcView, srcMagnet, tgtView, tgtMagnet) => {
-  if (!srcMagnet || !tgtMagnet) return false
-  if (srcView === tgtView) return false
-
-  const srcGroup = srcMagnet.getAttribute('port-group')
-  const tgtGroup = tgtMagnet.getAttribute('port-group')
-  if (srcGroup !== 'out' || tgtGroup !== 'in') return false
-
-  const srcPort = srcView.model.getPort(srcMagnet.getAttribute('port'))
-  const tgtPort = tgtView.model.getPort(tgtMagnet.getAttribute('port'))
-
-  return srcPort?.data?.kind === tgtPort?.data?.kind
-}
-
-/* =========================================================
- * 🔍 ZOOM
- * ========================================================= */
-const zoomAtPoint = (newZoom, cx, cy) => {
-  const oldScale = paper.scale().sx
-  const factor = newZoom / oldScale
-  const translate = paper.translate()
-
-  paper.translate(
-    cx - (cx - translate.tx) * factor,
-    cy - (cy - translate.ty) * factor
-  )
-  paper.scale(newZoom, newZoom)
-  zoom.value = newZoom
-}
-
-const zoomIn = () =>
-  zoomAtPoint(Math.min(ZOOM_MAX, zoom.value + ZOOM_STEP),
-    paperEl.value.clientWidth / 2,
-    paperEl.value.clientHeight / 2
-  )
-
-const zoomOut = () =>
-  zoomAtPoint(Math.max(ZOOM_MIN, zoom.value - ZOOM_STEP),
-    paperEl.value.clientWidth / 2,
-    paperEl.value.clientHeight / 2
-  )
-
-/* =========================================================
+/* =========================
  * LIFECYCLE
- * ========================================================= */
+ * ========================= */
 onMounted(() => {
-  graph = new dia.Graph({}, { cellNamespace: shapes })
+  graph = new dia.Graph({}, { cellNamespace: shapes });
 
   paper = new dia.Paper({
     el: paperEl.value,
     model: graph,
-    width: '100%',
+    width: "100%",
     height: 400,
-    background: { color: '#F5F5F5' },
+    gridSize: 10,
+    drawGrid: true,
+    background: { color: "#F5F5F5" },
     cellViewNamespace: shapes,
-    defaultLink: () => new shapes.standard.Link(),
-    linkPinning: false,
-    validateConnection
-  })
+    defaultLink: () =>
+      new shapes.standard.Link({ attrs: { line: { stroke: "#333", strokeWidth: 2 } } }),
+    validateConnection: (srcView, srcMagnet, tgtView, tgtMagnet) => {
+      if (!srcMagnet || !tgtMagnet) return false;
+      const sKind = srcMagnet.getAttribute("data-kind");
+      const tKind = tgtMagnet.getAttribute("data-kind");
+      if (!sKind || !tKind) return false;
+      if (sKind === "param" && tKind === "audio") return false;
+      return true;
+    },
+  });
 
-  setupConnections()
+  paper.on("cell:pointerclick", (view) => {
+    if (modulesById.has(view.model.id)) selectModule(view.model.id);
+  });
 
-  paper.on('cell:pointerclick', (cellView) => {
-    if (!cellView.model.isLink()) {
-      selectModule(cellView.model.id)
+  paper.on("link:connect", (linkView) => {
+    const link = linkView.model;
+    emit("connection-added", { from: link.get("source"), to: link.get("target") });
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Delete" && selectedModule.value) {
+      selectedModule.value.shape.remove();
+      modulesById.delete(selectedModule.value.id);
+      emit("module-removed", selectedModule.value);
+      selectedModule.value = null;
     }
-  })
-
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Delete' && selectedModule.value) {
-      removeModule(selectedModule.value.id)
-    }
-  })
-
-  paperEl.value.addEventListener('wheel', (e) => {
-    if (!e.ctrlKey) return
-    e.preventDefault()
-
-    const rect = paperEl.value.getBoundingClientRect()
-    zoomAtPoint(
-      e.deltaY < 0
-        ? Math.min(ZOOM_MAX, zoom.value + ZOOM_STEP)
-        : Math.max(ZOOM_MIN, zoom.value - ZOOM_STEP),
-      e.clientX - rect.left,
-      e.clientY - rect.top
-    )
-  }, { passive: false })
-})
+  });
+});
 
 onBeforeUnmount(() => {
-  paper?.remove()
-  graph?.clear()
-})
+  paper?.remove();
+  graph?.clear();
+});
 
-/* --------------------
- * API exposée
- * -------------------- */
-defineExpose({
-  addModule,
-  removeModule,
-  zoomIn,
-  zoomOut,
-  modulesById
-})
+defineExpose({ addModule, modulesById });
 </script>
 
 <template>
-  <div class="paper-container">
-    <div class="zoom-controls">
-      <button @click="zoomOut">−</button>
-      <span>{{ Math.round(zoom * 100) }}%</span>
-      <button @click="zoomIn">+</button>
-    </div>
-    <div ref="paperEl" class="paper"></div>
-  </div>
+  <div ref="paperEl" class="paper"></div>
 </template>
 
 <style scoped>
-.paper-container {
-  width: 100%;
-  border: 1px solid #ddd;
-  position: relative;
-}
-
 .paper {
   width: 100%;
   height: 400px;
-}
-
-.zoom-controls {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  gap: 4px;
-  background: rgba(255,255,255,0.8);
-  padding: 4px 6px;
-  border-radius: 4px;
-  z-index: 10;
+  border: 1px solid #ddd;
 }
 </style>
