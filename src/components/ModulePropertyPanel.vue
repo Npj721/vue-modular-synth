@@ -17,13 +17,11 @@ const { getModuleByType } = useModuleCatalog()
 // Quand module sélectionné change
 watch(() => props.module, (mod) => {
   if (!mod) {
-    // clear si aucun module
     Object.keys(params).forEach(k => delete params[k])
     Object.keys(paramDefs).forEach(k => delete paramDefs[k])
     return
   }
 
-  // Récup paramDefs depuis le catalogue
   const def = getModuleByType(mod.type)
   if (!def) return
 
@@ -33,9 +31,19 @@ watch(() => props.module, (mod) => {
     paramDefs[key] = def.params[key]
   })
 
-  // Copier les valeurs existantes (ou default si jamais absentes)
+  // Copier les valeurs existantes depuis module.params si elles existent
   Object.keys(paramDefs).forEach(key => {
-    params[key] = mod.params[key] !== undefined ? mod.params[key] : paramDefs[key].default
+    //Si la valeur existe déjà dans params, on ne l’écrase pas
+    if (params[key] === undefined) {
+      if (mod.params[key] === undefined) {
+        // Premier affichage → prendre la valeur default
+        mod.params[key] = paramDefs[key].default
+      }
+      params[key] = mod.params[key]
+    } else {
+      // params[key] contient déjà la valeur modifiée → on la laisse telle quelle
+      mod.params[key] = params[key]
+    }
   })
 }, { immediate: true })
 
