@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, watch } from 'vue'
 import { useModuleCatalog } from '../composables/useModuleCatalog'
+import EnvelopeEditor from './EnvelopeEditor.vue'
 
 const props = defineProps({
   module: { type: Object, default: null }
@@ -55,7 +56,7 @@ const emitChange = (key, value) => {
     <h3>{{ module.type }} Parameters</h3>
     <div v-for="(def, key) in paramDefs" :key="key" class="param-row">
       <label>{{ key }}</label>
-
+      {{ def.type }}
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
              type="number"
@@ -78,6 +79,13 @@ const emitChange = (key, value) => {
              type="checkbox"
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
+      <!-- Enveloppe -->
+      <EnvelopeEditor
+        v-else-if="def.type === 'envelope'"
+        :stages="params[key]"
+        @update="val => emitChange(key, val)"
+      />
+
     </div>
   </div>
 </template>

@@ -132,6 +132,7 @@ watch(patch, (newPatch) => {
     <ModulePropertyPanel
       :module="selectedModule()"
       @param-changed="handleParamChanged"
+      :style="'width:100%'"
     />
 
     <!-- Debug sélection -->
