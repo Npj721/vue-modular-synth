@@ -2,6 +2,8 @@
 import { ref, computed } from "vue"
 import { usePatchStorage } from "../composables/usePatchStorage"
 
+const emit = defineEmits(['patch-loaded'])
+
 const props = defineProps({
   paperRef: { type: Object, required: true }
 })
@@ -44,15 +46,16 @@ const savePatch = () => {
 /* =========================
  * LOAD
  * ========================= */
-const loadPatch = () => {
-  if (!selected.value) return
 
-  const patch = load(selected.value)
+const loadPatchByName = (name) => {
+  const patch = load(name)
   if (!patch) return
 
-  patchName.value = patch.name
-  props.paperRef.importPatch(patch)
+  props.paperRef.loadPatch(patch)
+
+   emit('patch-loaded', patch)
 }
+
 
 /* =========================
  * DELETE
@@ -142,7 +145,7 @@ const importFile = async (e) => {
 
     <!-- Load/Delete -->
     <div class="actions">
-      <button :disabled="!selected" @click="loadPatch">Load</button>
+      <button @click="loadPatchByName(selected)">Load</button>
       <button :disabled="!selected" @click="deletePatch">Delete</button>
     </div>
   </div>

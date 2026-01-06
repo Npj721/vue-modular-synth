@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { ref, onMounted, onBeforeUnmount, toRaw } from "vue";
 import { dia, shapes } from "@joint/core";
 import { useModuleCatalog } from "../composables/useModuleCatalog";
 
@@ -196,7 +196,7 @@ const exportPatch = () => {
       id: m.id,
       type: m.type,
       position: m.shape.position(),
-      params: structuredClone(m.params)
+      params: JSON.parse(JSON.stringify(toRaw(m.params)))
     })),
     connections: graph.getLinks().map(l => ({
       from: l.get("source"),
@@ -236,6 +236,55 @@ const importPatch = (patch) => {
     link.addTo(graph)
   })
 }
+
+const loadPatch = (patch) => {
+  if (!patch) return
+
+  // reset complet
+  graph.clear()
+  modulesById.clear()
+  /*selectedModule.value = null
+  emit("module-selected", null)
+*/
+  // restaurer vue
+  if (patch.view) {
+    const z = patch.view.zoom ?? 1
+    zoom.value = z
+    paper.scale(z, z)
+    paper.translate(patch.view.pan?.tx ?? 0, patch.view.pan?.ty ?? 0)
+  }
+
+  // recréer les modules
+  patch.modules.forEach((m) => {
+    // addModule retourne maintenant la vraie shape
+    const shape = addModule(m.type, m.position.x, m.position.y, m.id)
+    console.log({ shape })
+    if (!shape) return
+
+    const module = modulesById.get(m.id)
+    if (module && m.params) {
+      // réinjecter les paramètres depuis le patch
+      module.params = structuredClone(m.params)
+    }
+  })
+
+  // recréer les connexions
+  patch.connections.forEach((c) => {
+    const link = new shapes.standard.Link({
+      source: c.from,
+      target: c.to,
+      attrs: { line: { stroke: "#333", strokeWidth: 2 } },
+    })
+    link.addTo(graph)
+  })
+
+  // sélectionner le premier module pour afficher le panneau
+  if (patch.modules.length > 0) {
+    const firstId = patch.modules[0].id
+    selectModule(firstId)
+  }
+}
+
 
 
 
@@ -438,7 +487,8 @@ defineExpose({
   addModule,
   modulesById,
   exportPatch,
-  importPatch
+  importPatch,
+  loadPatch
 })
 
 </script>

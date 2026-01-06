@@ -69,6 +69,14 @@ const handleModuleRemoved = (module) => {
   }
 }
 
+const handlePatchLoaded = (loadedPatch) => {
+  // Reset modules et connexions existantes
+  patch.modules.splice(0, patch.modules.length, ...loadedPatch.modules)
+  patch.connections.splice(0, patch.connections.length, ...loadedPatch.connections)
+  selectedModuleId.value = loadedPatch.modules[0]?.id || null
+}
+
+
 /* =========================================================
  * CONNECTIONS
  * ========================================================= */
@@ -126,7 +134,10 @@ watch(patch, (newPatch) => {
       @connection-removed="handleConnectionRemoved"
     />
 
-    <PatchManager :paperRef="paperRef" />
+    <PatchManager
+      :paperRef="paperRef"
+      @patch-loaded="handlePatchLoaded"
+    />
 
     <!-- Properties -->
     <ModulePropertyPanel
