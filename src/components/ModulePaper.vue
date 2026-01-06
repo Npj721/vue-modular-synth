@@ -198,28 +198,20 @@ onMounted(() => {
         attrs: { line: { stroke: "#333", strokeWidth: 2 } },
       }),
     validateConnection: (srcView, srcMagnet, tgtView, tgtMagnet) => {
-      console.log({ srcView, srcMagnet, tgtView, tgtMagnet });
       if (!srcMagnet || !tgtMagnet) return false;
       if (srcView === tgtView) return false;
-
-      console.log("ok magnet");
 
       const sKind = srcMagnet.getAttribute("data-kind");
       const tKind = tgtMagnet.getAttribute("data-kind");
       const sRole = srcMagnet.getAttribute("data-role");
       const tRole = tgtMagnet.getAttribute("data-role");
 
-      console.log({ sKind, tKind, sRole, tRole });
-
       if (!sKind || !tKind || !sRole || !tRole) return false;
 
-      console.log("ok role");
-
-      // 🔍 récupérer les modules
+      // récupérer les modules
       const srcModule = modulesById.get(srcView.model.id);
       const tgtModule = modulesById.get(tgtView.model.id);
-
-      console.log({ srcModule, tgtModule });
+      
       if (!srcModule || !tgtModule) return false;
 
       /* =========================
