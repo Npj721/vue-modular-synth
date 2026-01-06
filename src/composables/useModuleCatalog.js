@@ -20,6 +20,7 @@ export function useModuleCatalog() {
             id: 'frequency',
             label: 'Freq',
             kind: 'param',
+            role: 'modulatable',
             rate: 'a-rate',
             multiple: true
           },
@@ -27,6 +28,7 @@ export function useModuleCatalog() {
             id: 'detune',
             label: 'Detune',
             kind: 'param',
+            role: 'modulatable',
             rate: 'a-rate',
             multiple: true
           }
@@ -36,26 +38,15 @@ export function useModuleCatalog() {
             id: 'out',
             label: 'Out',
             kind: 'audio',
+            role: 'audioOut',
             multiple: true
           }
         ]
       },
 
       params: {
-        frequency: {
-          type: 'number',
-          min: 20,
-          max: 20000,
-          step: 1,
-          default: 440
-        },
-        detune: {
-          type: 'number',
-          min: -1200,
-          max: 1200,
-          step: 1,
-          default: 0
-        },
+        frequency: num(20, 20000, 1, 440),
+        detune: num(-1200, 1200, 1, 0),
         type: {
           type: 'enum',
           values: ['sine', 'triangle', 'square', 'sawtooth'],
@@ -65,7 +56,7 @@ export function useModuleCatalog() {
     },
 
     /* =========================
-     * GAIN
+     * GAIN (audio + modulator)
      * ========================= */
 
     gain: {
@@ -76,22 +67,35 @@ export function useModuleCatalog() {
 
       ports: {
         inputs: [
-          { id: 'in', label: 'In', kind: 'audio', multiple: true },
-          { id: 'gain', label: 'Gain', kind: 'param', rate: 'a-rate', multiple: true }
+          {
+            id: 'in',
+            label: 'In',
+            kind: 'audio',
+            role: 'audioIn',
+            multiple: true
+          },
+          {
+            id: 'gain',
+            label: 'Gain',
+            kind: 'param',
+            role: 'modulatable',
+            rate: 'a-rate',
+            multiple: true
+          }
         ],
         outputs: [
-          { id: 'out', label: 'Out', kind: 'audio', multiple: true }
+          {
+            id: 'out',
+            label: 'Out',
+            kind: 'audio',
+            role: 'modulator', // 👈 clé : seule source de modulation autorisée
+            multiple: true
+          }
         ]
       },
 
       params: {
-        gain: {
-          type: 'number',
-          min: 0,
-          max: 1,
-          step: 0.01,
-          default: 0.5
-        }
+        gain: num(0, 1, 0.01, 0.5)
       }
     },
 
@@ -107,22 +111,35 @@ export function useModuleCatalog() {
 
       ports: {
         inputs: [
-          { id: 'in', label: 'In', kind: 'audio', multiple: true },
-          { id: 'delayTime', label: 'Time', kind: 'param', rate: 'a-rate', multiple: true }
+          {
+            id: 'in',
+            label: 'In',
+            kind: 'audio',
+            role: 'audioIn',
+            multiple: true
+          },
+          {
+            id: 'delayTime',
+            label: 'Time',
+            kind: 'param',
+            role: 'modulatable',
+            rate: 'a-rate',
+            multiple: true
+          }
         ],
         outputs: [
-          { id: 'out', label: 'Out', kind: 'audio', multiple: true }
+          {
+            id: 'out',
+            label: 'Out',
+            kind: 'audio',
+            role: 'audioOut',
+            multiple: true
+          }
         ]
       },
 
       params: {
-        delayTime: {
-          type: 'number',
-          min: 0,
-          max: 5,
-          step: 0.01,
-          default: 0.3
-        }
+        delayTime: num(0, 5, 0.01, 0.3)
       }
     },
 
@@ -130,13 +147,13 @@ export function useModuleCatalog() {
      * FILTERS (BIQUAD)
      * ========================= */
 
-    filter_lowpass: createFilter('Lowpass', 'lowpass', ['frequency', 'Q']),
-    filter_highpass: createFilter('Highpass', 'highpass', ['frequency', 'Q']),
-    filter_bandpass: createFilter('Bandpass', 'bandpass', ['frequency', 'Q']),
-    filter_notch: createFilter('Notch', 'notch', ['frequency', 'Q']),
-    filter_peaking: createFilter('Peaking', 'peaking', ['frequency', 'Q', 'gain']),
-    filter_lowshelf: createFilter('LowShelf', 'lowshelf', ['frequency', 'gain']),
-    filter_highshelf: createFilter('HighShelf', 'highshelf', ['frequency', 'gain']),
+    filter_lowpass: createFilter('Lowpass', ['frequency', 'Q']),
+    filter_highpass: createFilter('Highpass', ['frequency', 'Q']),
+    filter_bandpass: createFilter('Bandpass', ['frequency', 'Q']),
+    filter_notch: createFilter('Notch', ['frequency', 'Q']),
+    filter_peaking: createFilter('Peaking', ['frequency', 'Q', 'gain']),
+    filter_lowshelf: createFilter('LowShelf', ['frequency', 'gain']),
+    filter_highshelf: createFilter('HighShelf', ['frequency', 'gain']),
 
     /* =========================
      * COMPRESSOR
@@ -150,11 +167,23 @@ export function useModuleCatalog() {
 
       ports: {
         inputs: [
-          { id: 'in', label: 'In', kind: 'audio', multiple: true },
+          {
+            id: 'in',
+            label: 'In',
+            kind: 'audio',
+            role: 'audioIn',
+            multiple: true
+          },
           ...paramPorts(['threshold', 'knee', 'ratio', 'attack', 'release'])
         ],
         outputs: [
-          { id: 'out', label: 'Out', kind: 'audio', multiple: true }
+          {
+            id: 'out',
+            label: 'Out',
+            kind: 'audio',
+            role: 'audioOut',
+            multiple: true
+          }
         ]
       },
 
@@ -179,10 +208,22 @@ export function useModuleCatalog() {
 
       ports: {
         inputs: [
-          { id: 'in', label: 'In', kind: 'audio', multiple: true }
+          {
+            id: 'in',
+            label: 'In',
+            kind: 'audio',
+            role: 'audioIn',
+            multiple: true
+          }
         ],
         outputs: [
-          { id: 'out', label: 'Out', kind: 'audio', multiple: true }
+          {
+            id: 'out',
+            label: 'Out',
+            kind: 'audio',
+            role: 'audioOut',
+            multiple: true
+          }
         ]
       },
 
@@ -195,7 +236,7 @@ export function useModuleCatalog() {
     },
 
     /* =========================
-     * ENVELOPE
+     * ENVELOPE (modulator pur)
      * ========================= */
 
     envelope: {
@@ -211,6 +252,7 @@ export function useModuleCatalog() {
             id: 'out',
             label: 'Out',
             kind: 'param',
+            role: 'modulator',
             rate: 'a-rate',
             multiple: true
           }
@@ -240,7 +282,13 @@ export function useModuleCatalog() {
 
       ports: {
         inputs: [
-          { id: 'in', label: 'In', kind: 'audio', multiple: true }
+          {
+            id: 'in',
+            label: 'In',
+            kind: 'audio',
+            role: 'audioIn',
+            multiple: true
+          }
         ],
         outputs: []
       },
@@ -262,12 +310,13 @@ export function useModuleCatalog() {
       id: name,
       label: name,
       kind: 'param',
+      role: 'modulatable',
       rate: 'a-rate',
       multiple: true
     }))
   }
 
-  function createFilter(label, type, paramNames) {
+  function createFilter(label, paramNames) {
     return {
       label,
       color: '#FFC75F',
@@ -276,11 +325,23 @@ export function useModuleCatalog() {
 
       ports: {
         inputs: [
-          { id: 'in', label: 'In', kind: 'audio', multiple: true },
+          {
+            id: 'in',
+            label: 'In',
+            kind: 'audio',
+            role: 'audioIn',
+            multiple: true
+          },
           ...paramPorts(paramNames)
         ],
         outputs: [
-          { id: 'out', label: 'Out', kind: 'audio', multiple: true }
+          {
+            id: 'out',
+            label: 'Out',
+            kind: 'audio',
+            role: 'audioOut',
+            multiple: true
+          }
         ]
       },
 

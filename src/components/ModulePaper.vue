@@ -81,7 +81,11 @@ const addModule = (type, x = 100, y = 100) => {
       id: `in:${p.id}`,
       group: "in",
       attrs: {
-        circle: { "data-port": p.id, "data-kind": p.kind },
+        circle: {
+          "data-port": p.id,
+          "data-kind": p.kind,
+          "data-role": p.kind === "audio" ? "audioIn" : "modulatable",
+        },
         text: { text: p.label ?? p.id },
       },
       args: { index: i },
@@ -90,7 +94,11 @@ const addModule = (type, x = 100, y = 100) => {
       id: `out:${p.id}`,
       group: "out",
       attrs: {
-        circle: { "data-port": p.id, "data-kind": p.kind },
+        circle: {
+          "data-port": p.id,
+          "data-kind": p.kind,
+          "data-role": p.kind === "audio" ? "audioOut" : "modulator",
+        },
         text: { text: p.label ?? p.id },
       },
       args: { index: i },
@@ -181,12 +189,92 @@ onMounted(() => {
         attrs: { line: { stroke: "#333", strokeWidth: 2 } },
       }),
     validateConnection: (srcView, srcMagnet, tgtView, tgtMagnet) => {
+      console.log({ srcView, srcMagnet, tgtView, tgtMagnet });
       if (!srcMagnet || !tgtMagnet) return false;
+      if (srcView === tgtView) return false;
+
+      console.log("ok magnet");
+
       const sKind = srcMagnet.getAttribute("data-kind");
       const tKind = tgtMagnet.getAttribute("data-kind");
-      if (!sKind || !tKind) return false;
-      if (sKind === "param" && tKind === "audio") return false;
-      return true;
+      const sRole = srcMagnet.getAttribute("data-role");
+      const tRole = tgtMagnet.getAttribute("data-role");
+
+      console.log({ sKind, tKind, sRole, tRole });
+
+      if (!sKind || !tKind || !sRole || !tRole) return false;
+
+      console.log("ok role");
+
+      // 🔍 récupérer les modules
+      const srcModule = modulesById.get(srcView.model.id);
+      const tgtModule = modulesById.get(tgtView.model.id);
+
+      console.log({ srcModule, tgtModule });
+      if (!srcModule || !tgtModule) return false;
+
+      /* =========================
+       * CHAÎNE AUDIO
+       * ========================= */
+
+      // audio → audio autorisé UNIQUEMENT via Gain
+      if (
+        sKind === "audio" &&
+        tKind === "audio" &&
+        sRole === "audioOut" &&
+        tRole === "audioIn"
+      ) {
+        // Si c'est un gain qui sort, il peut aller n'importe où
+        if (srcModule.type === "gain") return true;
+
+        // Si c'est une source (osc, noise…), elle peut aller vers un gain
+        if (
+          [
+            "osc",
+            "delay",
+            "filter_lowpass",
+            "filter_highpass",
+            "filter_bandpass",
+            "filter_notch",
+            "filter_peaking",
+            "filter_lowshelf",
+            "filter_highshelf",
+            "compressor",
+            "convolver",
+          ].includes(srcModule.type) &&
+          tgtModule.type === "gain"
+        )
+          return true;
+
+        return false;
+      }
+
+      /* =========================
+       * MODULATION
+       * ========================= */
+
+      // SEUL gain.out peut moduler un param
+      if (
+        sRole === "audioOut" &&
+        tRole === "modulatable" &&
+        srcModule.type === "gain"
+      ) {
+        return true;
+      }
+
+      /* =========================
+       * ENVELOPPE
+       * ========================= */
+
+      if (
+        sRole === "modulator" &&
+        tRole === "modulatable" &&
+        srcModule.type === "envelope"
+      ) {
+        return true;
+      }
+
+      return false;
     },
   });
 
@@ -197,11 +285,25 @@ onMounted(() => {
 
   // connection créée
   paper.on("link:connect", (linkView) => {
+    console.log('ok link created')
     const link = linkView.model;
     emit("connection-added", {
       from: link.get("source"),
       to: link.get("target"),
     });
+  });
+
+  // dès qu’un lien change de target (ou est abandonné)
+  paper.on("link:pointerup", (linkView, evt) => {
+    const link = linkView.model;
+    const source = link.get("source");
+    const target = link.get("target");
+
+    // si la connexion n'est pas complète ou invalide → supprimer
+    if (!source.id || !target.id) {
+      link.remove();
+      return;
+    }
   });
 
   // suppression module
