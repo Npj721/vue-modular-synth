@@ -15,37 +15,33 @@ const paramDefs = reactive({})
 const { getModuleByType } = useModuleCatalog()
 
 // Quand module sélectionné change
-watch(() => props.module, (mod) => {
-  if (!mod) {
+watch(
+  () => props.module,
+  (mod) => {
+    // reset complet
     Object.keys(params).forEach(k => delete params[k])
     Object.keys(paramDefs).forEach(k => delete paramDefs[k])
-    return
-  }
 
-  const def = getModuleByType(mod.type)
-  if (!def) return
+    if (!mod) return
 
-  // Copier les définitions
-  Object.keys(paramDefs).forEach(k => delete paramDefs[k])
-  Object.keys(def.params).forEach(key => {
-    paramDefs[key] = def.params[key]
-  })
+    const def = getModuleByType(mod.type)
+    if (!def) return
 
-  // Copier les valeurs existantes depuis module.params si elles existent
-  Object.keys(paramDefs).forEach(key => {
-    //Si la valeur existe déjà dans params, on ne l’écrase pas
-    if (params[key] === undefined) {
+    // copier defs
+    Object.entries(def.params).forEach(([key, defParam]) => {
+      paramDefs[key] = defParam
+
+      // initialisation par INSTANCE
       if (mod.params[key] === undefined) {
-        // Premier affichage → prendre la valeur default
-        mod.params[key] = paramDefs[key].default
+        mod.params[key] = defParam.default
       }
+
+      // copie locale pour l’UI
       params[key] = mod.params[key]
-    } else {
-      // params[key] contient déjà la valeur modifiée → on la laisse telle quelle
-      mod.params[key] = params[key]
-    }
-  })
-}, { immediate: true })
+    })
+  },
+  { immediate: true }
+)
 
 // Émettre les changements
 const emitChange = (key, value) => {
