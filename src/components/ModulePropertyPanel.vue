@@ -62,7 +62,7 @@ const emitChange = (key, value) => {
 
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
-             type="range"
+             type="number"
              :min="def.min"
              :max="def.max"
              :step="def.step"
