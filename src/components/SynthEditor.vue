@@ -2,6 +2,7 @@
 import { ref, reactive, watch } from 'vue'
 import ModuleToolbar from './ModuleToolbar.vue'
 import ModulePaper from './ModulePaper.vue'
+import PatchManager from './PatchManager.vue'
 import ModulePropertyPanel from './ModulePropertyPanel.vue'
 
 /* --------------------
@@ -124,6 +125,8 @@ watch(patch, (newPatch) => {
       @connection-added="handleConnectionAdded"
       @connection-removed="handleConnectionRemoved"
     />
+
+    <PatchManager :paperRef="paperRef" />
 
     <!-- Properties -->
     <ModulePropertyPanel

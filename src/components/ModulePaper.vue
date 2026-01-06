@@ -74,11 +74,11 @@ const portGroups = {
 /* =========================
  * ADD MODULE
  * ========================= */
-const addModule = (type, x = 100, y = 100) => {
+const addModule = (type, x = 100, y = 100, forcedId = null) => {
   const def = getModuleByType(type);
   if (!def) return;
 
-  const id = crypto.randomUUID();
+  const id = forcedId ?? crypto.randomUUID()
 
   const ports = [
     ...def.ports.inputs.map((p, i) => ({
@@ -178,6 +178,67 @@ const selectModule = (id) => {
   emit("module-selected", module);
 };
 
+const clearGraph = () => {
+  selectedModule.value = null
+  modulesById.clear()
+  graph.clear()
+}
+
+
+const exportPatch = () => {
+  return {
+    version: 1,
+    view: {
+      zoom: zoom.value,
+      pan: paper.translate()
+    },
+    modules: [...modulesById.values()].map(m => ({
+      id: m.id,
+      type: m.type,
+      position: m.shape.position(),
+      params: structuredClone(m.params)
+    })),
+    connections: graph.getLinks().map(l => ({
+      from: l.get("source"),
+      to: l.get("target")
+    }))
+  }
+}
+
+
+const importPatch = (patch) => {
+  clearGraph()
+
+  // restaurer la vue
+  if (patch.view) {
+    paper.scale(patch.view.zoom, patch.view.zoom)
+    paper.translate(patch.view.pan.tx, patch.view.pan.ty)
+    zoom.value = patch.view.zoom
+  }
+
+  // recréer les modules
+  patch.modules.forEach(m => {
+    addModule(m.type, m.position.x, m.position.y, m.id)
+
+    const module = modulesById.get(m.id)
+    if (module && m.params) {
+      module.params = structuredClone(m.params)
+    }
+  })
+
+  // recréer les connexions
+  patch.connections.forEach(c => {
+    const link = new shapes.standard.Link({
+      source: c.from,
+      target: c.to,
+      attrs: { line: { stroke: "#333", strokeWidth: 2 } }
+    })
+    link.addTo(graph)
+  })
+}
+
+
+
 /* =========================
  * LIFECYCLE
  * ========================= */
@@ -211,7 +272,7 @@ onMounted(() => {
       // récupérer les modules
       const srcModule = modulesById.get(srcView.model.id);
       const tgtModule = modulesById.get(tgtView.model.id);
-      
+
       if (!srcModule || !tgtModule) return false;
 
       /* =========================
@@ -228,10 +289,11 @@ onMounted(() => {
         // Si c'est un gain qui sort, il peut aller n'importe où
         if (srcModule.type === "gain") return true;
 
-        // Si c'est une source (osc, noise…), elle peut aller vers un gain
+        // Si c'est une source, elle peut aller vers un gain
         if (
           [
             "osc",
+            "voice",
             "delay",
             "filter_lowpass",
             "filter_highpass",
@@ -372,7 +434,13 @@ onBeforeUnmount(() => {
   graph?.clear();
 });
 
-defineExpose({ addModule, modulesById });
+defineExpose({
+  addModule,
+  modulesById,
+  exportPatch,
+  importPatch
+})
+
 </script>
 
 
