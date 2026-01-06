@@ -9,7 +9,7 @@ export function useModuleCatalog() {
 
     voice: {
       label: "Voice",
-      color: "#9c9c05ff",
+      color: "#9c9c05",
       category: "source",
       singleton: false,
 
@@ -54,7 +54,7 @@ export function useModuleCatalog() {
     },
     osc: {
       label: "Oscillator",
-      color: "#FF7BE5",
+      color: "#9c6a00",
       category: "source",
       singleton: false,
 
