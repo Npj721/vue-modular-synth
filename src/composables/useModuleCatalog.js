@@ -7,6 +7,51 @@ export function useModuleCatalog() {
      * SOURCES
      * ========================= */
 
+    voice: {
+      label: "Voice",
+      color: "#9c9c05ff",
+      category: "source",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "frequency",
+            label: "Freq",
+            kind: "param",
+            role: "modulatable",
+            rate: "a-rate",
+            multiple: true,
+          },
+          {
+            id: "detune",
+            label: "Detune",
+            kind: "param",
+            role: "modulatable",
+            rate: "a-rate",
+            multiple: true,
+          },
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        detune: num(-1200, 1200, 1, 0),
+        type: {
+          type: "enum",
+          values: ["sine", "triangle", "square", "sawtooth"],
+          default: "sine",
+        },
+      },
+    },
     osc: {
       label: "Oscillator",
       color: "#FF7BE5",
