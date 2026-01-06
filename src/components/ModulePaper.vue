@@ -14,6 +14,10 @@ const paperEl = ref(null);
 let graph;
 let paper;
 
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
+let panOrigin = { tx: 0, ty: 0 };
+
 const zoom = ref(1);
 const ZOOM_STEP = 0.1;
 const ZOOM_MIN = 0.3;
@@ -160,12 +164,17 @@ const addModule = (type, x = 100, y = 100) => {
  * SELECT MODULE
  * ========================= */
 const selectModule = (id) => {
-  if (selectedModule.value)
-    selectedModule.value.shape.attr("body/stroke", null);
+  if (selectedModule.value) {
+    selectedModule.value.shape.attr("body/class", "module-body");
+  }
+
   const module = modulesById.get(id);
   if (!module) return;
+
   selectedModule.value = module;
-  module.shape.attr("body/stroke", "#FF0000");
+
+  module.shape.attr("body/class", "module-body is-selected");
+
   emit("module-selected", module);
 };
 
@@ -283,9 +292,41 @@ onMounted(() => {
     if (modulesById.has(view.model.id)) selectModule(view.model.id);
   });
 
+  paper.on("blank:pointerdown", (evt) => {
+    if (!evt.ctrlKey) return;
+
+    evt.preventDefault();
+    evt.stopPropagation();
+
+    isPanning = true;
+    panStart = { x: evt.clientX, y: evt.clientY };
+    panOrigin = paper.translate();
+
+    paper.el.style.cursor = "grabbing";
+  });
+
+  paper.on("blank:pointermove", (evt) => {
+    if (!isPanning) return;
+
+    evt.preventDefault();
+
+    const scale = paper.scale().sx;
+
+    const dx = (evt.clientX - panStart.x) / scale;
+    const dy = (evt.clientY - panStart.y) / scale;
+
+    paper.translate(panOrigin.tx + dx, panOrigin.ty + dy);
+  });
+
+  paper.on("blank:pointerup", () => {
+    if (!isPanning) return;
+
+    isPanning = false;
+    paper.el.style.cursor = "default";
+  });
+
   // connection créée
   paper.on("link:connect", (linkView) => {
-    console.log('ok link created')
     const link = linkView.model;
     emit("connection-added", {
       from: link.get("source"),

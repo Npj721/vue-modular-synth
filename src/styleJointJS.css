@@ -1,0 +1,49 @@
+/* =========================
+ * MODULE BASE
+ * ========================= */
+
+.module-body {
+  transition:
+    stroke 0.2s ease,
+    stroke-width 0.2s ease,
+    filter 0.2s ease;
+}
+
+/* =========================
+ * SELECTED – GLOW + ANTS
+ * ========================= */
+
+.module-body.is-selected {
+  stroke: #4dabff;
+  stroke-width: 2.5;
+
+  /* marching ants */
+  stroke-dasharray: 6 4;
+  animation: ants 1.2s linear infinite;
+
+  /* glow */
+  filter:
+    drop-shadow(0 0 4px rgba(77, 171, 255, 0.6))
+    drop-shadow(0 0 10px rgba(77, 171, 255, 0.35));
+}
+
+/* =========================
+ * ANIMATION
+ * ========================= */
+
+@keyframes ants {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.paper {
+  cursor: default;
+}
+
+.paper.is-panning {
+  cursor: grabbing;
+}
