@@ -1,159 +1,259 @@
 <script setup>
-import { ref, reactive, watch } from 'vue'
-import ModuleToolbar from './ModuleToolbar.vue'
-import ModulePaper from './ModulePaper.vue'
-import PatchManager from './PatchManager.vue'
-import ModulePropertyPanel from './ModulePropertyPanel.vue'
+import { ref, reactive, watch } from "vue";
+import ModuleToolbar from "./ModuleToolbar.vue";
+import ModulePaper from "./ModulePaper.vue";
+import PatchManager from "./PatchManager.vue";
+import ModulePropertyPanel from "./ModulePropertyPanel.vue";
 
 /* --------------------
  * Refs
  * -------------------- */
-const paperRef = ref(null)
+const paperRef = ref(null);
 
 /* --------------------
  * Patch JSON (source de vérité)
  * -------------------- */
 const patch = reactive({
   modules: [],
-  connections: []
-})
+  connections: [],
+});
+
+const defPatch = ref(null)
 
 /* --------------------
  * Sélection
  * -------------------- */
-const selectedModuleId = ref(null)
+const selectedModuleId = ref(null);
 
 /* =========================================================
  * TOOLBAR
  * ========================================================= */
 const handleAddModule = (type) => {
-  const id = paperRef.value.addModule(type, 150, 100)
+  const id = paperRef.value.addModule(type, 150, 100);
 
   patch.modules.push({
     id,
     type,
-    params: { ...paperRef.value.modulesById.get(id).params }
-  })
+    params: { ...paperRef.value.modulesById.get(id).params },
+  });
 
-  selectedModuleId.value = id
-}
+  selectedModuleId.value = id;
+};
 
 /* =========================================================
  * MODULE SELECTION
  * ========================================================= */
 const handleModuleSelected = (module) => {
-  selectedModuleId.value = module.id
-}
+  selectedModuleId.value = module.id;
+};
 
 /* =========================================================
  * MODULE REMOVAL
  * ========================================================= */
 const handleModuleRemoved = (module) => {
   // modules
-  const mIdx = patch.modules.findIndex(m => m.id === module.id)
-  if (mIdx !== -1) patch.modules.splice(mIdx, 1)
+  const mIdx = patch.modules.findIndex((m) => m.id === module.id);
+  if (mIdx !== -1) patch.modules.splice(mIdx, 1);
 
   // connections (mutation, pas réassignation)
   for (let i = patch.connections.length - 1; i >= 0; i--) {
-    const c = patch.connections[i]
-    if (
-      c.from.moduleId === module.id ||
-      c.to.moduleId === module.id
-    ) {
-      patch.connections.splice(i, 1)
+    const c = patch.connections[i];
+    if (c.from.moduleId === module.id || c.to.moduleId === module.id) {
+      patch.connections.splice(i, 1);
     }
   }
 
   if (selectedModuleId.value === module.id) {
-    selectedModuleId.value = null
+    selectedModuleId.value = null;
   }
-}
+};
 
 const handlePatchLoaded = (loadedPatch) => {
   // Reset modules et connexions existantes
-  patch.modules.splice(0, patch.modules.length, ...loadedPatch.modules)
-  patch.connections.splice(0, patch.connections.length, ...loadedPatch.connections)
-  selectedModuleId.value = loadedPatch.modules[0]?.id || null
-}
-
+  patch.modules.splice(0, patch.modules.length, ...loadedPatch.modules);
+  patch.connections.splice(
+    0,
+    patch.connections.length,
+    ...loadedPatch.connections
+  );
+  selectedModuleId.value = loadedPatch.modules[0]?.id || null;
+};
 
 /* =========================================================
  * CONNECTIONS
  * ========================================================= */
 const handleConnectionAdded = (conn) => {
-  patch.connections.push(conn)
-}
+  patch.connections.push(conn);
+};
 
 const handleConnectionRemoved = (conn) => {
-  const idx = patch.connections.findIndex(c =>
-    c.from.moduleId === conn.from.moduleId &&
-    c.from.port === conn.from.port &&
-    c.to.moduleId === conn.to.moduleId &&
-    c.to.port === conn.to.port
-  )
-  if (idx !== -1) patch.connections.splice(idx, 1)
-}
+  const idx = patch.connections.findIndex(
+    (c) =>
+      c.from.moduleId === conn.from.moduleId &&
+      c.from.port === conn.from.port &&
+      c.to.moduleId === conn.to.moduleId &&
+      c.to.port === conn.to.port
+  );
+  if (idx !== -1) patch.connections.splice(idx, 1);
+};
 
 /* =========================================================
  * MODULE PROPERTIES
  * ========================================================= */
 const handleParamChanged = ({ key, value }) => {
-  if (!selectedModuleId.value) return
+  if (!selectedModuleId.value) return;
 
-  const module = patch.modules.find(m => m.id === selectedModuleId.value)
-  if (!module) return
+  const module = patch.modules.find((m) => m.id === selectedModuleId.value);
+  if (!module) return;
 
-  module.params[key] = value
-}
+  module.params[key] = value;
+};
 
 /* =========================================================
  * Derived selected module (pour le panel)
  * ========================================================= */
 const selectedModule = () =>
-  patch.modules.find(m => m.id === selectedModuleId.value) || null
+  patch.modules.find((m) => m.id === selectedModuleId.value) || null;
 
 /* =========================================================
  * Debug
  * ========================================================= */
-watch(patch, (newPatch) => {
-  console.log('Patch JSON:', JSON.stringify(newPatch, null, 2))
-}, { deep: true })
+watch(
+  patch,
+  (newPatch) => {
+    defPatch.value =  JSON.stringify(newPatch, null, 2)
+  },
+  { deep: true }
+);
 </script>
 
 <template>
-  <div>
+  <div class="editor-root">
     <!-- Toolbar -->
-    <ModuleToolbar @add-module="handleAddModule" />
+    <header class="editor-toolbar">
+      <ModuleToolbar @add-module="handleAddModule" />
+    </header>
 
-    <!-- Paper -->
-    <ModulePaper
-      ref="paperRef"
-      @module-selected="handleModuleSelected"
-      @module-removed="handleModuleRemoved"
-      @connection-added="handleConnectionAdded"
-      @connection-removed="handleConnectionRemoved"
-    />
+    <!-- Main area -->
+    <div class="editor-main">
+      <!-- Patch manager -->
+      <aside class="editor-patch" :class="{ collapsed: isPatchCollapsed }">
+        <PatchManager :paperRef="paperRef" @patch-loaded="handlePatchLoaded"  :style="'width:90%'"/>
+      </aside>
 
-    <PatchManager
-      :paperRef="paperRef"
-      @patch-loaded="handlePatchLoaded"
-    />
+      <!-- Paper + debug -->
+      <section class="editor-paper-wrapper">
+        <ModulePaper
+          ref="paperRef"
+          class="editor-paper"
+          @module-selected="handleModuleSelected"
+          @module-removed="handleModuleRemoved"
+          @connection-added="handleConnectionAdded"
+          @connection-removed="handleConnectionRemoved"
+        />
 
-    <!-- Properties -->
-    <ModulePropertyPanel
-      :module="selectedModule()"
-      @param-changed="handleParamChanged"
-      :style="'width:100%'"
-    />
+        <div class="editor-debug" v-if="selectedModule()">
+          <strong>Selected:</strong>
+          {{ selectedModule().type }} (ID: {{ selectedModule().id }})
+          <div>
+            <textarea :style="'width:100%'"> {{ defPatch }} </textarea>
+          </div>
+        </div>
+      </section>
 
-    <!-- Debug sélection -->
-    <div v-if="selectedModule()" style="margin-top:8px;">
-      <strong>Selected:</strong>
-      {{ selectedModule().type }} (ID: {{ selectedModule().id }})
+      <!-- Property panel -->
+      <aside class="editor-properties" v-if="selectedModule()">
+        <ModulePropertyPanel
+          :module="selectedModule()"
+          @param-changed="handleParamChanged"
+          :style="'width:90%'"
+        />
+      </aside>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* styling optionnel */
+  .editor-root {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* =========================
+  * TOOLBAR
+  * ========================= */
+  .editor-toolbar {
+    flex: 0 0 auto;
+    border-bottom: 1px solid #ccc;
+    background: #f5f5f5;
+    padding: 4px;
+  }
+
+  /* =========================
+  * MAIN GRID
+  * ========================= */
+  .editor-main {
+    flex: 1;
+    display: grid;
+    grid-template-columns:
+      auto /* patch manager */
+      1fr /* paper */
+      auto; /* properties */
+    overflow: hidden;
+  }
+
+  /* =========================
+  * PATCH MANAGER
+  * ========================= */
+  .editor-patch {
+    width: 260px;
+    border-right: 1px solid #ddd;
+    background: #fafafa;
+    overflow-y: auto;
+    transition: width 0.2s ease;
+  }
+
+  .editor-patch.collapsed {
+    width: 0;
+    padding: 0;
+    border: none;
+  }
+
+  /* =========================
+  * PAPER
+  * ========================= */
+  .editor-paper-wrapper {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .editor-paper {
+    flex: 1;
+    background: #fff;
+    overflow: hidden;
+  }
+
+  /* =========================
+  * DEBUG
+  * ========================= */
+  .editor-debug {
+    flex: 0 0 auto;
+    padding: 6px 8px;
+    font-size: 12px;
+    border-top: 1px solid #ddd;
+    background: #fafafa;
+  }
+
+  /* =========================
+  * PROPERTIES
+  * ========================= */
+  .editor-properties {
+    width: 300px;
+    border-left: 1px solid #ddd;
+    background: #fafafa;
+    overflow-y: auto;
+  }
 </style>
