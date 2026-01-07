@@ -56,7 +56,6 @@ const emitChange = (key, value) => {
     <h3>{{ module.type }} Parameters</h3>
     <div v-for="(def, key) in paramDefs" :key="key" class="param-row">
       <label>{{ key }}</label>
-      {{ def.type }}
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
              type="number"
