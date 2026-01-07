@@ -30,14 +30,6 @@ const selectedModuleId = ref(null);
  * ========================================================= */
 const handleAddModule = (type) => {
   const id = paperRef.value.addModule(type, 150, 100);
-
-  patch.modules.push({
-    id,
-    type,
-    params: { ...paperRef.value.modulesById.get(id).params },
-  });
-
-  selectedModuleId.value = id;
 };
 
 /* =========================================================
@@ -109,6 +101,24 @@ const handleParamChanged = ({ key, value }) => {
   module.params[key] = value;
 };
 
+const handleModuleAdded = ({ id, type, params, position }) => {
+  console.log('handleModuleAdded', {  id, type, params, position })
+
+  patch.modules.push({
+    id,
+    type,
+    params: params,
+    position
+  })
+}
+
+const handleModuleMoved = ({ id, position }) => {
+  console.log('handleModuleMoved', { id, position })
+  const m = patch.modules.find(m => m.id === id)
+  if (!m) return
+  m.position = { ...position }
+}
+
 /* =========================================================
  * Derived selected module (pour le panel)
  * ========================================================= */
@@ -138,7 +148,7 @@ watch(
     <div class="editor-main">
       <!-- Patch manager -->
       <aside class="editor-patch" :class="{ collapsed: isPatchCollapsed }">
-        <PatchManager :paperRef="paperRef" @patch-loaded="handlePatchLoaded"  :style="'width:90%'"/>
+        <PatchManager :paperRef="paperRef" :patch="patch" @patch-loaded="handlePatchLoaded"  :style="'width:90%'"/>
       </aside>
 
       <!-- Paper + debug -->
@@ -150,13 +160,15 @@ watch(
           @module-removed="handleModuleRemoved"
           @connection-added="handleConnectionAdded"
           @connection-removed="handleConnectionRemoved"
+          @module-added="handleModuleAdded"
+          @module-moved="handleModuleMoved"
         />
 
         <div class="editor-debug" v-if="selectedModule()">
           <strong>Selected:</strong>
           {{ selectedModule().type }} (ID: {{ selectedModule().id }})
           <div>
-            <textarea :style="'width:100%'"> {{ defPatch }} </textarea>
+            <textarea :style="'width:100%'" rows="15"> {{ defPatch }} </textarea>
           </div>
         </div>
       </section>

@@ -5,7 +5,8 @@ import { usePatchStorage } from "../composables/usePatchStorage"
 const emit = defineEmits(['patch-loaded'])
 
 const props = defineProps({
-  paperRef: { type: Object, required: true }
+  paperRef: { type: Object, required: true },
+  patch: { type: Object, required: true },
 })
 
 const {
@@ -36,11 +37,7 @@ const savePatch = () => {
 
   const exists = names().includes(patchName.value)
   if (exists && !confirm("Overwrite existing patch?")) return
-
-  const patch = props.paperRef.exportPatch()
-  patch.name = patchName.value
-
-  save(patchName.value, patch)
+  save(patchName.value, props.patch)
 }
 
 /* =========================

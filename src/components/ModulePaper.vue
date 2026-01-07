@@ -4,8 +4,10 @@ import { dia, shapes } from "@joint/core";
 import { useModuleCatalog } from "../composables/useModuleCatalog";
 
 const emit = defineEmits([
+  "module-added",
   "module-selected",
   "module-removed",
+  "module-moved",
   "connection-added",
   "connection-removed",
 ]);
@@ -127,11 +129,23 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
   modulesById.set(id, {
     id,
     type,
-    params: Object.fromEntries(
-      Object.entries(def.params).map(([k, v]) => [k, v.default])
+    params: JSON.parse(
+      JSON.stringify(
+        Object.fromEntries(
+          Object.entries(def.params).map(([k, v]) => [k, v.default])
+        )
+      )
     ),
     shape,
   });
+
+  emit("module-added", {
+    id: shape.id,
+    type,
+    params: structuredClone(modulesById.get(id).params),
+    position: shape.position()
+  });
+
 
   // ------------------------
   // Alignement des labels
@@ -152,10 +166,16 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
       shape.portProp(port.id, "attrs/text/x", 50);
       shape.portProp(port.id, "attrs/text/y", yOffset);
     });
+
+    emit("module-moved", {
+      id: shape.id,
+      position: shape.position()
+    })
+
   };
 
   updatePortLabels();
-  shape.on("change:position", updatePortLabels);
+  shape.on("change:position", () => { updatePortLabels(); });
 
   return id;
 };
