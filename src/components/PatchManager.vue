@@ -152,7 +152,7 @@ const importFile = async (e) => {
 .patch-manager {
   border: 1px solid #ccc;
   padding: 10px;
-  width: 260px;
+
   background: #fafafa;
   display: flex;
   flex-direction: column;

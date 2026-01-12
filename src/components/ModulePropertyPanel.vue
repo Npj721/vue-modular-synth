@@ -49,13 +49,20 @@ const emitChange = (key, value) => {
   params[key] = value
   emit('param-changed', { key, value })
 }
+
+const updateEnveloppe= (key, value) => {
+  console.log(value)
+  params.stages = value
+  emit('param-changed', { key, value })
+}
 </script>
 
 <template>
   <div v-if="module" class="property-panel">
+    {{ module }}
     <h3>{{ module.type }} Parameters</h3>
     <div v-for="(def, key) in paramDefs" :key="key" class="param-row">
-      <label>{{ key }}</label>
+      <label>{{ key }}</label>  
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
              type="number"
@@ -81,8 +88,8 @@ const emitChange = (key, value) => {
       <!-- Enveloppe -->
       <EnvelopeEditor
         v-else-if="def.type === 'envelope'"
-        :stages="params[key]"
-        @update="val => emitChange(key, val)"
+        :stages="params.stages"
+        @update="val => updateEnveloppe(key, val)"
       />
 
     </div>
@@ -95,7 +102,6 @@ const emitChange = (key, value) => {
   padding: 8px;
   border-radius: 4px;
   margin-top: 8px;
-  width: 220px;
   background-color: #f9f9f9;
 }
 
@@ -106,8 +112,5 @@ const emitChange = (key, value) => {
   margin-bottom: 6px;
 }
 
-label {
-  flex: 1;
-  font-weight: bold;
-}
+
 </style>

@@ -146,13 +146,18 @@ watch(
 
     <!-- Main area -->
     <div class="editor-main">
-      <!-- Patch manager -->
-      <aside class="editor-patch" :class="{ collapsed: isPatchCollapsed }">
-        <PatchManager :paperRef="paperRef" :patch="patch" @patch-loaded="handlePatchLoaded"  :style="'width:90%'"/>
+      <!-- Patch manager (left) -->
+      <aside class="editor-patch">
+        <PatchManager
+          :paperRef="paperRef"
+          :patch="patch"
+          @patch-loaded="handlePatchLoaded"
+        />
       </aside>
 
-      <!-- Paper + debug -->
-      <section class="editor-paper-wrapper">
+      <!-- Center column -->
+      <section class="editor-center">
+        <!-- Paper -->
         <ModulePaper
           ref="paperRef"
           class="editor-paper"
@@ -164,23 +169,15 @@ watch(
           @module-moved="handleModuleMoved"
         />
 
-        <div class="editor-debug" v-if="selectedModule()">
-          <strong>Selected:</strong>
-          {{ selectedModule().type }} (ID: {{ selectedModule().id }})
-          <div>
-            <textarea :style="'width:100%'" rows="15"> {{ defPatch }} </textarea>
-          </div>
-        </div>
-      </section>
-
-      <!-- Property panel -->
-      <aside class="editor-properties" v-if="selectedModule()">
+        <!-- Properties -->
         <ModulePropertyPanel
+          v-if="selectedModule()"
+          class="editor-properties"
           :module="selectedModule()"
           @param-changed="handleParamChanged"
-          :style="'width:90%'"
+          :style="'width:98.75%'"
         />
-      </aside>
+      </section>
     </div>
   </div>
 </template>
@@ -266,6 +263,7 @@ watch(
     width: 300px;
     border-left: 1px solid #ddd;
     background: #fafafa;
-    overflow-y: auto;
+    max-height: 400px;
+    overflow: auto;
   }
 </style>

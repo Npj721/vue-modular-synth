@@ -303,15 +303,36 @@ export function useModuleCatalog() {
         ],
       },
 
-      params: {
-        stages: {
-          type: "envelope",
-          default: [
-            { from: 0, to: 1, duration: 0.01 },
-            { from: 1, to: 0, duration: 0.3 },
-          ],
+     params: {
+  stages: {
+    type: "envelope",
+    default: {
+      press: [
+        {
+          from: "current",
+          to: 1,
+          duration: 0.01,
+          curve: "linear",
         },
-      },
+        {
+          from: 1,
+          to: 0.8,
+          duration: 0.2,
+          curve: "exponential",
+        },
+      ],
+      release: [
+        {
+          from: "current",
+          to: 0,
+          duration: 0.3,
+          curve: "exponential",
+        },
+      ],
+    },
+  },
+},
+
     },
 
     /* =========================
