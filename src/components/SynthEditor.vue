@@ -4,6 +4,7 @@ import ModuleToolbar from "./ModuleToolbar.vue";
 import ModulePaper from "./ModulePaper.vue";
 import PatchManager from "./PatchManager.vue";
 import ModulePropertyPanel from "./ModulePropertyPanel.vue";
+import SynthKeyboard from "./SynthKeyboard.vue";
 
 /* --------------------
  * Refs
@@ -139,6 +140,9 @@ watch(
 
 <template>
   <div class="editor-root">
+    <textarea name="" id="">
+      {{ patch }}
+    </textarea>
     <!-- Toolbar -->
     <header class="editor-toolbar">
       <ModuleToolbar @add-module="handleAddModule" />
@@ -177,6 +181,11 @@ watch(
           @param-changed="handleParamChanged"
           :style="'width:98.75%'"
         />
+        <SynthKeyboard
+          :patch="patch"
+        />
+
+        
       </section>
     </div>
   </div>
