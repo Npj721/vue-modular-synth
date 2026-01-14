@@ -2,6 +2,7 @@
 import { reactive, watch } from 'vue'
 import { useModuleCatalog } from '../composables/useModuleCatalog'
 import EnvelopeEditor from './EnvelopeEditor.vue'
+import AudioFilePicker from './AudioFilePicker.vue'
 
 const props = defineProps({
   module: { type: Object, default: null }
@@ -51,7 +52,6 @@ const emitChange = (key, value) => {
 }
 
 const updateEnveloppe= (key, value) => {
-  console.log(value)
   params.stages = value
   emit('param-changed', { key, value })
 }
@@ -90,6 +90,11 @@ const updateEnveloppe= (key, value) => {
         v-else-if="def.type === 'envelope'"
         :stages="params.stages"
         @update="val => updateEnveloppe(key, val)"
+      />
+      <AudioFilePicker
+        v-else-if="def.type === 'audioFile'"
+        :value="params[key]"
+        @update="val => emitChange(key, val)"
       />
 
     </div>

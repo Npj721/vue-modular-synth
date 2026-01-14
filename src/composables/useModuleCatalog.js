@@ -246,8 +246,8 @@ export function useModuleCatalog() {
 
     convolver: {
       label: "Convolver",
-      color: "#4D8076",
-      category: "fx",
+      color: "#6B5B95",
+      category: "effect",
       singleton: false,
 
       ports: {
@@ -273,8 +273,12 @@ export function useModuleCatalog() {
 
       params: {
         buffer: {
-          type: "file",
-          accept: ["audio/*"],
+          type: "audioFile",
+          default: null, // string | null
+        },
+        normalize: {
+          type: "boolean",
+          default: true,
         },
       },
     },
