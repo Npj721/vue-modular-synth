@@ -1,43 +1,52 @@
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
-import { usePatchVoice } from '../composables/usePatchVoice'
+import { ref, watch, onMounted, onUnmounted } from "vue"
+import { usePatchVoice } from "../composables/usePatchVoice"
 
 const props = defineProps({
   patch: {
     type: Object,
-    required: true
-  }
+    required: true,
+  },
 })
 
-const audioCtx = ref(null)
-const voice = ref(null)
-const activeNote = ref(null)
+/* =========================
+ * State
+ * ========================= */
+const synth = ref(null)
 const ready = ref(false)
-
-const KEYS = [
-  { note: 60, label: 'C' },
-  { note: 62, label: 'D' },
-  { note: 64, label: 'E' },
-  { note: 65, label: 'F' },
-  { note: 67, label: 'G' },
-  { note: 69, label: 'A' },
-  { note: 71, label: 'B' },
-  { note: 72, label: 'C' }
-]
+const activeNotes = ref(new Set())
 
 /* =========================
- * Audio init (user gesture)
+ * Keyboard layout (UI)
+ * ========================= */
+const KEYS = [
+  { note: 60, label: "C", key: "A" },
+  { note: 62, label: "D", key: "Z" },
+  { note: 64, label: "E", key: "E" },
+  { note: 65, label: "F", key: "R" },
+  { note: 67, label: "G", key: "T" },
+  { note: 69, label: "A", key: "Y" },
+  { note: 71, label: "B", key: "U" },
+  { note: 72, label: "C", key: "I" },
+]
+
+const KEYBOARD_MAP = {
+  a: 60,
+  z: 62,
+  e: 64,
+  r: 65,
+  t: 67,
+  y: 69,
+  u: 71,
+  i: 72,
+}
+
+/* =========================
+ * Init Audio (user gesture)
  * ========================= */
 async function initAudio() {
-  if (!audioCtx.value) {
-    audioCtx.value = new AudioContext()
-  }
-
-  if (audioCtx.value.state === 'suspended') {
-    await audioCtx.value.resume()
-  }
-
-  voice.value = usePatchVoice(audioCtx.value, props.patch)
+  synth.value = usePatchVoice(props.patch)
+  await synth.value.init()
   ready.value = true
 }
 
@@ -46,11 +55,15 @@ async function initAudio() {
  * ========================= */
 watch(
   () => props.patch,
-  (patch) => {
-    if (!audioCtx.value || !ready.value) return
+  async (newPatch) => {
+    if (!ready.value) return
 
-    voice.value?.dispose()
-    voice.value = usePatchVoice(audioCtx.value, patch)
+    // stop everything
+    synth.value.stopAll()
+
+    // recréer le moteur
+    synth.value = usePatchVoice(newPatch)
+    await synth.value.init()
   },
   { deep: true }
 )
@@ -59,29 +72,52 @@ watch(
  * Note handling
  * ========================= */
 function noteOn(note) {
-  if (!ready.value || !voice.value) return
+  if (!ready.value || activeNotes.value.has(note)) return
 
-  // piano behavior
-  voice.value.stop()
-  voice.value.start(note, 1)
-  activeNote.value = note
+  synth.value.noteOn(note)
+  activeNotes.value.add(note)
 }
 
 function noteOff(note) {
-  if (activeNote.value === note && voice.value) {
-    voice.value.stop()
-    activeNote.value = null
+  if (!ready.value || !activeNotes.value.has(note)) return
+
+  synth.value.noteOff(note)
+  activeNotes.value.delete(note)
+}
+
+/* =========================
+ * Keyboard events
+ * ========================= */
+function handleKeyDown(e) {
+  if (e.repeat) return
+
+  const note = KEYBOARD_MAP[e.key.toLowerCase()]
+  if (note !== undefined) {
+    noteOn(note)
   }
 }
 
+function handleKeyUp(e) {
+  const note = KEYBOARD_MAP[e.key.toLowerCase()]
+  if (note !== undefined) {
+    noteOff(note)
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", handleKeyDown)
+  window.addEventListener("keyup", handleKeyUp)
+})
+
 onUnmounted(() => {
-  voice.value?.dispose()
+  window.removeEventListener("keydown", handleKeyDown)
+  window.removeEventListener("keyup", handleKeyUp)
+  synth.value?.stopAll()
 })
 </script>
 
 <template>
   <div class="synth-keyboard">
-
     <!-- INIT -->
     <button v-if="!ready" class="init-btn" @click="initAudio">
       Init Audio
@@ -90,18 +126,18 @@ onUnmounted(() => {
     <!-- KEYS -->
     <div v-else class="keys">
       <button
-        v-for="key in KEYS"
-        :key="key.note"
+        v-for="k in KEYS"
+        :key="k.note"
         class="key"
-        :class="{ active: activeNote === key.note }"
-        @mousedown="noteOn(key.note)"
-        @mouseup="noteOff(key.note)"
-        @mouseleave="noteOff(key.note)"
+        :class="{ active: activeNotes.has(k.note) }"
+        @mousedown="noteOn(k.note)"
+        @mouseup="noteOff(k.note)"
+        @mouseleave="noteOff(k.note)"
       >
-        {{ key.label }}
+        <div class="note">{{ k.label }}</div>
+        <div class="kbd">{{ k.key }}</div>
       </button>
     </div>
-
   </div>
 </template>
 
@@ -120,19 +156,35 @@ onUnmounted(() => {
 
 .keys {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .key {
-  width: 48px;
-  height: 120px;
+  width: 56px;
+  height: 140px;
   border: 1px solid #999;
   background: #fdfdfd;
   cursor: pointer;
   user-select: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 6px;
 }
 
 .key.active {
   background: #00c9a7;
+  color: white;
+}
+
+.note {
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.kbd {
+  font-size: 11px;
+  opacity: 0.6;
+  text-align: right;
 }
 </style>
