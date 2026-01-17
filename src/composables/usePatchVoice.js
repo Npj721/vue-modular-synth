@@ -13,31 +13,36 @@ function scheduleEnvelope(param, stages, ctx, velocity = 1) {
   const now = ctx.currentTime
   let t = now
 
+  // valeur audio réelle
+  const current = param.value
   param.cancelScheduledValues(now)
+  param.setValueAtTime(current, now)
+
+  let lastValue = current
 
   for (const stage of stages) {
     const from =
-      stage.from === "current"
-        ? param.value
-        : stage.from
+      stage.from === "current" ? lastValue : stage.from
 
     const to = stage.to * velocity
+    const end = t + stage.duration
 
     param.setValueAtTime(from, t)
-
-    t += stage.duration
 
     if (stage.curve === "exponential") {
       param.exponentialRampToValueAtTime(
         Math.max(0.0001, to),
-        t
+        end
       )
     } else {
-      param.linearRampToValueAtTime(to, t)
+      param.linearRampToValueAtTime(to, end)
     }
+
+    lastValue = to
+    t = end
   }
 
-  return t - now // durée totale
+  return t - now
 }
 
 /* =========================================================
@@ -46,16 +51,14 @@ function scheduleEnvelope(param, stages, ctx, velocity = 1) {
 export function usePatchVoice(patch) {
   const audioCtx = ref(null)
 
-  // graph statique
-  const nodes = new Map() // moduleId -> AudioNode
-  const paramInputs = [] // connexions vers AudioParam
-  const envelopes = []   // modules envelope
+  const nodes = new Map()
+  const paramInputs = []
+  const envelopes = []
 
-  // polyphonie
-  const voices = new Map() // note -> VoiceInstance
+  const voices = new Map()
 
   /* =========================
-   * Init AudioContext
+   * Init
    * ========================= */
   async function init() {
     if (!audioCtx.value) {
@@ -78,7 +81,6 @@ export function usePatchVoice(patch) {
 
     const ctx = audioCtx.value
 
-    // 1️⃣ créer nodes fixes
     for (const mod of patch.modules) {
       let node = null
 
@@ -98,35 +100,23 @@ export function usePatchVoice(patch) {
 
         case "voice":
         case "osc":
-          // sources → par voix, pas ici
           continue
       }
 
-      if (node) {
-        nodes.set(mod.id, node)
-      }
+      if (node) nodes.set(mod.id, node)
     }
 
-    // 2️⃣ connexions
     for (const c of patch.connections) {
       const fromNode = nodes.get(c.from.id)
       const toNode = nodes.get(c.to.id)
 
-      const [, fromPort] = c.from.port.split(":")
       const [, toPort] = c.to.port.split(":")
 
       if (!fromNode) continue
 
       if (toNode) {
-        // audio → audio
         fromNode.connect(toNode)
       } else {
-        // audio → AudioParam
-        const targetMod = patch.modules.find(
-          (m) => m.id === c.to.id
-        )
-        if (!targetMod) continue
-
         paramInputs.push({
           sourceNodeId: c.from.id,
           targetModuleId: c.to.id,
@@ -137,123 +127,163 @@ export function usePatchVoice(patch) {
   }
 
   /* =========================
-   * Create a voice
+   * Voice creation
    * ========================= */
-  function createVoice(note, velocity = 1) {
-    const ctx = audioCtx.value
-    const freq = noteToFreq(note)
 
-    const sources = []
-    const envInstances = []
+function createParamInput(ctx, baseValue) {
+  const base = ctx.createConstantSource()
+  base.offset.value = baseValue
+  base.start()
 
-    // 1️⃣ créer sources
-    for (const mod of patch.modules) {
-      if (mod.type !== "voice" && mod.type !== "osc") continue
+  return {
+    base,
+    input: base.offset // AudioParam
+  }
+}
 
-      const osc = ctx.createOscillator()
-      osc.type = mod.params.type || "sine"
-      osc.frequency.value =
-        mod.type === "voice" ? freq : mod.params.frequency
-      osc.detune.value = mod.params.detune || 0
+function createVoice(note, velocity = 1) {
+  const ctx = audioCtx.value
+  const freq = noteToFreq(note)
 
-      // connexions audio
-      for (const c of patch.connections) {
-        if (c.from.id !== mod.id) continue
+  const nodes = new Map()
+  const sources = []
+  const envelopes = []
 
-        const target = nodes.get(c.to.id)
-        if (target) osc.connect(target)
-      }
+  /* =========================
+   * 1️⃣ Create nodes (PER VOICE)
+   * ========================= */
+  for (const mod of patch.modules) {
+    let node = null
 
-      // connexions param
-      for (const p of paramInputs) {
-        if (p.sourceNodeId === mod.id) {
-          const targetNode = nodes.get(p.targetModuleId)
-          if (targetNode && targetNode[p.param]) {
-            osc.connect(targetNode[p.param])
+    switch (mod.type) {
+      case "voice": {
+        const osc = ctx.createOscillator()
+        osc.type = mod.params.type || "sine"
+        
+        // base frequency via ConstantSource
+        /*const freqInput = createParamInput(ctx, freq)
+        freqInput.base.connect(osc.frequency)*/
+        osc.frequency.value = freq;
+
+        // detune base
+
+        osc.detune.value = mod.params.detune || 0
+        nodes.set(mod.id, {
+          node: osc,
+          params: {
+            frequency: osc.frequency,
+            detune: osc.detune ,
           }
-        }
-      }
-
-      osc.start()
-      sources.push(osc)
-    }
-
-    // 2️⃣ envelopes
-    for (const env of envelopes) {
-      for (const c of patch.connections) {
-        if (c.from.id !== env.id) continue
-
-        const targetNode = nodes.get(c.to.id)
-        const [, paramName] = c.to.port.split(":")
-
-        if (!targetNode || !targetNode[paramName]) continue
-
-        const param = targetNode[paramName]
-
-        const pressDur = scheduleEnvelope(
-          param,
-          env.params.stages.press,
-          ctx,
-          velocity
-        )
-
-        const releaseDur = env.params.stages.release.reduce(
-          (s, st) => s + st.duration,
-          0
-        )
-
-        envInstances.push({
-          param,
-          pressDur,
-          releaseDur,
-          releaseStages: env.params.stages.release,
         })
+
+        osc.start()
+        sources.push(osc)
+        break
       }
-    }
 
-    return {
-      note,
-      sources,
-      envelopes: envInstances,
-      stop(immediate = false) {
-        const now = ctx.currentTime
+      case "osc": {
+        const osc = ctx.createOscillator()
+        osc.type = mod.params.type || "sine"
+        osc.frequency.value = mod.params.frequency
+        osc.detune.value = mod.params.detune || 0
+        osc.start()
 
-        let maxRelease = 0
+        nodes.set(mod.id, { node: osc })
+        sources.push(osc)
+        break
+      }
 
-        for (const env of envInstances) {
-          env.param.cancelScheduledValues(now)
+      case "gain": {
+        const g = ctx.createGain()
+        g.gain.value = mod.params.gain ?? 1
+        nodes.set(mod.id, { node: g, params: { gain: g.gain } })
+        break
+      }
 
-          if (!immediate) {
-            scheduleEnvelope(
-              env.param,
-              env.releaseStages,
-              ctx
-            )
-            maxRelease = Math.max(
-              maxRelease,
-              env.releaseDur
-            )
-          }
-        }
+      case "destination":
+        nodes.set(mod.id, { node: ctx.destination })
+        break
 
-        const stopTime = immediate
-          ? now
-          : now + maxRelease
-
-        for (const src of sources) {
-          try {
-            src.stop(stopTime)
-          } catch {}
-        }
-      },
+      case "envelope":
+        nodes.set(mod.id, mod)
+        break
     }
   }
+
+  /* =========================
+   * 2️⃣ Connections (audio + param)
+   * ========================= */
+  for (const c of patch.connections) {
+    const from = nodes.get(c.from.id)
+    const to = nodes.get(c.to.id)
+    if (!from || !to) continue
+    const [, toPort] = c.to.port.split(":") 
+
+    console.log('Connections (audio + param)', { from, to, toPort})
+    
+
+    if (toPort == "in") {
+      console.log('on se connecte sur le "in" ')
+      from.node.connect(to.node)
+    } else if (to.params?.[toPort]) {
+      console.log("on se connecte sur " + to.params[toPort])
+      from.node.connect(to.params[toPort])
+    }
+  }
+
+  /* =========================
+   * 3️⃣ Envelopes (PER VOICE)
+   * ========================= */
+  for (const mod of patch.modules) {
+    if (mod.type !== "envelope") continue
+
+    for (const c of patch.connections) {
+      if (c.from.id !== mod.id) continue
+
+      const target = nodes.get(c.to.id)
+      const [, paramName] = c.to.port.split(":")
+
+      if (!target?.params?.[paramName]) continue
+
+      const param = target.params[paramName]
+
+      scheduleEnvelope(param, mod.params.stages.press, ctx, velocity)
+
+      envelopes.push({
+        param,
+        release: mod.params.stages.release
+      })
+    }
+  }
+
+  /* =========================
+   * 4️⃣ Voice API
+   * ========================= */
+  return {
+    stop() {
+      const now = ctx.currentTime
+      let maxRelease = 0
+
+      for (const env of envelopes) {
+        env.param.cancelScheduledValues(now)
+        maxRelease = Math.max(
+          maxRelease,
+          scheduleEnvelope(env.param, env.release, ctx)
+        )
+      }
+
+      for (const src of sources) {
+        src.stop(now + maxRelease + 0.01)
+      }
+    }
+  }
+}
+
 
   /* =========================
    * Public API
    * ========================= */
   function noteOn(note, velocity = 1) {
-    // comportement piano
     if (voices.has(note)) {
       voices.get(note).stop(true)
       voices.delete(note)
