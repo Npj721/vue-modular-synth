@@ -27,6 +27,8 @@ function scheduleEnvelope(param, stages, ctx, velocity = 1) {
     const to = stage.to * velocity
     const end = t + stage.duration
 
+    console.log('stage ', { stage  })
+
     param.setValueAtTime(from, t)
 
     if (stage.curve === "exponential") {
@@ -226,8 +228,8 @@ function createVoice(note, velocity = 1) {
       console.log('on se connecte sur le "in" ')
       from.node.connect(to.node)
     } else if (to.params?.[toPort]) {
-      console.log("on se connecte sur " + to.params[toPort])
-      from.node.connect(to.params[toPort])
+      console.log("on se connecte sur ", { type: from.type, to: to.params[toPort] })
+      if(from.type != "envelope") from.node.connect(to.params[toPort])
     }
   }
 
@@ -265,7 +267,7 @@ function createVoice(note, velocity = 1) {
       let maxRelease = 0
 
       for (const env of envelopes) {
-        env.param.cancelScheduledValues(now)
+        //env.param.cancelScheduledValues(now)
         maxRelease = Math.max(
           maxRelease,
           scheduleEnvelope(env.param, env.release, ctx)
