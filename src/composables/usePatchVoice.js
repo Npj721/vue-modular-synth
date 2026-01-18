@@ -9,38 +9,39 @@ const noteToFreq = (note) =>
 /* =========================================================
  * Envelope scheduling
  * ========================================================= */
+const EPS = 0.0001
+
 function scheduleEnvelope(param, stages, ctx, velocity = 1) {
   const now = ctx.currentTime
-
-  // valeur de base ABSOLUE du param
   const baseValue = param.value
 
-  // figer la valeur actuelle réelle
   param.cancelScheduledValues(now)
   param.setValueAtTime(param.value, now)
 
   let t = now
 
   for (const stage of stages) {
-    const fromEnv =
+    let fromEnv =
       stage.from === "current"
         ? param.value / baseValue
         : stage.from
 
-    const toEnv = stage.to * velocity
+    let toEnv = stage.to * velocity
+
+    // 🔒 clamp pour exponential
+    if (stage.curve === "exponential") {
+      fromEnv = Math.max(EPS, fromEnv)
+      toEnv = Math.max(EPS, toEnv)
+    }
 
     const fromValue = baseValue * fromEnv
     const toValue = baseValue * toEnv
 
     param.setValueAtTime(fromValue, t)
-
     t += stage.duration
 
     if (stage.curve === "exponential") {
-      param.exponentialRampToValueAtTime(
-        Math.max(0.0001, toValue),
-        t
-      )
+      param.exponentialRampToValueAtTime(toValue, t)
     } else {
       param.linearRampToValueAtTime(toValue, t)
     }
@@ -48,6 +49,7 @@ function scheduleEnvelope(param, stages, ctx, velocity = 1) {
 
   return t - now
 }
+
 
 /* =========================================================
  * Main composable
