@@ -11,37 +11,39 @@ const noteToFreq = (note) =>
  * ========================================================= */
 function scheduleEnvelope(param, stages, ctx, velocity = 1) {
   const now = ctx.currentTime
+
+  // valeur de base ABSOLUE du param
+  const baseValue = param.value
+
+  // figer la valeur actuelle réelle
+  param.cancelScheduledValues(now)
+  param.setValueAtTime(param.value, now)
+
   let t = now
 
-  // valeur audio réelle
-  const current = param.value
-  param.cancelScheduledValues(now)
-  param.setValueAtTime(current, now)
-
-  let lastValue = current
-
   for (const stage of stages) {
-    const from =
-      stage.from === "current" ? lastValue : stage.from
+    const fromEnv =
+      stage.from === "current"
+        ? param.value / baseValue
+        : stage.from
 
-    const to = stage.to * velocity
-    const end = t + stage.duration
+    const toEnv = stage.to * velocity
 
-    console.log('stage ', { stage  })
+    const fromValue = baseValue * fromEnv
+    const toValue = baseValue * toEnv
 
-    param.setValueAtTime(from, t)
+    param.setValueAtTime(fromValue, t)
+
+    t += stage.duration
 
     if (stage.curve === "exponential") {
       param.exponentialRampToValueAtTime(
-        Math.max(0.0001, to),
-        end
+        Math.max(0.0001, toValue),
+        t
       )
     } else {
-      param.linearRampToValueAtTime(to, end)
+      param.linearRampToValueAtTime(toValue, t)
     }
-
-    lastValue = to
-    t = end
   }
 
   return t - now
