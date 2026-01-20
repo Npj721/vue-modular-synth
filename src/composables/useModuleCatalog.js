@@ -308,28 +308,34 @@ export function useModuleCatalog() {
       },
 
       params: {
+         modulation: {
+          type: "enum",
+          values: ["replace", "relative"],
+          default: "relative",
+        },
+
         stages: {
           type: "envelope",
           default: {
             press: [
               {
-                from: "current",
+                from: 0,
                 to: 1,
-                duration: 0.01,
-                curve: "linear",
+                duration: 0.35,
+                curve: "exponential",
               },
               {
                 from: 1,
-                to: 0.8,
-                duration: 0.2,
-                curve: "exponential",
+                to: 0.75,
+                duration: 0.75,
+                curve: "linear",
               },
             ],
             release: [
               {
                 from: "current",
                 to: 0,
-                duration: 0.3,
+                duration: 0.75,
                 curve: "exponential",
               },
             ],

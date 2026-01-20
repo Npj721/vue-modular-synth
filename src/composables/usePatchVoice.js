@@ -9,8 +9,6 @@ const EPS = 0.0001
 const noteToFreq = (note) =>
   440 * Math.pow(2, (note - 69) / 12)
 
-const safeExp = (v) => Math.max(EPS, v)
-
 function getEnvelopeDuration(stages = []) {
   return stages.reduce((t, s) => t + s.duration, 0)
 }
@@ -22,11 +20,9 @@ function getEnvelopeDuration(stages = []) {
 function scheduleStages(param, stages, ctx, velocity = 1) {
   const now = ctx.currentTime
 
-  // 🔑 LA LIGNE MAGIQUE
   if (param.cancelAndHoldAtTime) {
     param.cancelAndHoldAtTime(now)
   } else {
-    // fallback vieux navigateurs
     const v = param.value
     param.cancelScheduledValues(now)
     param.setValueAtTime(v, now)
@@ -157,19 +153,17 @@ export function usePatchVoice(patch) {
 
       const [, toPort] = c.to.port.split(":")
 
-      // audio → audio
       if (toPort === "in") {
         from.node.connect(to.node)
-      }
-      // audio → AudioParam (FM / AM)
-      else if (to.params?.[toPort]) {
+      } else if (to.params?.[toPort]) {
         from.node.connect(to.params[toPort])
       }
     }
 
     /* ---------- 3️⃣ Envelopes (PRESS) ---------- */
 
-    const activeEnvs = []
+    const modulatedParams = []
+    const amplitudeEnvs = []
 
     for (const env of envelopes) {
       for (const c of patch.connections) {
@@ -187,10 +181,17 @@ export function usePatchVoice(patch) {
           velocity
         )
 
-        activeEnvs.push({
+        const isAmplitude = paramName === "gain"
+
+        modulatedParams.push({
           param,
-          release: env.params.stages.release
+          release: env.params.stages.release,
+          isAmplitude
         })
+
+        if (isAmplitude) {
+          amplitudeEnvs.push(env)
+        }
       }
     }
 
@@ -198,25 +199,36 @@ export function usePatchVoice(patch) {
 
     return {
       stop() {
-      const now = ctx.currentTime
-      let maxRelease = 0
+        const now = ctx.currentTime
 
-      for (const env of activeEnvs) {
-        env.param.cancelScheduledValues(now)
-        scheduleStages(env.param, env.release, ctx)
-        maxRelease = Math.max(
-          maxRelease,
-          getEnvelopeDuration(env.release)
-        )
-      }
+        let maxAmpRelease = 0
 
-      // ⏳ ON ATTEND LA FIN DU RELEASE
-      for (const src of sources) {
-        src.stop(now + maxRelease + 0.05)
+        for (const env of modulatedParams) {
+          env.param.cancelScheduledValues(now)
+          scheduleStages(env.param, env.release, ctx)
+
+          if (env.isAmplitude) {
+            maxAmpRelease = Math.max(
+              maxAmpRelease,
+              getEnvelopeDuration(env.release)
+            )
+          }
+        }
+
+        // 🔑 RÈGLE FONDAMENTALE
+        // - pas d’enveloppe d’amplitude → stop immédiat
+        // - enveloppes d’amplitude → attendre leur release
+
+        const stopTime =
+          amplitudeEnvs.length > 0
+            ? now + maxAmpRelease + 0.02
+            : now
+
+        for (const src of sources) {
+          src.stop(stopTime)
+        }
       }
     }
-
-        }
   }
 
   /* =========================
