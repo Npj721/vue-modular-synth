@@ -307,36 +307,35 @@ export function useModuleCatalog() {
         ],
       },
 
-     params: {
-  stages: {
-    type: "envelope",
-    default: {
-      press: [
-        {
-          from: "current",
-          to: 1,
-          duration: 0.01,
-          curve: "linear",
+      params: {
+        stages: {
+          type: "envelope",
+          default: {
+            press: [
+              {
+                from: "current",
+                to: 1,
+                duration: 0.01,
+                curve: "linear",
+              },
+              {
+                from: 1,
+                to: 0.8,
+                duration: 0.2,
+                curve: "exponential",
+              },
+            ],
+            release: [
+              {
+                from: "current",
+                to: 0,
+                duration: 0.3,
+                curve: "exponential",
+              },
+            ],
+          },
         },
-        {
-          from: 1,
-          to: 0.8,
-          duration: 0.2,
-          curve: "exponential",
-        },
-      ],
-      release: [
-        {
-          from: "current",
-          to: 0,
-          duration: 0.3,
-          curve: "exponential",
-        },
-      ],
-    },
-  },
-},
-
+      },
     },
 
     /* =========================
@@ -419,7 +418,7 @@ export function useModuleCatalog() {
           if (p === "frequency") return [p, num(20, 20000, 1, 1000)];
           if (p === "Q") return [p, num(0.0001, 100, 0.01, 1)];
           if (p === "gain") return [p, num(-40, 40, 0.1, 0)];
-        })
+        }),
       ),
     };
   }
