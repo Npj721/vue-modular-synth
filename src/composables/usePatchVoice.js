@@ -14,10 +14,16 @@ function getEnvelopeDuration(stages = []) {
 }
 
 /* =========================================================
- * Envelope scheduler (PURE AudioParam automation)
+ * Envelope scheduler (AudioParam only)
  * ========================================================= */
 
-function scheduleStages(param, stages, ctx, velocity = 1, base = 1) {
+function scheduleStages(
+  param,
+  stages,
+  ctx,
+  velocity = 1,
+  base = 1
+) {
   const now = ctx.currentTime
 
   if (param.cancelAndHoldAtTime) {
@@ -64,10 +70,22 @@ export function usePatchVoice(patch) {
   const audioCtx = ref(null)
   const voices = new Map() // Map<note, voice>
 
+  /* =========================
+   * Init
+   * ========================= */
+
   async function init() {
-    if (!audioCtx.value) audioCtx.value = new AudioContext()
-    if (audioCtx.value.state !== "running") await audioCtx.value.resume()
+    if (!audioCtx.value) {
+      audioCtx.value = new AudioContext()
+    }
+    if (audioCtx.value.state !== "running") {
+      await audioCtx.value.resume()
+    }
   }
+
+  /* =========================
+   * Create one voice
+   * ========================= */
 
   function createVoice(note, velocity = 1) {
     const ctx = audioCtx.value
@@ -82,21 +100,30 @@ export function usePatchVoice(patch) {
     for (const mod of patch.modules) {
       let node = null
       let params = {}
-      let base = 0
+      let bases = {}
 
       switch (mod.type) {
         case "voice": {
           const osc = ctx.createOscillator()
           osc.type = mod.params.type || "sine"
+
           const freq = noteToFreq(note)
+          const detune = mod.params.detune ?? 0
+
           osc.frequency.setValueAtTime(freq, now)
-          osc.detune.setValueAtTime(mod.params.detune || 0, now)
+          osc.detune.setValueAtTime(detune, now)
           osc.start()
 
           node = osc
-          params.frequency = osc.frequency
-          params.detune = osc.detune
-          base = freq
+          params = {
+            frequency: osc.frequency,
+            detune: osc.detune
+          }
+          bases = {
+            frequency: freq,
+            detune: detune
+          }
+
           sources.push(osc)
           break
         }
@@ -104,27 +131,38 @@ export function usePatchVoice(patch) {
         case "osc": {
           const osc = ctx.createOscillator()
           osc.type = mod.params.type || "sine"
-          const freq = mod.params.frequency || 440
+
+          const freq = mod.params.frequency ?? 440
+          const detune = mod.params.detune ?? 0
+
           osc.frequency.setValueAtTime(freq, now)
-          osc.detune.setValueAtTime(mod.params.detune || 0, now)
+          osc.detune.setValueAtTime(detune, now)
           osc.start()
 
           node = osc
-          params.frequency = osc.frequency
-          params.detune = osc.detune
-          base = freq
+          params = {
+            frequency: osc.frequency,
+            detune: osc.detune
+          }
+          bases = {
+            frequency: freq,
+            detune: detune
+          }
+
           sources.push(osc)
           break
         }
 
         case "gain": {
           const g = ctx.createGain()
-          const gainValue = mod.params.gain ?? 1
-          g.gain.setValueAtTime(gainValue, now)
+          const gain = mod.params.gain ?? 1
+
+          g.gain.setValueAtTime(gain, now)
 
           node = g
-          params.gain = g.gain
-          base = gainValue
+          params = { gain: g.gain }
+          bases = { gain }
+
           break
         }
 
@@ -137,7 +175,7 @@ export function usePatchVoice(patch) {
           continue
       }
 
-      nodes.set(mod.id, { node, params, base })
+      nodes.set(mod.id, { node, params, bases })
     }
 
     /* ---------- 2️⃣ Connections ---------- */
@@ -165,12 +203,19 @@ export function usePatchVoice(patch) {
         if (c.from.id !== env.id) continue
 
         const target = nodes.get(c.to.id)
+        if (!target) continue
+
         const [, paramName] = c.to.port.split(":")
-        const param = target?.params?.[paramName]
+        const param = target.params?.[paramName]
         if (!param) continue
 
-        const modulation = env.params.modulation || "replace"
-        const base = modulation === "relative" ? target.base : 1
+        const modulation =
+          env.params.modulation ?? "replace"
+
+        const base =
+          modulation === "relative"
+            ? target.bases?.[paramName] ?? 1
+            : 1
 
         scheduleStages(
           param,
@@ -182,9 +227,9 @@ export function usePatchVoice(patch) {
 
         activeEnvs.push({
           param,
-          release: env.params.stages.release,
           base,
-          modulation
+          release: env.params.stages.release,
+          affectsAmplitude: paramName === "gain"
         })
       }
     }
@@ -195,15 +240,35 @@ export function usePatchVoice(patch) {
       stop() {
         const now = ctx.currentTime
         let maxRelease = 0
+        let hasAmplitudeEnv = false
 
         for (const env of activeEnvs) {
-          const base = env.modulation === "relative" ? env.base : 1
-          scheduleStages(env.param, env.release, ctx, 1, base)
-          maxRelease = Math.max(maxRelease, getEnvelopeDuration(env.release))
+          env.param.cancelScheduledValues(now)
+
+          scheduleStages(
+            env.param,
+            env.release,
+            ctx,
+            1,
+            env.base
+          )
+
+          maxRelease = Math.max(
+            maxRelease,
+            getEnvelopeDuration(env.release)
+          )
+
+          if (env.affectsAmplitude) {
+            hasAmplitudeEnv = true
+          }
         }
 
-        for (const src of sources) {
-          src.stop(now + maxRelease + 0.05)
+        // ⛔️ On ne stoppe les oscillateurs
+        // QUE si une enveloppe agit sur l’amplitude
+        if (hasAmplitudeEnv) {
+          for (const src of sources) {
+            src.stop(now + maxRelease + 0.05)
+          }
         }
       }
     }
@@ -211,7 +276,7 @@ export function usePatchVoice(patch) {
 
   /* =========================
    * Public API
-   ========================= */
+   * ========================= */
 
   function noteOn(note, velocity = 1) {
     if (!audioCtx.value) return
@@ -228,6 +293,7 @@ export function usePatchVoice(patch) {
   function noteOff(note) {
     const voice = voices.get(note)
     if (!voice) return
+
     voice.stop()
     voices.delete(note)
   }
