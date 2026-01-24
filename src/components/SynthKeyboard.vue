@@ -28,6 +28,24 @@ const KEYS = [
   { note: 69, label: "A", key: "Y" },
   { note: 71, label: "B", key: "U" },
   { note: 72, label: "C", key: "I" },
+  
+  { note: 74, label: "C2", key: "Q" },
+  { note: 76, label: "D2", key: "S" },
+  { note: 77, label: "E2", key: "D" },
+  { note: 79, label: "F2", key: "F" },
+  { note: 81, label: "G2", key: "G" },
+  { note: 83, label: "A2", key: "H" },
+  { note: 84, label: "B2", key: "J" },
+
+  { note: 86, label: "C3", key: "W" },
+  { note: 88, label: "D3", key: "X" },
+  { note: 89, label: "E3", key: "C" },
+  { note: 91, label: "F3", key: "V" },
+  { note: 93, label: "G3", key: "B" },
+  { note: 95, label: "A3", key: "N" },
+  { note: 96, label: "B3", key: "," },
+
+
 ]
 
 const KEYBOARD_MAP = {
@@ -39,6 +57,26 @@ const KEYBOARD_MAP = {
   y: 69,
   u: 71,
   i: 72,
+  
+
+  q: 72,
+  s: 74,
+  d: 76,
+  f: 77,
+  g: 79,
+  h: 81,
+  j: 83,
+  k: 84,
+ 
+
+  w: 84,
+  x: 86,
+  c: 88,
+  v: 89,
+  b: 91,
+  n: 93,
+  ',': 95,
+  ';':96
 }
 
 /* =========================
