@@ -70,9 +70,9 @@ const emit = defineEmits(["update:patch"])
 </template>
 
 <style scoped>
+
 h1{
   color: rgb(0, 39, 33);;
-
 }
 .button {
   margin-right: 12px;
