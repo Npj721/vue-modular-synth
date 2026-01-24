@@ -1,5 +1,5 @@
 <script setup>
-import SynthEditor from './components/SynthEditor.vue'
+  import SynthEditor from './components/SynthEditor.vue'
 </script>
 
 <template>

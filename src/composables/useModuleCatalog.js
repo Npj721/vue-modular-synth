@@ -321,13 +321,25 @@ export function useModuleCatalog() {
               {
                 from: 0,
                 to: 1,
-                duration: 0.35,
+                duration: 0.05,
                 curve: "exponential",
               },
               {
                 from: 1,
                 to: 0.75,
-                duration: 0.75,
+                duration: 0.3,
+                curve: "linear",
+              },
+              {
+                from: 0.75,
+                to: 0.75,
+                duration: 0.3,
+                curve: "linear",
+              },
+              {
+                from: 0.75,
+                to: 0,
+                duration: 0.7,
                 curve: "linear",
               },
             ],
@@ -335,8 +347,8 @@ export function useModuleCatalog() {
               {
                 from: "current",
                 to: 0,
-                duration: 0.75,
-                curve: "exponential",
+                duration: 0.4,
+                curve: "linear",
               },
             ],
           },
