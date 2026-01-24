@@ -5,8 +5,8 @@ import { usePatchStorage } from "../composables/usePatchStorage"
 const emit = defineEmits(['patch-loaded'])
 
 const props = defineProps({
-  paperRef: { type: Object, required: true },
-  patch: { type: Object, required: true },
+  paperRef: { type: Object, required: false },
+  patch: { type: Object, required: false },
 })
 
 const {
