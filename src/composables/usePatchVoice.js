@@ -335,6 +335,10 @@ export function usePatchVoice(patch) {
           for (const src of sources) {
             src.stop(now + maxRelease + 0.05)
           }
+        }else{
+          for (const src of sources) {
+            src.stop(now  + 0.05)
+          }
         }
       }
     }
