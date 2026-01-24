@@ -108,8 +108,6 @@ const handleParamChanged = ({ key, value }) => {
 };
 
 const handleModuleAdded = ({ id, type, params, position }) => {
-  console.log('handleModuleAdded', {  id, type, params, position })
-
   patch.modules.push({
     id,
     type,
@@ -119,7 +117,6 @@ const handleModuleAdded = ({ id, type, params, position }) => {
 }
 
 const handleModuleMoved = ({ id, position }) => {
-  console.log('handleModuleMoved', { id, position })
   const m = patch.modules.find(m => m.id === id)
   if (!m) return
   m.position = { ...position }

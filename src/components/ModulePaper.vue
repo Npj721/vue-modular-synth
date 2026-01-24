@@ -278,7 +278,6 @@ const loadPatch = (patch) => {
   patch.modules.forEach((m) => {
     // addModule retourne maintenant la vraie shape
     const shape = addModule(m.type, m.position.x, m.position.y, m.id)
-    console.log({ shape })
     if (!shape) return
 
     const module = modulesById.get(m.id)
