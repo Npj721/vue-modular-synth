@@ -381,6 +381,29 @@ export function useModuleCatalog() {
 
       params: {},
     },
+
+    input: {
+      label: "Input",
+      color: "#222222",
+      category: "input",
+      singleton: true,
+
+      ports: {
+        inputs: [],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {},
+    },
+
   });
 
   /* =========================

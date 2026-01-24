@@ -355,8 +355,9 @@ onMounted(() => {
         sRole === "audioOut" &&
         tRole === "audioIn"
       ) {
-        // Si c'est un gain qui sort, il peut aller n'importe où
-        if (srcModule.type === "gain") return true;
+        if (srcModule.type === "gain" || srcModule.type === "input") {
+          return true;
+        }
 
         // Si c'est une source, elle peut aller vers un gain
         if (
