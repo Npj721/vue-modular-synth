@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from "vue"
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from "vue"
 import { usePatchVoice } from "../composables/usePatchVoice"
 
 const props = defineProps({
@@ -17,70 +17,75 @@ const ready = ref(false)
 const activeNotes = ref(new Set())
 
 /* =========================
- * Keyboard layout (UI)
+ * Keyboard logic
  * ========================= */
-const KEYS = [
-  { note: 60, label: "C", key: "A" },
-  { note: 62, label: "D", key: "Z" },
-  { note: 64, label: "E", key: "E" },
-  { note: 65, label: "F", key: "R" },
-  { note: 67, label: "G", key: "T" },
-  { note: 69, label: "A", key: "Y" },
-  { note: 71, label: "B", key: "U" },
-  { note: 72, label: "C", key: "I" },
-  
-  { note: 74, label: "C2", key: "Q" },
-  { note: 76, label: "D2", key: "S" },
-  { note: 77, label: "E2", key: "D" },
-  { note: 79, label: "F2", key: "F" },
-  { note: 81, label: "G2", key: "G" },
-  { note: 83, label: "A2", key: "H" },
-  { note: 84, label: "B2", key: "J" },
+const SCALE = [0, 2, 4, 5, 7, 9, 11] // do ré mi fa sol la si
 
-  { note: 86, label: "C3", key: "W" },
-  { note: 88, label: "D3", key: "X" },
-  { note: 89, label: "E3", key: "C" },
-  { note: 91, label: "F3", key: "V" },
-  { note: 93, label: "G3", key: "B" },
-  { note: 95, label: "A3", key: "N" },
-  { note: 96, label: "B3", key: "," },
-
-
+const KEY_ROWS = [
+  ["a","z","e","r","t","y","u","i","o","p"],
+  ["q","s","d","f","g","h","j","k","l","m","ù","µ"],
+  ["w","x","c","v","b","n",",",";","="]
 ]
 
-const KEYBOARD_MAP = {
-  a: 60,
-  z: 62,
-  e: 64,
-  r: 65,
-  t: 67,
-  y: 69,
-  u: 71,
-  i: 72,
-  
+const baseNote = ref(38) // D2
 
-  q: 72,
-  s: 74,
-  d: 76,
-  f: 77,
-  g: 79,
-  h: 81,
-  j: 83,
-  k: 84,
- 
+function buildKeyboardMap() {
+  const map = {}
 
-  w: 84,
-  x: 86,
-  c: 88,
-  v: 89,
-  b: 91,
-  n: 93,
-  ',': 95,
-  ';':96
+  KEY_ROWS.forEach((row, rowIndex) => {
+    const octaveBase = baseNote.value + rowIndex * 12
+
+    row.forEach((key, indexInRow) => {
+      const scaleDegree = indexInRow % SCALE.length
+      const octaveShift = Math.floor(indexInRow / SCALE.length)
+
+      map[key] =
+        octaveBase +
+        octaveShift * 12 +
+        SCALE[scaleDegree]
+    })
+  })
+
+  return map
+}
+
+
+const KEYBOARD_MAP = ref(buildKeyboardMap())
+
+/* =========================
+ * UI KEYS (pour le template)
+ * ========================= */
+const KEYS = computed(() => {
+  const keys = []
+
+  KEY_ROWS.forEach((row) => {
+    row.forEach((key) => {
+      const note = KEYBOARD_MAP.value[key]
+      if (note !== undefined) {
+        keys.push({
+          key,
+          note,
+          label: note, // plus tard → C3, D#4, etc
+        })
+      }
+    })
+  })
+
+  return keys
+})
+
+function octaveUp() {
+  baseNote.value += 12
+  KEYBOARD_MAP.value = buildKeyboardMap()
+}
+
+function octaveDown() {
+  baseNote.value -= 12
+  KEYBOARD_MAP.value = buildKeyboardMap()
 }
 
 /* =========================
- * Init Audio (user gesture)
+ * Init Audio
  * ========================= */
 async function initAudio() {
   synth.value = usePatchVoice(props.patch)
@@ -93,32 +98,33 @@ async function initAudio() {
  * ========================= */
 watch(
   () => props.patch,
-  async (newPatch) => {
+  async () => {
     if (!ready.value) return
 
-    // stop everything
+    // 1. stop toutes les voix
     synth.value.stopAll()
+    activeNotes.value.clear()
 
-    // recréer le moteur
-    synth.value = usePatchVoice(newPatch)
-    await synth.value.init()
+    // 2. attendre que Vue ait fini
+    await nextTick()
+
+
+    synth.value.rebuildMainPatch()
   },
   { deep: true }
 )
 
 /* =========================
- * Note handling
+ * Notes
  * ========================= */
 function noteOn(note) {
   if (!ready.value || activeNotes.value.has(note)) return
-
   synth.value.noteOn(note)
   activeNotes.value.add(note)
 }
 
 function noteOff(note) {
   if (!ready.value || !activeNotes.value.has(note)) return
-
   synth.value.noteOff(note)
   activeNotes.value.delete(note)
 }
@@ -129,17 +135,16 @@ function noteOff(note) {
 function handleKeyDown(e) {
   if (e.repeat) return
 
-  const note = KEYBOARD_MAP[e.key.toLowerCase()]
-  if (note !== undefined) {
-    noteOn(note)
-  }
+  if (e.key === "+") return octaveUp()
+  if (e.key === "-") return octaveDown()
+
+  const note = KEYBOARD_MAP.value[e.key.toLowerCase()]
+  if (note !== undefined) noteOn(note)
 }
 
 function handleKeyUp(e) {
-  const note = KEYBOARD_MAP[e.key.toLowerCase()]
-  if (note !== undefined) {
-    noteOff(note)
-  }
+  const note = KEYBOARD_MAP.value[e.key.toLowerCase()]
+  if (note !== undefined) noteOff(note)
 }
 
 onMounted(() => {
@@ -156,16 +161,14 @@ onUnmounted(() => {
 
 <template>
   <div class="synth-keyboard">
-    <!-- INIT -->
     <button v-if="!ready" class="init-btn" @click="initAudio">
       Init Audio
     </button>
 
-    <!-- KEYS -->
     <div v-else class="keys">
       <button
         v-for="k in KEYS"
-        :key="k.note"
+        :key="k.key"
         class="key"
         :class="{ active: activeNotes.has(k.note) }"
         @mousedown="noteOn(k.note)"
