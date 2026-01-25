@@ -60,6 +60,8 @@ function scheduleStages(param, stages, ctx, velocity = 1, base = 1) {
  * Main composable
  * ========================================================= */
 
+
+
 export function usePatchVoice(patch) {
   const audioCtx = ref(null)
   const voices = new Map()
@@ -83,6 +85,24 @@ export function usePatchVoice(patch) {
     if (!mainNodes) {
       buildMainPatch()
     }
+  }
+
+  function teardownMainPatch() {
+    if (!mainNodes) return
+
+    // stopper toutes les voices
+    stopAll()
+
+    for (const { node } of mainNodes.values()) {
+      try {
+        node.disconnect()
+      } catch (e) {
+        // destination ne supporte pas toujours disconnect()
+      }
+    }
+
+    mainNodes = null
+    mainInputNode = null
   }
 
   /* =========================
@@ -181,6 +201,12 @@ export function usePatchVoice(patch) {
       }
     }
   }
+
+  function rebuildMainPatch() {
+    teardownMainPatch()
+    buildMainPatch()
+  }
+
 
   /* =========================
    * Create ONE voice
@@ -405,6 +431,7 @@ export function usePatchVoice(patch) {
 
   return {
     init,
+    rebuildMainPatch,
     noteOn,
     noteOff,
     stopAll,
