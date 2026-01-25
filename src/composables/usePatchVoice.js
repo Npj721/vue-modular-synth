@@ -64,6 +64,10 @@ export function usePatchVoice(patch) {
   const audioCtx = ref(null)
   const voices = new Map()
 
+  // MAIN PATCH STATE (shared)
+  let mainNodes = null
+  let mainInputNode = null
+
   /* =========================
    * Init
    * ========================= */
@@ -75,10 +79,111 @@ export function usePatchVoice(patch) {
     if (audioCtx.value.state !== "running") {
       await audioCtx.value.resume()
     }
+
+    if (!mainNodes) {
+      buildMainPatch()
+    }
   }
 
   /* =========================
-   * Create one voice
+   * Build MAIN patch (once)
+   * ========================= */
+
+  function buildMainPatch() {
+    const ctx = audioCtx.value
+    const now = ctx.currentTime
+
+    mainNodes = new Map()
+
+    for (const mod of patch.mainPatch.modules) {
+      let node = null
+      let params = {}
+      let bases = {}
+
+      switch (mod.type) {
+
+        case "input": {
+          const g = ctx.createGain()
+          g.gain.setValueAtTime(1, now)
+
+          node = g
+          params = { gain: g.gain }
+          bases = { gain: 1 }
+
+          mainInputNode = g
+          break
+        }
+
+        case "gain": {
+          const g = ctx.createGain()
+          const gain = mod.params.gain ?? 1
+          g.gain.setValueAtTime(gain, now)
+
+          node = g
+          params = { gain: g.gain }
+          bases = { gain }
+          break
+        }
+
+        case "compressor": {
+          const c = ctx.createDynamicsCompressor()
+          const p = mod.params
+
+          c.threshold.setValueAtTime(p.threshold ?? -24, now)
+          c.knee.setValueAtTime(p.knee ?? 30, now)
+          c.ratio.setValueAtTime(p.ratio ?? 12, now)
+          c.attack.setValueAtTime(p.attack ?? 0.003, now)
+          c.release.setValueAtTime(p.release ?? 0.25, now)
+
+          node = c
+          params = {
+            threshold: c.threshold,
+            knee: c.knee,
+            ratio: c.ratio,
+            attack: c.attack,
+            release: c.release,
+          }
+          bases = { ...p }
+          break
+        }
+
+        case "delay": {
+          const d = ctx.createDelay(5)
+          const time = mod.params.delayTime ?? 0.3
+          d.delayTime.setValueAtTime(time, now)
+
+          node = d
+          params = { delayTime: d.delayTime }
+          bases = { delayTime: time }
+          break
+        }
+
+        case "destination":
+          node = ctx.destination
+          break
+      }
+
+      mainNodes.set(mod.id, { node, params, bases })
+    }
+
+    // connections
+    for (const c of patch.mainPatch.connections) {
+      const from = mainNodes.get(c.from.id)
+      const to = mainNodes.get(c.to.id)
+      if (!from || !to) continue
+
+      const [, toPort] = c.to.port.split(":")
+
+      if (toPort === "in") {
+        from.node.connect(to.node)
+      } else if (to.params?.[toPort]) {
+        from.node.connect(to.params[toPort])
+      }
+    }
+  }
+
+  /* =========================
+   * Create ONE voice
    * ========================= */
 
   function createVoice(note, velocity = 1) {
@@ -89,16 +194,14 @@ export function usePatchVoice(patch) {
     const sources = []
     const envelopes = []
 
-    /* ---------- 1️⃣ Create modules ---------- */
+    /* ---------- 1️⃣ Create VOICE modules ---------- */
 
-    for (const mod of patch.modules) {
+    for (const mod of patch.voicePatch.modules) {
       let node = null
       let params = {}
       let bases = {}
 
       switch (mod.type) {
-
-        /* ================= OSCILLATORS ================= */
 
         case "voice":
         case "osc": {
@@ -121,86 +224,36 @@ export function usePatchVoice(patch) {
             frequency: osc.frequency,
             detune: osc.detune,
           }
-          bases = {
-            frequency: freq,
-            detune: detune,
-          }
+          bases = { frequency: freq, detune }
 
           sources.push(osc)
           break
         }
 
-        /* ================= GAIN ================= */
-
         case "gain": {
           const g = ctx.createGain()
           const gain = mod.params.gain ?? 1
-
           g.gain.setValueAtTime(gain, now)
 
           node = g
           params = { gain: g.gain }
           bases = { gain }
-
           break
         }
 
-        /* ================= DELAY ================= */
-
         case "delay": {
-          const d = ctx.createDelay(5.0)
+          const d = ctx.createDelay(5)
           const time = mod.params.delayTime ?? 0.3
-
           d.delayTime.setValueAtTime(time, now)
 
           node = d
           params = { delayTime: d.delayTime }
           bases = { delayTime: time }
-
           break
         }
-
-        /* ================= FILTERS ================= */
-
-        case "filter_lowpass":
-        case "filter_highpass":
-        case "filter_bandpass":
-        case "filter_notch":
-        case "filter_peaking":
-        case "filter_lowshelf":
-        case "filter_highshelf": {
-          const f = ctx.createBiquadFilter()
-
-          f.type = mod.type.replace("filter_", "")
-
-          const freq = mod.params.frequency ?? 1000
-          const Q = mod.params.Q ?? 1
-          const gain = mod.params.gain ?? 0
-
-          f.frequency.setValueAtTime(freq, now)
-          f.Q.setValueAtTime(Q, now)
-          f.gain.setValueAtTime(gain, now)
-
-          node = f
-          params = {
-            frequency: f.frequency,
-            Q: f.Q,
-            gain: f.gain,
-          }
-          bases = {
-            frequency: freq,
-            Q,
-            gain,
-          }
-
-          break
-        }
-
-        /* ================= COMPRESSOR ================= */
 
         case "compressor": {
           const c = ctx.createDynamicsCompressor()
-
           const p = mod.params
 
           c.threshold.setValueAtTime(p.threshold ?? -24, now)
@@ -218,28 +271,12 @@ export function usePatchVoice(patch) {
             release: c.release,
           }
           bases = { ...p }
-
           break
         }
-
-        /* ================= CONVOLVER ================= */
-
-        case "convolver": {
-          const conv = ctx.createConvolver()
-          conv.normalize = mod.params.normalize ?? true
-          conv.buffer = mod.params.buffer ?? null
-
-          node = conv
-          break
-        }
-
-        /* ================= DEST ================= */
 
         case "destination":
-          node = ctx.destination
+          node = mainInputNode
           break
-
-        /* ================= ENVELOPE ================= */
 
         case "envelope":
           envelopes.push(mod)
@@ -251,7 +288,7 @@ export function usePatchVoice(patch) {
 
     /* ---------- 2️⃣ Connections ---------- */
 
-    for (const c of patch.connections) {
+    for (const c of patch.voicePatch.connections) {
       const from = nodes.get(c.from.id)
       const to = nodes.get(c.to.id)
       if (!from || !to) continue
@@ -265,12 +302,12 @@ export function usePatchVoice(patch) {
       }
     }
 
-    /* ---------- 3️⃣ Envelopes (PRESS) ---------- */
+    /* ---------- 3️⃣ Envelopes ---------- */
 
     const activeEnvs = []
 
     for (const env of envelopes) {
-      for (const c of patch.connections) {
+      for (const c of patch.voicePatch.connections) {
         if (c.from.id !== env.id) continue
 
         const target = nodes.get(c.to.id)
@@ -281,7 +318,6 @@ export function usePatchVoice(patch) {
         if (!param) continue
 
         const modulation = env.params.modulation ?? "replace"
-
         const base =
           modulation === "relative"
             ? target.bases?.[paramName] ?? 1
@@ -331,14 +367,8 @@ export function usePatchVoice(patch) {
           if (env.affectsAmplitude) hasAmpEnv = true
         }
 
-        if (hasAmpEnv) {
-          for (const src of sources) {
-            src.stop(now + maxRelease + 0.05)
-          }
-        }else{
-          for (const src of sources) {
-            src.stop(now  + 0.05)
-          }
+        for (const src of sources) {
+          src.stop(now + (hasAmpEnv ? maxRelease + 0.05 : 0.05))
         }
       }
     }

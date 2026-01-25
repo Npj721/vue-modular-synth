@@ -8,11 +8,11 @@
 
 <template>
   <SynthEditor v-model:patch="patch"/>
-  <SynthKeyboard :patch="patch.voicePatch" />
+  <SynthKeyboard :patch="patch.value ? patch.value : patch" />
  <h1>patch</h1>
-    <div>
-        {{ patch }}
-    </div>
+ <div>
+  {{ patch }}
+ </div>
 </template>
 
 <style scoped>
