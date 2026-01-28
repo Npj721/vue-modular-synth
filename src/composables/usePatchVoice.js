@@ -60,53 +60,38 @@ function scheduleStages(param, stages, ctx, velocity = 1, base = 1) {
  * Main composable
  * ========================================================= */
 
-
-
 export function usePatchVoice(patch) {
   const audioCtx = ref(null)
   const voices = new Map()
 
-  // MAIN PATCH STATE (shared)
+  // MAIN PATCH (singleton)
   let mainNodes = null
   let mainInputNode = null
+  let mainSources = []
+  let mainRunning = false
 
   /* =========================
-   * Init
+   * Init (lazy safe)
    * ========================= */
 
-  async function init() {
+  async function ensureContext() {
     if (!audioCtx.value) {
       audioCtx.value = new AudioContext()
     }
     if (audioCtx.value.state !== "running") {
       await audioCtx.value.resume()
     }
+  }
 
+  async function init() {
+    await ensureContext()
     if (!mainNodes) {
       buildMainPatch()
     }
   }
 
-  function teardownMainPatch() {
-    if (!mainNodes) return
-
-    // stopper toutes les voices
-    stopAll()
-
-    for (const { node } of mainNodes.values()) {
-      try {
-        node.disconnect()
-      } catch (e) {
-        // destination ne supporte pas toujours disconnect()
-      }
-    }
-
-    mainNodes = null
-    mainInputNode = null
-  }
-
   /* =========================
-   * Build MAIN patch (once)
+   * MAIN PATCH
    * ========================= */
 
   function buildMainPatch() {
@@ -114,6 +99,7 @@ export function usePatchVoice(patch) {
     const now = ctx.currentTime
 
     mainNodes = new Map()
+    mainSources = []
 
     for (const mod of patch.mainPatch.modules) {
       let node = null
@@ -125,11 +111,9 @@ export function usePatchVoice(patch) {
         case "input": {
           const g = ctx.createGain()
           g.gain.setValueAtTime(1, now)
-
           node = g
           params = { gain: g.gain }
           bases = { gain: 1 }
-
           mainInputNode = g
           break
         }
@@ -138,7 +122,6 @@ export function usePatchVoice(patch) {
           const g = ctx.createGain()
           const gain = mod.params.gain ?? 1
           g.gain.setValueAtTime(gain, now)
-
           node = g
           params = { gain: g.gain }
           bases = { gain }
@@ -148,13 +131,11 @@ export function usePatchVoice(patch) {
         case "compressor": {
           const c = ctx.createDynamicsCompressor()
           const p = mod.params
-
           c.threshold.setValueAtTime(p.threshold ?? -24, now)
           c.knee.setValueAtTime(p.knee ?? 30, now)
           c.ratio.setValueAtTime(p.ratio ?? 12, now)
           c.attack.setValueAtTime(p.attack ?? 0.003, now)
           c.release.setValueAtTime(p.release ?? 0.25, now)
-
           node = c
           params = {
             threshold: c.threshold,
@@ -171,10 +152,25 @@ export function usePatchVoice(patch) {
           const d = ctx.createDelay(5)
           const time = mod.params.delayTime ?? 0.3
           d.delayTime.setValueAtTime(time, now)
-
           node = d
           params = { delayTime: d.delayTime }
           bases = { delayTime: time }
+          break
+        }
+
+        case "osc": {
+          const osc = ctx.createOscillator()
+          osc.type = mod.params.type || "sine"
+          osc.frequency.setValueAtTime(
+            mod.params.frequency ?? 440,
+            now
+          )
+          osc.detune.setValueAtTime(
+            mod.params.detune ?? 0,
+            now
+          )
+          node = osc
+          mainSources.push(osc)
           break
         }
 
@@ -202,14 +198,46 @@ export function usePatchVoice(patch) {
     }
   }
 
+  function startMainPatch() {
+    if (mainRunning) return
+    const now = audioCtx.value.currentTime
+    for (const src of mainSources) {
+      try { src.start(now) } catch {}
+    }
+    mainRunning = true
+  }
+
+  function stopMainPatch() {
+    if (!mainRunning) return
+    const now = audioCtx.value.currentTime
+    for (const src of mainSources) {
+      try { src.stop(now) } catch {}
+    }
+    mainRunning = false
+    mainSources = []
+  }
+
+  function teardownMainPatch() {
+    stopAll()
+    stopMainPatch()
+
+    if (!mainNodes) return
+    for (const { node } of mainNodes.values()) {
+      try { node.disconnect() } catch {}
+    }
+
+    mainNodes = null
+    mainInputNode = null
+  }
+
   function rebuildMainPatch() {
     teardownMainPatch()
     buildMainPatch()
+    startMainPatch()
   }
 
-
   /* =========================
-   * Create ONE voice
+   * VOICES
    * ========================= */
 
   function createVoice(note, velocity = 1) {
@@ -219,8 +247,6 @@ export function usePatchVoice(patch) {
     const nodes = new Map()
     const sources = []
     const envelopes = []
-
-    /* ---------- 1️⃣ Create VOICE modules ---------- */
 
     for (const mod of patch.voicePatch.modules) {
       let node = null
@@ -233,25 +259,20 @@ export function usePatchVoice(patch) {
         case "osc": {
           const osc = ctx.createOscillator()
           osc.type = mod.params.type || "sine"
-
           const freq =
             mod.type === "voice"
               ? noteToFreq(note)
               : mod.params.frequency ?? 440
-
           const detune = mod.params.detune ?? 0
-
           osc.frequency.setValueAtTime(freq, now)
           osc.detune.setValueAtTime(detune, now)
           osc.start()
-
           node = osc
           params = {
             frequency: osc.frequency,
             detune: osc.detune,
           }
           bases = { frequency: freq, detune }
-
           sources.push(osc)
           break
         }
@@ -260,7 +281,6 @@ export function usePatchVoice(patch) {
           const g = ctx.createGain()
           const gain = mod.params.gain ?? 1
           g.gain.setValueAtTime(gain, now)
-
           node = g
           params = { gain: g.gain }
           bases = { gain }
@@ -271,7 +291,6 @@ export function usePatchVoice(patch) {
           const d = ctx.createDelay(5)
           const time = mod.params.delayTime ?? 0.3
           d.delayTime.setValueAtTime(time, now)
-
           node = d
           params = { delayTime: d.delayTime }
           bases = { delayTime: time }
@@ -281,13 +300,11 @@ export function usePatchVoice(patch) {
         case "compressor": {
           const c = ctx.createDynamicsCompressor()
           const p = mod.params
-
           c.threshold.setValueAtTime(p.threshold ?? -24, now)
           c.knee.setValueAtTime(p.knee ?? 30, now)
           c.ratio.setValueAtTime(p.ratio ?? 12, now)
           c.attack.setValueAtTime(p.attack ?? 0.003, now)
           c.release.setValueAtTime(p.release ?? 0.25, now)
-
           node = c
           params = {
             threshold: c.threshold,
@@ -312,15 +329,11 @@ export function usePatchVoice(patch) {
       nodes.set(mod.id, { node, params, bases })
     }
 
-    /* ---------- 2️⃣ Connections ---------- */
-
     for (const c of patch.voicePatch.connections) {
       const from = nodes.get(c.from.id)
       const to = nodes.get(c.to.id)
       if (!from || !to) continue
-
       const [, toPort] = c.to.port.split(":")
-
       if (toPort === "in") {
         from.node.connect(to.node)
       } else if (to.params?.[toPort]) {
@@ -328,17 +341,13 @@ export function usePatchVoice(patch) {
       }
     }
 
-    /* ---------- 3️⃣ Envelopes ---------- */
-
     const activeEnvs = []
 
     for (const env of envelopes) {
       for (const c of patch.voicePatch.connections) {
         if (c.from.id !== env.id) continue
-
         const target = nodes.get(c.to.id)
         if (!target) continue
-
         const [, paramName] = c.to.port.split(":")
         const param = target.params?.[paramName]
         if (!param) continue
@@ -366,8 +375,6 @@ export function usePatchVoice(patch) {
       }
     }
 
-    /* ---------- 4️⃣ Voice API ---------- */
-
     return {
       stop() {
         const now = ctx.currentTime
@@ -376,7 +383,6 @@ export function usePatchVoice(patch) {
 
         for (const env of activeEnvs) {
           env.param.cancelScheduledValues(now)
-
           scheduleStages(
             env.param,
             env.release,
@@ -384,12 +390,10 @@ export function usePatchVoice(patch) {
             1,
             env.base
           )
-
           maxRelease = Math.max(
             maxRelease,
             getEnvelopeDuration(env.release)
           )
-
           if (env.affectsAmplitude) hasAmpEnv = true
         }
 
@@ -404,22 +408,21 @@ export function usePatchVoice(patch) {
    * Public API
    * ========================= */
 
-  function noteOn(note, velocity = 1) {
-    if (!audioCtx.value) return
+  async function noteOn(note, velocity = 1) {
+    await init()
+    startMainPatch()
 
     if (voices.has(note)) {
       voices.get(note).stop()
       voices.delete(note)
     }
 
-    const voice = createVoice(note, velocity)
-    voices.set(note, voice)
+    voices.set(note, createVoice(note, velocity))
   }
 
   function noteOff(note) {
     const voice = voices.get(note)
     if (!voice) return
-
     voice.stop()
     voices.delete(note)
   }
