@@ -357,6 +357,79 @@ export function useModuleCatalog() {
     },
 
     /* =========================
+ * CONSTANT (modulator pur)
+ * ========================= */
+
+    constant: {
+      label: "Constant",
+      color: "#4D96FF",
+      category: "control",
+      singleton: false,
+
+      ports: {
+        inputs: [],
+        outputs: [
+          {
+            id: "offset",
+            label: "Offset",
+            kind: "param",
+            role: "modulator",
+            rate: "a-rate",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        value: {
+          type: "number",
+          min: -1000,
+          max: 1000,
+          step: 0.001,
+          default: 1,
+        },
+
+        modulation: {
+          type: "enum",
+          values: ["replace", "relative"],
+          default: "relative",
+        },
+
+        stages: {
+          type: "envelope",
+          default: {
+            press: [
+              {
+                from: 0,
+                to: 1,
+                duration: 0.05,
+                curve: "linear",
+              },
+            ],
+            release: [
+              {
+                from: "current",
+                to: 0,
+                duration: 0.2,
+                curve: "linear",
+              },
+            ],
+          },
+        },
+
+        loop: {
+          type: "object",
+          default: {
+            enabled: false,
+            start: 0,
+            end: 0,
+          },
+        },
+      },
+    },
+
+
+    /* =========================
      * DESTINATION
      * ========================= */
 

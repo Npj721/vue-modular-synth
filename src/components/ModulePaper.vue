@@ -344,10 +344,10 @@ onMounted(() => {
       if (!srcModule || !tgtModule) return false;
 
       /* =========================
-       * CHAÎNE AUDIO
-       * ========================= */
+      * CHAÎNE AUDIO
+      * ========================= */
 
-      // audio → audio autorisé UNIQUEMENT via Gain
+      // audio → audio autorisé UNIQUEMENT via Gain ou Input
       if (
         sKind === "audio" &&
         tKind === "audio" &&
@@ -382,10 +382,21 @@ onMounted(() => {
       }
 
       /* =========================
-       * MODULATION
-       * ========================= */
+      * MODULATION (RÈGLE GÉNÉRALISÉE)
+      * ========================= */
 
-      // SEUL gain.out peut moduler un param
+      // Toute sortie de type "modulator" peut moduler une entrée "modulatable"
+      if (
+        sRole === "modulator" && // Le rôle de la source est 'modulator'
+        tRole === "modulatable"  // Le rôle de la cible est 'modulatable'
+      ) {
+        return true;
+      }
+
+      // Ancienne règle spécifique au gain (optionnelle, mais redondante maintenant)
+      // On la garde pour la compatibilité, mais elle est couverte par la règle ci-dessus
+      // car le gain.out a le rôle "modulator".
+      /*
       if (
         sRole === "audioOut" &&
         tRole === "modulatable" &&
@@ -393,18 +404,7 @@ onMounted(() => {
       ) {
         return true;
       }
-
-      /* =========================
-       * ENVELOPPE
-       * ========================= */
-
-      if (
-        sRole === "modulator" &&
-        tRole === "modulatable" &&
-        srcModule.type === "envelope"
-      ) {
-        return true;
-      }
+      */
 
       return false;
     },

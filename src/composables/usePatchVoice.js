@@ -1,3 +1,4 @@
+// composables/usePatchVoice.js
 import { ref } from "vue"
 
 /* =========================================================
@@ -174,6 +175,16 @@ export function usePatchVoice(patch) {
           break
         }
 
+        case "constant": {
+          const constantNode = ctx.createConstantSource();
+          const value = mod.params.value !== undefined ? mod.params.value : 1;
+          constantNode.offset.setValueAtTime(value, now);
+          node = constantNode;
+          params = { offset: constantNode.offset };
+          bases = { value };
+          break;
+        }
+
         case "destination":
           node = ctx.destination
           break
@@ -190,7 +201,12 @@ export function usePatchVoice(patch) {
 
       const [, toPort] = c.to.port.split(":")
 
-      if (toPort === "in") {
+      // Gestion spéciale pour les sources 'constant'
+      if (from.params?.offset) {
+        // Connecter l'AudioParam 'offset' à un autre AudioParam
+
+        from.node.connect(to.params[toPort]);
+      } else if (toPort === "in") {
         from.node.connect(to.node)
       } else if (to.params?.[toPort]) {
         from.node.connect(to.params[toPort])
@@ -204,12 +220,24 @@ export function usePatchVoice(patch) {
     for (const src of mainSources) {
       try { src.start(now) } catch {}
     }
+    // Démarrer les ConstantSourceNodes dans le mainPatch
+    for (const { node } of mainNodes.values()) {
+      if (node && typeof node.start === 'function') {
+        try { node.start(now); } catch {}
+      }
+    }
     mainRunning = true
   }
 
   function stopMainPatch() {
     if (!mainRunning) return
     const now = audioCtx.value.currentTime
+    // Arrêter les ConstantSourceNodes dans le mainPatch
+    for (const { node } of mainNodes.values()) {
+      if (node && typeof node.stop === 'function') {
+        try { node.stop(now + 0.001); } catch {}
+      }
+    }
     for (const src of mainSources) {
       try { src.stop(now) } catch {}
     }
@@ -246,7 +274,7 @@ export function usePatchVoice(patch) {
 
     const nodes = new Map()
     const sources = []
-    const envelopes = []
+    const modulators = []
 
     for (const mod of patch.voicePatch.modules) {
       let node = null
@@ -317,12 +345,22 @@ export function usePatchVoice(patch) {
           break
         }
 
+        case "constant": {
+        const constantNode = ctx.createConstantSource();
+        constantNode.offset.setValueAtTime(0, now);
+        node = constantNode;
+        params = { offset: constantNode.offset };
+        bases = { value: mod.params.value ?? 1 };
+        try { node.start(); } catch {}
+        break;
+      }
+
         case "destination":
           node = mainInputNode
           break
 
         case "envelope":
-          envelopes.push(mod)
+          modulators.push(mod)
           continue
       }
 
@@ -332,9 +370,15 @@ export function usePatchVoice(patch) {
     for (const c of patch.voicePatch.connections) {
       const from = nodes.get(c.from.id)
       const to = nodes.get(c.to.id)
+
       if (!from || !to) continue
       const [, toPort] = c.to.port.split(":")
-      if (toPort === "in") {
+      console.log( { from, to, toPort })
+
+      // Gestion spéciale pour les sources 'constant'
+      if (from.params?.offset) {
+        from.node.connect(to.params[toPort]);
+      }else if (toPort === "in") {
         from.node.connect(to.node)
       } else if (to.params?.[toPort]) {
         from.node.connect(to.params[toPort])
@@ -343,37 +387,51 @@ export function usePatchVoice(patch) {
 
     const activeEnvs = []
 
-    for (const env of envelopes) {
-      for (const c of patch.voicePatch.connections) {
-        if (c.from.id !== env.id) continue
-        const target = nodes.get(c.to.id)
-        if (!target) continue
-        const [, paramName] = c.to.port.split(":")
-        const param = target.params?.[paramName]
-        if (!param) continue
+for (const modulator of modulators) {
 
-        const modulation = env.params.modulation ?? "replace"
-        const base =
-          modulation === "relative"
-            ? target.bases?.[paramName] ?? 1
-            : 1
+    // Trouver toutes les connexions sortantes de ce modulateur
+    for (const c of patch.voicePatch.connections) {
+      if (c.from.id !== modulator.id) continue;
 
-        scheduleStages(
-          param,
-          env.params.stages.press,
-          ctx,
-          velocity,
-          base
-        )
+      const target = nodes.get(c.to.id);
+      if (!target) continue;
+      console.log({ target })
+      const [, paramName] = c.to.port.split(":");
+      const param = target.params?.[paramName];
+      if (!param) continue;
 
-        activeEnvs.push({
-          param,
-          base,
-          release: env.params.stages.release,
-          affectsAmplitude: paramName === "gain",
-        })
+      // Déterminer la valeur de base pour le mode 'relative'
+      let baseValue = 1;
+      if (modulator.params.modulation === "relative") {
+        // Pour un 'constant', la base est sa propre valeur 'value'
+        // Pour un 'envelope', la base est la valeur du paramètre cible
+        if (modulator.type === "constant") {
+          baseValue = target.bases?.value ?? 1;
+        } else {
+          baseValue = target.bases?.[paramName] ?? 1;
+        }
       }
+
+      // Programmer la phase 'press' de l'enveloppe/stages
+      scheduleStages(
+        param,
+        modulator.params.stages.press,
+        ctx,
+        velocity,
+        baseValue
+      );
+
+      activeEnvs.push({
+        param,
+        base: baseValue,
+        release: modulator.params.stages.release,
+        affectsAmplitude: paramName === "gain",
+        // On stocke le type pour une éventuelle logique future
+        modulatorType: modulator.type
+      });
     }
+  }
+
 
     return {
       stop() {
@@ -395,6 +453,15 @@ export function usePatchVoice(patch) {
             getEnvelopeDuration(env.release)
           )
           if (env.affectsAmplitude) hasAmpEnv = true
+          console.log({ env })
+        }
+
+        // Arrêter les ConstantSourceNodes de cette voix
+        for (const { node } of nodes.values()) {
+          if (node && typeof node.stop === 'function') {
+            console.log( { node, hasAmpEnv })
+            try { node.stop(now + (hasAmpEnv ? maxRelease + 0.05 : 0.05 )); } catch {}
+          }
         }
 
         for (const src of sources) {
@@ -432,11 +499,40 @@ export function usePatchVoice(patch) {
     voices.clear()
   }
 
+  // --- NOUVELLE FONCTION PUBLIQUE ---
+  // Permet de mettre à jour dynamiquement la valeur d'un module 'constant'
+  function updateConstantValue(patchType, moduleId, newValue) {
+    if (!ready.value) return;
+
+    const isMain = patchType === 'main';
+    const nodesMap = isMain ? mainNodes : Array.from(voices.values()).flatMap(v => Array.from(v.nodes?.entries() || []));
+
+    if (isMain) {
+      const nodeData = mainNodes.get(moduleId);
+      if (nodeData && nodeData.params.offset) {
+        nodeData.params.offset.setValueAtTime(newValue, audioCtx.value.currentTime);
+      }
+    } else {
+      // Pour le voicePatch, on doit itérer sur toutes les voix actives
+      for (const [id, nodeData] of nodesMap) {
+        if (id === moduleId && nodeData.params.offset) {
+          nodeData.params.offset.setValueAtTime(newValue, audioCtx.value.currentTime);
+        }
+      }
+    }
+  }
+
+  // Ajouter un flag ready pour permettre l'utilisation de updateConstantValue
+  const ready = ref(false);
+  // Il faudra le passer à true dans votre composant après l'init, ou exposer `init` différemment.
+
   return {
     init,
     rebuildMainPatch,
     noteOn,
     noteOff,
     stopAll,
+    updateConstantValue, // Exposé pour la modulation dynamique
+    // ready, // Si vous souhaitez l'exposer pour une gestion plus fine
   }
 }
