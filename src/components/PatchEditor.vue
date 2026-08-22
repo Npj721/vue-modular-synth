@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, watch } from "vue";
+import { ref, reactive, watch, onMounted, nextTick, toRaw } from "vue";
 import ModuleToolbar from "./ModuleToolbar.vue";
 import ModulePaper from "./ModulePaper.vue";
 import PatchManager from "./PatchManager.vue";
@@ -19,7 +19,13 @@ const props = defineProps({
   patch: {
     type: Object,
     required: true
-  }
+  },
+  // masquer le patch manager (utilisé par l'éditeur de super-module)
+  showPatchManager: { type: Boolean, default: true },
+  // autoriser les nœuds d'interface Super In / Super Out
+  allowInterfaceModules: { type: Boolean, default: false },
+  // contenu initial à dessiner au montage (édition d'un super-module)
+  initialPatch: { type: Object, default: null },
 })
 const patch = props.patch
 
@@ -139,19 +145,40 @@ watch(
   },
   { deep: true }
 );
+
+/* =========================================================
+ * Contenu initial (ex: édition d'un super-module existant)
+ * ========================================================= */
+onMounted(async () => {
+  const initial = props.initialPatch;
+  if (!initial?.modules?.length) return;
+
+  await nextTick();
+
+  // dessiner sur le paper (émet aussi module-added / connection-added)
+  const clone = JSON.parse(JSON.stringify(toRaw(initial)));
+  paperRef.value?.loadPatch(clone);
+
+  // resynchroniser la source de vérité (remplace les push des events)
+  patch.modules.splice(0, patch.modules.length, ...clone.modules);
+  patch.connections.splice(0, patch.connections.length, ...clone.connections);
+});
 </script>
 
 <template>
   <div class="editor-root">
     <!-- Toolbar -->
     <header class="editor-toolbar">
-      <ModuleToolbar @add-module="handleAddModule" />
+      <ModuleToolbar
+        :exclude-categories="allowInterfaceModules ? [] : ['interface']"
+        @add-module="handleAddModule"
+      />
     </header>
 
     <!-- Main area -->
     <div class="editor-main">
       <!-- Patch manager (left) -->
-      <aside class="editor-patch">
+      <aside v-if="showPatchManager" class="editor-patch">
         <PatchManager
           :paperRef="paperRef"
           :patch="patch"

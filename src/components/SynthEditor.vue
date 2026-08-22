@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, watch } from "vue"
 import PatchEditor from "./PatchEditor.vue";
+import SuperModuleEditor from "./SuperModuleEditor.vue";
 
 const currentPatch = ref("voice")
 
@@ -20,6 +21,10 @@ const toggleVoicePatch = () => {
 
 const toggleMainPatch = () => {
     currentPatch.value = "main"
+}
+
+const toggleSuperModules = () => {
+    currentPatch.value = "super"
 }
 
 const props = defineProps({
@@ -63,9 +68,11 @@ const emit = defineEmits(["update:patch"])
     <div>
         <button :class="currentPatch === 'voice' ? 'button actif' : 'button'" @click="toggleVoicePatch">Voice</button>
         <button :class="currentPatch === 'main' ? 'button actif' : 'button'" class="button" @click="toggleMainPatch">Main</button>
+        <button :class="currentPatch === 'super' ? 'button actif' : 'button'" class="button" @click="toggleSuperModules">Super Modules</button>
     </div>
     <PatchEditor v-model:patch="voicePatch" v-show="currentPatch === 'voice'"></PatchEditor>
     <PatchEditor v-model:patch="mainPatch" v-show="currentPatch === 'main'"></PatchEditor>
+    <SuperModuleEditor v-show="currentPatch === 'super'"></SuperModuleEditor>
 </div>
 </template>
 

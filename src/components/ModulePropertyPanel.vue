@@ -80,6 +80,12 @@ const updateEnveloppe= (key, value) => {
         <option v-for="v in def.values" :key="v" :value="v">{{ v }}</option>
       </select>
 
+      <!-- String text input -->
+      <input v-else-if="def.type === 'string'"
+             type="text"
+             v-model="params[key]"
+             @change="emitChange(key, params[key])" />
+
       <!-- Boolean checkbox -->
       <input v-else-if="def.type === 'boolean'"
              type="checkbox"

@@ -1,5 +1,6 @@
 // composables/usePatchVoice.js
 import { ref } from "vue"
+import { useSuperModules } from "./useSuperModules"
 
 /* =========================================================
  * Utils
@@ -12,6 +13,18 @@ const noteToFreq = (note) =>
 
 function getEnvelopeDuration(stages = []) {
   return stages.reduce((t, s) => t + s.duration, 0)
+}
+
+const safeStart = (node, t) => {
+  try { node.start(t) } catch {}
+}
+
+const safeStop = (node, t) => {
+  try { node.stop(t) } catch {}
+}
+
+const safeDisconnect = (node) => {
+  try { node.disconnect() } catch {}
 }
 
 /* =========================================================
@@ -65,10 +78,12 @@ export function usePatchVoice(patch) {
   const audioCtx = ref(null)
   const voices = new Map()
 
+  const { get: getSuperDef } = useSuperModules()
+
   // MAIN PATCH (singleton)
   let mainNodes = null
   let mainInputNode = null
-  let mainSources = []
+  let mainStarted = [] // nœuds à cycle de vie global (oscs, constants...)
   let mainRunning = false
 
   /* =========================
@@ -91,140 +106,349 @@ export function usePatchVoice(patch) {
     }
   }
 
-  /* =========================
-   * MAIN PATCH
-   * ========================= */
+  /* =========================================================
+   * MOTEUR DE GRAPHE GÉNÉRIQUE
+   *
+   * Utilisé par : le patch principal, les voix, et récursivement
+   * par les super-modules. Retourne une map d'entrées :
+   *   id -> { node, params, bases, modulator?, isInput?,
+   *           inputsByPort?, outputsByPort?, isSuper? }
+   * ========================================================= */
 
-  function buildMainPatch() {
-    const ctx = audioCtx.value
+  function instantiateModule(ctx, mod, o) {
     const now = ctx.currentTime
+    const p = mod.params ?? {}
 
-    mainNodes = new Map()
-    mainSources = []
+    // --- super-module enregistré ? ---
+    const superDef = getSuperDef(mod.type)
+    if (superDef) return instantiateSuper(ctx, superDef, p, o)
 
-    for (const mod of patch.mainPatch.modules) {
-      let node = null
-      let params = {}
-      let bases = {}
+    // --- nœuds d'interface (uniquement à l'intérieur d'un super-module) ---
+    if (mod.type === "super.in" || mod.type === "super.out") {
+      const map = mod.type === "super.in" ? o.boundaryIn : o.boundaryOut
+      if (!map || !map.has(mod.id)) return null
+      return { node: map.get(mod.id), params: {}, bases: {} }
+    }
 
-      switch (mod.type) {
+    switch (mod.type) {
 
-        case "input": {
-          const g = ctx.createGain()
-          g.gain.setValueAtTime(1, now)
-          node = g
-          params = { gain: g.gain }
-          bases = { gain: 1 }
-          mainInputNode = g
-          break
+      case "input": {
+        const g = ctx.createGain()
+        g.gain.setValueAtTime(1, now)
+        return { node: g, params: { gain: g.gain }, bases: { gain: 1 }, isInput: true }
+      }
+
+      case "voice":
+      case "osc": {
+        const osc = ctx.createOscillator()
+        osc.type = p.type || "sine"
+        const freq =
+          mod.type === "voice"
+            ? (o.note !== undefined ? noteToFreq(o.note) : p.frequency ?? 440)
+            : p.frequency ?? 440
+        const detune = p.detune ?? 0
+        osc.frequency.setValueAtTime(freq, now)
+        osc.detune.setValueAtTime(detune, now)
+        if (!o.deferStart) safeStart(osc, now)
+        o.started.push(osc)
+        return {
+          node: osc,
+          params: { frequency: osc.frequency, detune: osc.detune },
+          bases: { frequency: freq, detune },
         }
+      }
 
-        case "gain": {
-          const g = ctx.createGain()
-          const gain = mod.params.gain ?? 1
-          g.gain.setValueAtTime(gain, now)
-          node = g
-          params = { gain: g.gain }
-          bases = { gain }
-          break
-        }
+      case "gain": {
+        const g = ctx.createGain()
+        const gain = p.gain ?? 1
+        g.gain.setValueAtTime(gain, now)
+        return { node: g, params: { gain: g.gain }, bases: { gain } }
+      }
 
-        case "compressor": {
-          const c = ctx.createDynamicsCompressor()
-          const p = mod.params
-          c.threshold.setValueAtTime(p.threshold ?? -24, now)
-          c.knee.setValueAtTime(p.knee ?? 30, now)
-          c.ratio.setValueAtTime(p.ratio ?? 12, now)
-          c.attack.setValueAtTime(p.attack ?? 0.003, now)
-          c.release.setValueAtTime(p.release ?? 0.25, now)
-          node = c
-          params = {
+      case "delay": {
+        const d = ctx.createDelay(5)
+        const time = p.delayTime ?? 0.3
+        d.delayTime.setValueAtTime(time, now)
+        return { node: d, params: { delayTime: d.delayTime }, bases: { delayTime: time } }
+      }
+
+      case "compressor": {
+        const c = ctx.createDynamicsCompressor()
+        c.threshold.setValueAtTime(p.threshold ?? -24, now)
+        c.knee.setValueAtTime(p.knee ?? 30, now)
+        c.ratio.setValueAtTime(p.ratio ?? 12, now)
+        c.attack.setValueAtTime(p.attack ?? 0.003, now)
+        c.release.setValueAtTime(p.release ?? 0.25, now)
+        return {
+          node: c,
+          params: {
             threshold: c.threshold,
             knee: c.knee,
             ratio: c.ratio,
             attack: c.attack,
             release: c.release,
-          }
-          bases = { ...p }
-          break
+          },
+          bases: { ...p },
         }
-
-        case "delay": {
-          const d = ctx.createDelay(5)
-          const time = mod.params.delayTime ?? 0.3
-          d.delayTime.setValueAtTime(time, now)
-          node = d
-          params = { delayTime: d.delayTime }
-          bases = { delayTime: time }
-          break
-        }
-
-        case "osc": {
-          const osc = ctx.createOscillator()
-          osc.type = mod.params.type || "sine"
-          osc.frequency.setValueAtTime(
-            mod.params.frequency ?? 440,
-            now
-          )
-          osc.detune.setValueAtTime(
-            mod.params.detune ?? 0,
-            now
-          )
-          node = osc
-          mainSources.push(osc)
-          break
-        }
-
-        case "constant": {
-          const constantNode = ctx.createConstantSource();
-          const value = mod.params.value !== undefined ? mod.params.value : 1;
-          constantNode.offset.setValueAtTime(value, now);
-          node = constantNode;
-          params = { offset: constantNode.offset };
-          bases = { value };
-          break;
-        }
-
-        case "destination":
-          node = ctx.destination
-          break
       }
 
-      mainNodes.set(mod.id, { node, params, bases })
+      /* Filtres biquad (filter_lowpass, filter_highpass, ...) */
+      case "filter_lowpass":
+      case "filter_highpass":
+      case "filter_bandpass":
+      case "filter_notch":
+      case "filter_peaking":
+      case "filter_lowshelf":
+      case "filter_highshelf": {
+        const f = ctx.createBiquadFilter()
+        f.type = mod.type.replace("filter_", "")
+        const freq = p.frequency ?? 1000
+        const q = p.Q ?? 1
+        f.frequency.setValueAtTime(freq, now)
+        f.Q.setValueAtTime(q, now)
+        const params = { frequency: f.frequency, Q: f.Q }
+        const bases = { frequency: freq, Q: q }
+        if (p.gain !== undefined) {
+          f.gain.setValueAtTime(p.gain, now)
+          params.gain = f.gain
+          bases.gain = p.gain
+        }
+        return { node: f, params, bases }
+      }
+
+      case "constant": {
+        const constantNode = ctx.createConstantSource()
+        const value = p.value ?? 1
+        constantNode.offset.setValueAtTime(value, now)
+        if (!o.deferStart) safeStart(constantNode, now)
+        o.started.push(constantNode)
+        return {
+          node: constantNode,
+          params: { offset: constantNode.offset },
+          bases: { value },
+        }
+      }
+
+      case "destination": {
+        if (!o.destinationNode) return null
+        return { node: o.destinationNode, params: {}, bases: {} }
+      }
+
+      case "envelope":
+        return {
+          modulator: true,
+          modType: "envelope",
+          modParams: p,
+          node: null,
+          params: {},
+          bases: {},
+        }
     }
 
-    // connections
-    for (const c of patch.mainPatch.connections) {
-      const from = mainNodes.get(c.from.id)
-      const to = mainNodes.get(c.to.id)
-      if (!from || !to) continue
+    // type inconnu (ex: définition supprimée) -> ignoré silencieusement
+    return null
+  }
 
-      const [, toPort] = c.to.port.split(":")
+  /* =========================================================
+   * INSTANCIATION D'UN SUPER-MODULE
+   * ========================================================= */
 
-      // Gestion spéciale pour les sources 'constant'
-      if (from.params?.offset) {
-        // Connecter l'AudioParam 'offset' à un autre AudioParam
+  function instantiateSuper(ctx, def, instanceParams, o) {
+    // 1. cloner le graphe interne et router les paramètres de l'instance
+    //    (paramMap: clé aplatie -> { moduleId, key } interne)
+    const modules = (def.graph.modules ?? []).map((m) =>
+      JSON.parse(JSON.stringify(m))
+    )
 
-        from.node.connect(to.params[toPort]);
-      } else if (toPort === "in") {
-        from.node.connect(to.node)
-      } else if (to.params?.[toPort]) {
-        from.node.connect(to.params[toPort])
+    for (const [flat, route] of Object.entries(def.paramMap ?? {})) {
+      if (!(flat in instanceParams)) continue
+      const target = modules.find((m) => m.id === route.moduleId)
+      if (!target) continue
+      target.params[route.key] = JSON.parse(
+        JSON.stringify(instanceParams[flat])
+      )
+    }
+
+    // 2. gains de bordure : un par port d'interface exposé
+    const inputsByPort = new Map()
+    const outputsByPort = new Map()
+
+    for (const port of def.inputs) {
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(1, ctx.currentTime)
+      inputsByPort.set(port.portId, g)
+    }
+    for (const port of def.outputs) {
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(1, ctx.currentTime)
+      outputsByPort.set(port.portId, g)
+    }
+
+    // correspondance moduleId interne -> gain de bordure
+    const boundaryIn = new Map(
+      def.inputs.map((port) => [port.moduleId, inputsByPort.get(port.portId)])
+    )
+    const boundaryOut = new Map(
+      def.outputs.map((port) => [port.moduleId, outputsByPort.get(port.portId)])
+    )
+
+    // 3. construire le graphe interne (récursion possible : super dans super)
+    const inner = buildGraph(ctx, { modules, connections: def.graph.connections }, {
+      note: o.note,
+      velocity: o.velocity,
+      destinationNode: o.destinationNode,
+      deferStart: o.deferStart,
+      started: o.started,
+      activeEnvs: o.activeEnvs,
+      boundaryIn,
+      boundaryOut,
+    })
+
+    // 4. exposer les AudioParams internes modulables depuis l'extérieur
+    //    (ex: supervoice.gain est directement le GainNode interne)
+    const params = {}
+    const bases = {}
+    for (const [flat, route] of Object.entries(def.paramMap ?? {})) {
+      const target = inner.nodes.get(route.moduleId)
+      const param = target?.params?.[route.key]
+      if (param && typeof param.setValueAtTime === "function") {
+        params[flat] = param
+        bases[flat] = target.bases?.[route.key] ?? 1
       }
+    }
+
+    // sortie "par défaut" si un seul port de sortie (compat ancien câblage)
+    const firstOutput = outputsByPort.values().next().value ?? null
+
+    return {
+      node: firstOutput,
+      params,
+      bases,
+      inputsByPort,
+      outputsByPort,
+      isSuper: true,
+    }
+  }
+
+  /* =========================================================
+   * CONNEXIONS
+   * ========================================================= */
+
+  function wireConnection(ctx, c, nodes, o) {
+    const from = nodes.get(c.from?.id)
+    const to = nodes.get(c.to?.id)
+    if (!from || !to) return
+
+    const [, fromPort = "out"] = (c.from.port ?? "out:out").split(":")
+    const [, toPort = "in"] = (c.to.port ?? "in:in").split(":")
+
+    // --- source ---
+    let src = from.node
+    if (from.isSuper) {
+      src = from.outputsByPort.get(fromPort) ?? from.node
+    }
+    if (!src) return
+
+    // --- cible : AudioNode ou AudioParam ---
+    let target = null
+    if (to.isSuper) {
+      target = to.inputsByPort.get(toPort) ?? to.params?.[toPort] ?? null
+    } else if (toPort === "in") {
+      target = to.node
+    } else {
+      target = to.params?.[toPort] ?? null
+    }
+    if (!target) return
+
+    try { src.connect(target) } catch { return }
+
+    // --- enveloppe branchée sur ce paramètre ? ---
+    // (la cible doit être un AudioParam)
+    if (from.modulator && typeof target.setValueAtTime === "function") {
+      const paramName = toPort
+      let baseValue = 1
+      if (from.modParams.modulation === "relative") {
+        baseValue = to.bases?.[paramName] ?? 1
+      }
+
+      const stages = from.modParams.stages
+      if (!stages?.press?.length) return
+
+      scheduleStages(target, stages.press, ctx, o.velocity, baseValue)
+
+      o.activeEnvs.push({
+        param: target,
+        base: baseValue,
+        release: stages.release,
+        affectsAmplitude: paramName === "gain",
+        modulatorType: from.modType,
+      })
+    }
+  }
+
+  /**
+   * Construit un graphe complet (modules + connexions).
+   * @returns {{ nodes: Map, }}
+   */
+  function buildGraph(ctx, graph, opts) {
+    const o = {
+      note: opts.note,
+      velocity: opts.velocity ?? 1,
+      destinationNode: opts.destinationNode ?? null,
+      deferStart: opts.deferStart ?? false,
+      started: opts.started ?? [],
+      activeEnvs: opts.activeEnvs ?? [],
+      boundaryIn: opts.boundaryIn ?? null,
+      boundaryOut: opts.boundaryOut ?? null,
+    }
+
+    const nodes = new Map()
+
+    // passe 1 : instanciation
+    for (const mod of graph.modules ?? []) {
+      const entry = instantiateModule(ctx, mod, o)
+      if (entry) nodes.set(mod.id, entry)
+    }
+
+    // passe 2 : câblage (+ déclenchement des enveloppes)
+    for (const c of graph.connections ?? []) {
+      wireConnection(ctx, c, nodes, o)
+    }
+
+    return { nodes }
+  }
+
+  /* =========================================================
+   * MAIN PATCH
+   * ========================================================= */
+
+  function buildMainPatch() {
+    const ctx = audioCtx.value
+
+    const started = []
+
+    const { nodes } = buildGraph(ctx, patch.mainPatch, {
+      destinationNode: ctx.destination,
+      deferStart: true, // démarrés explicitement dans startMainPatch
+      started,
+    })
+
+    mainNodes = nodes
+    mainStarted = started
+
+    // le module "input" devient le point d'entrée global des voix
+    mainInputNode = null
+    for (const entry of nodes.values()) {
+      if (entry.isInput) mainInputNode = entry.node
     }
   }
 
   function startMainPatch() {
     if (mainRunning) return
+    if (!audioCtx.value) return
     const now = audioCtx.value.currentTime
-    for (const src of mainSources) {
-      try { src.start(now) } catch {}
-    }
-    // Démarrer les ConstantSourceNodes dans le mainPatch
-    for (const { node } of mainNodes.values()) {
-      if (node && typeof node.start === 'function') {
-        try { node.start(now); } catch {}
-      }
+    for (const node of mainStarted) {
+      safeStart(node, now)
     }
     mainRunning = true
   }
@@ -232,17 +456,18 @@ export function usePatchVoice(patch) {
   function stopMainPatch() {
     if (!mainRunning) return
     const now = audioCtx.value.currentTime
-    // Arrêter les ConstantSourceNodes dans le mainPatch
-    for (const { node } of mainNodes.values()) {
-      if (node && typeof node.stop === 'function') {
-        try { node.stop(now + 0.001); } catch {}
-      }
-    }
-    for (const src of mainSources) {
-      try { src.stop(now) } catch {}
+    for (const node of mainStarted) {
+      safeStop(node, now + 0.001)
     }
     mainRunning = false
-    mainSources = []
+    mainStarted = []
+  }
+
+  function disconnectEntry(entry) {
+    if (!entry) return
+    safeDisconnect(entry.node)
+    entry.inputsByPort?.forEach((g) => safeDisconnect(g))
+    entry.outputsByPort?.forEach((g) => safeDisconnect(g))
   }
 
   function teardownMainPatch() {
@@ -250,8 +475,8 @@ export function usePatchVoice(patch) {
     stopMainPatch()
 
     if (!mainNodes) return
-    for (const { node } of mainNodes.values()) {
-      try { node.disconnect() } catch {}
+    for (const entry of mainNodes.values()) {
+      disconnectEntry(entry)
     }
 
     mainNodes = null
@@ -264,176 +489,27 @@ export function usePatchVoice(patch) {
     startMainPatch()
   }
 
-  /* =========================
+  /* =========================================================
    * VOICES
-   * ========================= */
+   * ========================================================= */
 
   function createVoice(note, velocity = 1) {
     const ctx = audioCtx.value
-    const now = ctx.currentTime
 
-    const nodes = new Map()
-    const sources = []
-    const modulators = []
-
-    for (const mod of patch.voicePatch.modules) {
-      let node = null
-      let params = {}
-      let bases = {}
-
-      switch (mod.type) {
-
-        case "voice":
-        case "osc": {
-          const osc = ctx.createOscillator()
-          osc.type = mod.params.type || "sine"
-          const freq =
-            mod.type === "voice"
-              ? noteToFreq(note)
-              : mod.params.frequency ?? 440
-          const detune = mod.params.detune ?? 0
-          osc.frequency.setValueAtTime(freq, now)
-          osc.detune.setValueAtTime(detune, now)
-          osc.start()
-          node = osc
-          params = {
-            frequency: osc.frequency,
-            detune: osc.detune,
-          }
-          bases = { frequency: freq, detune }
-          sources.push(osc)
-          break
-        }
-
-        case "gain": {
-          const g = ctx.createGain()
-          const gain = mod.params.gain ?? 1
-          g.gain.setValueAtTime(gain, now)
-          node = g
-          params = { gain: g.gain }
-          bases = { gain }
-          break
-        }
-
-        case "delay": {
-          const d = ctx.createDelay(5)
-          const time = mod.params.delayTime ?? 0.3
-          d.delayTime.setValueAtTime(time, now)
-          node = d
-          params = { delayTime: d.delayTime }
-          bases = { delayTime: time }
-          break
-        }
-
-        case "compressor": {
-          const c = ctx.createDynamicsCompressor()
-          const p = mod.params
-          c.threshold.setValueAtTime(p.threshold ?? -24, now)
-          c.knee.setValueAtTime(p.knee ?? 30, now)
-          c.ratio.setValueAtTime(p.ratio ?? 12, now)
-          c.attack.setValueAtTime(p.attack ?? 0.003, now)
-          c.release.setValueAtTime(p.release ?? 0.25, now)
-          node = c
-          params = {
-            threshold: c.threshold,
-            knee: c.knee,
-            ratio: c.ratio,
-            attack: c.attack,
-            release: c.release,
-          }
-          bases = { ...p }
-          break
-        }
-
-        case "constant": {
-        const constantNode = ctx.createConstantSource();
-        constantNode.offset.setValueAtTime(0, now);
-        node = constantNode;
-        params = { offset: constantNode.offset };
-        bases = { value: mod.params.value ?? 1 };
-        try { node.start(); } catch {}
-        break;
-      }
-
-        case "destination":
-          node = mainInputNode
-          break
-
-        case "envelope":
-          modulators.push(mod)
-          continue
-      }
-
-      nodes.set(mod.id, { node, params, bases })
-    }
-
-    for (const c of patch.voicePatch.connections) {
-      const from = nodes.get(c.from.id)
-      const to = nodes.get(c.to.id)
-
-      if (!from || !to) continue
-      const [, toPort] = c.to.port.split(":")
-      console.log( { from, to, toPort })
-
-      // Gestion spéciale pour les sources 'constant'
-      if (from.params?.offset) {
-        from.node.connect(to.params[toPort]);
-      }else if (toPort === "in") {
-        from.node.connect(to.node)
-      } else if (to.params?.[toPort]) {
-        from.node.connect(to.params[toPort])
-      }
-    }
-
+    const started = []
     const activeEnvs = []
 
-for (const modulator of modulators) {
-
-    // Trouver toutes les connexions sortantes de ce modulateur
-    for (const c of patch.voicePatch.connections) {
-      if (c.from.id !== modulator.id) continue;
-
-      const target = nodes.get(c.to.id);
-      if (!target) continue;
-      console.log({ target })
-      const [, paramName] = c.to.port.split(":");
-      const param = target.params?.[paramName];
-      if (!param) continue;
-
-      // Déterminer la valeur de base pour le mode 'relative'
-      let baseValue = 1;
-      if (modulator.params.modulation === "relative") {
-        // Pour un 'constant', la base est sa propre valeur 'value'
-        // Pour un 'envelope', la base est la valeur du paramètre cible
-        if (modulator.type === "constant") {
-          baseValue = target.bases?.value ?? 1;
-        } else {
-          baseValue = target.bases?.[paramName] ?? 1;
-        }
-      }
-
-      // Programmer la phase 'press' de l'enveloppe/stages
-      scheduleStages(
-        param,
-        modulator.params.stages.press,
-        ctx,
-        velocity,
-        baseValue
-      );
-
-      activeEnvs.push({
-        param,
-        base: baseValue,
-        release: modulator.params.stages.release,
-        affectsAmplitude: paramName === "gain",
-        // On stocke le type pour une éventuelle logique future
-        modulatorType: modulator.type
-      });
-    }
-  }
-
+    const { nodes } = buildGraph(ctx, patch.voicePatch, {
+      note,
+      velocity,
+      destinationNode: mainInputNode,
+      started,
+      activeEnvs,
+    })
 
     return {
+      nodes,
+
       stop() {
         const now = ctx.currentTime
         let maxRelease = 0
@@ -441,39 +517,23 @@ for (const modulator of modulators) {
 
         for (const env of activeEnvs) {
           env.param.cancelScheduledValues(now)
-          scheduleStages(
-            env.param,
-            env.release,
-            ctx,
-            1,
-            env.base
-          )
-          maxRelease = Math.max(
-            maxRelease,
-            getEnvelopeDuration(env.release)
-          )
+          scheduleStages(env.param, env.release, ctx, 1, env.base)
+          maxRelease = Math.max(maxRelease, getEnvelopeDuration(env.release))
           if (env.affectsAmplitude) hasAmpEnv = true
-          console.log({ env })
         }
 
-        // Arrêter les ConstantSourceNodes de cette voix
-        for (const { node } of nodes.values()) {
-          if (node && typeof node.stop === 'function') {
-            console.log( { node, hasAmpEnv })
-            try { node.stop(now + (hasAmpEnv ? maxRelease + 0.05 : 0.05 )); } catch {}
-          }
-        }
+        const tail = hasAmpEnv ? maxRelease + 0.05 : 0.05
 
-        for (const src of sources) {
-          src.stop(now + (hasAmpEnv ? maxRelease + 0.05 : 0.05))
+        for (const node of started) {
+          safeStop(node, now + tail)
         }
-      }
+      },
     }
   }
 
-  /* =========================
+  /* =========================================================
    * Public API
-   * ========================= */
+   * ========================================================= */
 
   async function noteOn(note, velocity = 1) {
     await init()
@@ -499,32 +559,27 @@ for (const modulator of modulators) {
     voices.clear()
   }
 
-  // --- NOUVELLE FONCTION PUBLIQUE ---
-  // Permet de mettre à jour dynamiquement la valeur d'un module 'constant'
+  /**
+   * Met à jour dynamiquement la valeur d'un module 'constant'
+   * du patch principal ou des voix actives.
+   */
   function updateConstantValue(patchType, moduleId, newValue) {
-    if (!ready.value) return;
+    if (!audioCtx.value) return
 
-    const isMain = patchType === 'main';
-    const nodesMap = isMain ? mainNodes : Array.from(voices.values()).flatMap(v => Array.from(v.nodes?.entries() || []));
-
-    if (isMain) {
-      const nodeData = mainNodes.get(moduleId);
-      if (nodeData && nodeData.params.offset) {
-        nodeData.params.offset.setValueAtTime(newValue, audioCtx.value.currentTime);
-      }
-    } else {
-      // Pour le voicePatch, on doit itérer sur toutes les voix actives
-      for (const [id, nodeData] of nodesMap) {
-        if (id === moduleId && nodeData.params.offset) {
-          nodeData.params.offset.setValueAtTime(newValue, audioCtx.value.currentTime);
-        }
+    const now = audioCtx.value.currentTime
+    const apply = (nodesMap) => {
+      const entry = nodesMap?.get(moduleId)
+      if (entry?.params?.offset) {
+        entry.params.offset.setValueAtTime(newValue, now)
       }
     }
-  }
 
-  // Ajouter un flag ready pour permettre l'utilisation de updateConstantValue
-  const ready = ref(false);
-  // Il faudra le passer à true dans votre composant après l'init, ou exposer `init` différemment.
+    if (patchType === "main") {
+      apply(mainNodes)
+    } else {
+      for (const voice of voices.values()) apply(voice.nodes)
+    }
+  }
 
   return {
     init,
@@ -532,7 +587,6 @@ for (const modulator of modulators) {
     noteOn,
     noteOff,
     stopAll,
-    updateConstantValue, // Exposé pour la modulation dynamique
-    // ready, // Si vous souhaitez l'exposer pour une gestion plus fine
+    updateConstantValue,
   }
 }

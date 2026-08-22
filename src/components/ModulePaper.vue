@@ -337,53 +337,18 @@ onMounted(() => {
 
       if (!sKind || !tKind || !sRole || !tRole) return false;
 
-      // récupérer les modules
-      const srcModule = modulesById.get(srcView.model.id);
-      const tgtModule = modulesById.get(tgtView.model.id);
-
-      if (!srcModule || !tgtModule) return false;
-
       /* =========================
-      * CHAÎNE AUDIO
-      * ========================= */
-
-      // audio → audio autorisé UNIQUEMENT via Gain ou Input
-      if (
-        sKind === "audio" &&
-        tKind === "audio" &&
-        sRole === "audioOut" &&
-        tRole === "audioIn"
-      ) {
-        if (srcModule.type === "gain" || srcModule.type === "input") {
-          return true;
-        }
-
-        // Si c'est une source, elle peut aller vers un gain
-        if (
-          [
-            "osc",
-            "voice",
-            "delay",
-            "filter_lowpass",
-            "filter_highpass",
-            "filter_bandpass",
-            "filter_notch",
-            "filter_peaking",
-            "filter_lowshelf",
-            "filter_highshelf",
-            "compressor",
-            "convolver",
-          ].includes(srcModule.type) &&
-          tgtModule.type === "gain"
-        )
-          return true;
-
-        return false;
+       * CHAÎNE AUDIO (générique)
+       * Toute sortie audioOut peut alimenter toute entrée audioIn.
+       * (valable aussi pour les super-modules)
+       * ========================= */
+      if (sKind === "audio" && tKind === "audio") {
+        return sRole === "audioOut" && tRole === "audioIn";
       }
 
       /* =========================
-      * MODULATION (RÈGLE GÉNÉRALISÉE)
-      * ========================= */
+       * MODULATION (RÈGLE GÉNÉRALISÉE)
+       * ========================= */
 
       // Toute sortie de type "modulator" peut moduler une entrée "modulatable"
       if (
@@ -392,19 +357,6 @@ onMounted(() => {
       ) {
         return true;
       }
-
-      // Ancienne règle spécifique au gain (optionnelle, mais redondante maintenant)
-      // On la garde pour la compatibilité, mais elle est couverte par la règle ci-dessus
-      // car le gain.out a le rôle "modulator".
-      /*
-      if (
-        sRole === "audioOut" &&
-        tRole === "modulatable" &&
-        srcModule.type === "gain"
-      ) {
-        return true;
-      }
-      */
 
       return false;
     },

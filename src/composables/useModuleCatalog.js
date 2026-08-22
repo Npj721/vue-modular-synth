@@ -1,8 +1,13 @@
 // composables/useModuleCatalog.js
 import { reactive, readonly } from "vue";
 
-export function useModuleCatalog() {
-  const catalog = reactive({
+/* =========================================================
+ * CATALOG (singleton au niveau module)
+ * Nécessaire pour que l'enregistrement dynamique des
+ * super-modules soit visible dans tous les composants.
+ * ========================================================= */
+
+const catalog = reactive({
     /* =========================
      * SOURCES
      * ========================= */
@@ -430,6 +435,62 @@ export function useModuleCatalog() {
 
 
     /* =========================
+     * SUPER MODULES (interfaces)
+     * Placés à l'intérieur d'un super-module :
+     *  - super.in  = point d'entrée exposé sur le module externe
+     *  - super.out = point de sortie exposé sur le module externe
+     * Le paramètre "name" devient l'id du port externe.
+     * ========================= */
+
+    "super.in": {
+      label: "Super In",
+      color: "#1ABC9C",
+      category: "interface",
+      singleton: false,
+
+      ports: {
+        inputs: [],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        name: { type: "string", default: "in" },
+      },
+    },
+
+    "super.out": {
+      label: "Super Out",
+      color: "#E74C3C",
+      category: "interface",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "audioIn",
+            multiple: true,
+          },
+        ],
+        outputs: [],
+      },
+
+      params: {
+        name: { type: "string", default: "out" },
+      },
+    },
+
+    /* =========================
      * DESTINATION
      * ========================= */
 
@@ -481,6 +542,7 @@ export function useModuleCatalog() {
 
   /* =========================
    * HELPERS
+   * (hoistées : utilisables dans l'init du catalogue)
    * ========================= */
 
   function num(min, max, step, def) {
@@ -545,9 +607,25 @@ export function useModuleCatalog() {
   const getModuleByType = (type) => catalog[type];
   const getModuleTypes = () => Object.keys(catalog);
 
+  /**
+   * Enregistre dynamiquement un type de module
+   * (utilisé par les super-modules).
+   */
+  const registerModuleType = (type, def) => {
+    if (!type || !def) return;
+    catalog[type] = { ...def };
+  };
+
+  const unregisterModuleType = (type) => {
+    delete catalog[type];
+  };
+
+export function useModuleCatalog() {
   return {
     getCatalog,
     getModuleByType,
     getModuleTypes,
+    registerModuleType,
+    unregisterModuleType,
   };
 }
