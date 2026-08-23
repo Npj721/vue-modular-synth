@@ -167,7 +167,8 @@ function deleteDef(def) {
   border: 1px solid #ddd;
   border-radius: 4px;
   overflow: hidden;
-  height: max(560px, calc(100vh - 230px));
+  /* même gabarit que les éditeurs Voice / Main (PatchEditor = 100vh) */
+  height: 100vh;
 }
 
 /* =========================
@@ -306,11 +307,18 @@ function deleteDef(def) {
   display: flex;
 }
 
-/* le PatchEditor imbriqué remplit la cellule */
+/* le PatchEditor imbriqué remplit la cellule (sous la barre d'action) */
 .super-canvas :deep(.editor-root) {
   flex: 1;
-  height: auto;
+  height: 100%;
   min-width: 0;
+}
+
+/* colonne centrale : paper extensible + panel de propriétés en dessous */
+.super-canvas :deep(.editor-center) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .super-canvas :deep(.editor-main) {

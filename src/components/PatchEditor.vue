@@ -178,7 +178,7 @@ onMounted(async () => {
     </header>
 
     <!-- Main area -->
-    <div class="editor-main">
+    <div class="editor-main" :class="{ 'no-manager': !showPatchManager }">
       <!-- Patch manager (left) -->
       <aside v-if="showPatchManager" class="editor-patch">
         <PatchManager
@@ -250,6 +250,12 @@ onMounted(async () => {
       1fr /* paper */
       auto; /* properties */
     overflow: hidden;
+  }
+
+  /* sans patch manager, le canvas prend toute la largeur
+     (sinon il tombe dans la colonne "auto" et rétrécit) */
+  .editor-main.no-manager {
+    grid-template-columns: 1fr auto;
   }
 
   /* =========================
