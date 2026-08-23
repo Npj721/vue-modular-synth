@@ -359,6 +359,8 @@ saveFromGraph({
       connections: [
         { from: { id: "gm", port: "out:out" }, to: { id: "o1", port: "in:detune" } },
         { from: { id: "gm", port: "out:out" }, to: { id: "v1", port: "in:frequency" } },
+        // gain utilisé comme sortie audio classique
+        { from: { id: "gm", port: "out:out" }, to: { id: "vd", port: "in:in" } },
         { from: { id: "v1", port: "out:out" }, to: { id: "vd", port: "in:in" } },
       ],
     },
@@ -399,6 +401,12 @@ saveFromGraph({
     !!voiceNode &&
       !!mainInputGain &&
       voiceNode.connections.includes(mainInputGain)
+  );
+
+  // gain.out reste utilisable comme sortie audio (gain -> destination.in)
+  check(
+    "gain.out -> destination (audio chain)",
+    !!gainMod && !!mainInputGain && gainMod.connections.includes(mainInputGain)
   );
 }
 

@@ -377,11 +377,16 @@ onMounted(() => {
 
       /* =========================
        * CHAÎNE AUDIO (générique)
-       * Toute sortie audioOut peut alimenter toute entrée audioIn.
-       * (valable aussi pour les super-modules)
+       *
+       * Toute entrée audioIn accepte les sources de type audio,
+       * quel que soit leur rôle : "audioOut" (voice, filtre...)
+       * ou "modulator" (gain.out sert aussi de sortie audio).
        * ========================= */
       if (sKind === "audio" && tKind === "audio") {
-        return sRole === "audioOut" && tRole === "audioIn";
+        return (
+          tRole === "audioIn" &&
+          (sRole === "audioOut" || sRole === "modulator")
+        );
       }
 
       /* =========================
