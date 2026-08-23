@@ -152,6 +152,7 @@ function deleteDef(def) {
           v-model:patch="draft"
           :show-patch-manager="false"
           :allow-interface-modules="true"
+          :paper-fill-height="true"
           :initial-patch="initialPatch"
         />
       </section>
@@ -166,6 +167,7 @@ function deleteDef(def) {
   border: 1px solid #ddd;
   border-radius: 4px;
   overflow: hidden;
+  height: max(560px, calc(100vh - 230px));
 }
 
 /* =========================
@@ -217,8 +219,10 @@ function deleteDef(def) {
  * MAIN
  * ========================= */
 .super-main {
+  flex: 1;
   display: grid;
   grid-template-columns: 220px 1fr;
+  min-height: 0; /* permet au canvas de remplir sans déborder */
   overflow: hidden;
 }
 
@@ -229,6 +233,8 @@ function deleteDef(def) {
   border-right: 1px solid #ddd;
   background: #fafafa;
   padding: 10px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .super-list h3 {
@@ -296,5 +302,18 @@ function deleteDef(def) {
  * ========================= */
 .super-canvas {
   min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* le PatchEditor imbriqué remplit la cellule */
+.super-canvas :deep(.editor-root) {
+  flex: 1;
+  height: auto;
+  min-width: 0;
+}
+
+.super-canvas :deep(.editor-main) {
+  min-height: 0;
 }
 </style>

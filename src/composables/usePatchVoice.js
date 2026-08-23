@@ -28,6 +28,21 @@ const safeDisconnect = (node) => {
 }
 
 /* =========================================================
+ * Normalisation des graphes
+ * (le patch peut être vide/incomplet au démarrage)
+ * ========================================================= */
+
+const emptyGraph = () => ({ modules: [], connections: [] })
+
+function normalizeGraph(graph) {
+  if (!graph) return emptyGraph()
+  return {
+    modules: graph.modules ?? [],
+    connections: graph.connections ?? [],
+  }
+}
+
+/* =========================================================
  * Envelope scheduler
  * ========================================================= */
 
@@ -342,13 +357,6 @@ export function usePatchVoice(patch) {
     const [, fromPort = "out"] = (c.from.port ?? "out:out").split(":")
     const [, toPort = "in"] = (c.to.port ?? "in:in").split(":")
 
-    // --- source ---
-    let src = from.node
-    if (from.isSuper) {
-      src = from.outputsByPort.get(fromPort) ?? from.node
-    }
-    if (!src) return
-
     // --- cible : AudioNode ou AudioParam ---
     let target = null
     if (to.isSuper) {
@@ -358,13 +366,11 @@ export function usePatchVoice(patch) {
     } else {
       target = to.params?.[toPort] ?? null
     }
-    if (!target) return
 
-    try { src.connect(target) } catch { return }
+    // --- enveloppe : aucun flux audio, on programme uniquement le paramètre ---
+    if (from.modulator) {
+      if (!target || typeof target.setValueAtTime !== "function") return
 
-    // --- enveloppe branchée sur ce paramètre ? ---
-    // (la cible doit être un AudioParam)
-    if (from.modulator && typeof target.setValueAtTime === "function") {
       const paramName = toPort
       let baseValue = 1
       if (from.modParams.modulation === "relative") {
@@ -383,7 +389,17 @@ export function usePatchVoice(patch) {
         affectsAmplitude: paramName === "gain",
         modulatorType: from.modType,
       })
+      return
     }
+
+    // --- câblage audio classique ---
+    let src = from.node
+    if (from.isSuper) {
+      src = from.outputsByPort.get(fromPort) ?? from.node
+    }
+    if (!src || !target) return
+
+    try { src.connect(target) } catch {}
   }
 
   /**
@@ -427,7 +443,7 @@ export function usePatchVoice(patch) {
 
     const started = []
 
-    const { nodes } = buildGraph(ctx, patch.mainPatch, {
+    const { nodes } = buildGraph(ctx, normalizeGraph(patch?.mainPatch), {
       destinationNode: ctx.destination,
       deferStart: true, // démarrés explicitement dans startMainPatch
       started,
@@ -499,7 +515,7 @@ export function usePatchVoice(patch) {
     const started = []
     const activeEnvs = []
 
-    const { nodes } = buildGraph(ctx, patch.voicePatch, {
+    const { nodes } = buildGraph(ctx, normalizeGraph(patch?.voicePatch), {
       note,
       velocity,
       destinationNode: mainInputNode,
@@ -588,5 +604,6 @@ export function usePatchVoice(patch) {
     noteOff,
     stopAll,
     updateConstantValue,
+    getContext: () => audioCtx.value,
   }
 }

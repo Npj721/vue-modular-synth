@@ -24,6 +24,8 @@ const props = defineProps({
   showPatchManager: { type: Boolean, default: true },
   // autoriser les nœuds d'interface Super In / Super Out
   allowInterfaceModules: { type: Boolean, default: false },
+  // étirer le canvas sur la hauteur disponible
+  paperFillHeight: { type: Boolean, default: false },
   // contenu initial à dessiner au montage (édition d'un super-module)
   initialPatch: { type: Object, default: null },
 })
@@ -192,6 +194,7 @@ onMounted(async () => {
         <ModulePaper
           ref="paperRef"
           class="editor-paper"
+          :fill-height="paperFillHeight"
           @module-selected="handleModuleSelected"
           @module-removed="handleModuleRemoved"
           @connection-added="handleConnectionAdded"

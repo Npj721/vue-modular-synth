@@ -12,9 +12,15 @@ const emit = defineEmits([
   "connection-removed",
 ]);
 
+const props = defineProps({
+  // étirer le canvas sur la hauteur du conteneur parent
+  fillHeight: { type: Boolean, default: false },
+});
+
 const paperEl = ref(null);
 let graph;
 let paper;
+let resizeObserver = null;
 
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
@@ -310,6 +316,16 @@ const loadPatch = (patch) => {
 /* =========================
  * LIFECYCLE
  * ========================= */
+
+const onKeyDown = (e) => {
+  if (e.key === "Delete" && selectedModule.value) {
+    selectedModule.value.shape.remove();
+    modulesById.delete(selectedModule.value.id);
+    emit("module-removed", selectedModule.value);
+    selectedModule.value = null;
+  }
+};
+
 onMounted(() => {
   graph = new dia.Graph({}, { cellNamespace: shapes });
 
@@ -423,14 +439,20 @@ onMounted(() => {
   });
 
   // suppression module
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Delete" && selectedModule.value) {
-      selectedModule.value.shape.remove();
-      modulesById.delete(selectedModule.value.id);
-      emit("module-removed", selectedModule.value);
-      selectedModule.value = null;
-    }
-  });
+  window.addEventListener("keydown", onKeyDown);
+
+  // hauteur responsive
+  if (props.fillHeight && typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          paper?.setDimensions(width, Math.max(200, height));
+        }
+      }
+    });
+    resizeObserver.observe(paperEl.value);
+  }
 
   paperEl.value.addEventListener(
     "wheel",
@@ -451,6 +473,11 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  window.removeEventListener("keydown", onKeyDown);
   paper?.remove();
   graph?.clear();
 });
@@ -467,20 +494,51 @@ defineExpose({
 
 
 <template>
-  <div class="paper-container">
+  <div class="paper-container" :class="{ fill: fillHeight }">
     <div class="zoom-controls">
       <button @click="zoomOut">−</button>
       <span>{{ Math.round(zoom * 100) }}%</span>
       <button @click="zoomIn">+</button>
     </div>
-    <div ref="paperEl" class="paper"></div>
+    <div ref="paperEl" class="paper" :class="{ fill: fillHeight }"></div>
   </div>
 </template>
 
 <style scoped>
+.paper-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.paper-container.fill {
+  height: 100%;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.zoom-controls button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #ccc;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
 .paper {
   width: 100%;
   height: 400px;
   border: 1px solid #ddd;
+}
+
+.paper.fill {
+  flex: 1;
+  min-height: 300px;
 }
 </style>
