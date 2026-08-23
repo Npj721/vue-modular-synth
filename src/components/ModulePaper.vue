@@ -96,7 +96,9 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
         circle: {
           "data-port": p.id,
           "data-kind": p.kind,
-          "data-role": p.kind === "audio" ? "audioIn" : "modulatable",
+          // rôle déclaré par le catalogue (fallback dérivé du kind)
+          "data-role":
+            p.role ?? (p.kind === "audio" ? "audioIn" : "modulatable"),
         },
         text: { text: p.label ?? p.id },
       },
@@ -109,7 +111,9 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
         circle: {
           "data-port": p.id,
           "data-kind": p.kind,
-          "data-role": p.kind === "audio" ? "audioOut" : "modulator",
+          // ex: gain.out est kind "audio" mais rôle "modulator"
+          "data-role":
+            p.role ?? (p.kind === "audio" ? "audioOut" : "modulator"),
         },
         text: { text: p.label ?? p.id },
       },
@@ -364,12 +368,15 @@ onMounted(() => {
 
       /* =========================
        * MODULATION (RÈGLE GÉNÉRALISÉE)
+       *
+       * Toute sortie "modulator" (envelope, constant, gain...)
+       * OU "audioOut" (signal brut : FM / AM)
+       * peut moduler une entrée "modulatable"
+       * (frequency, detune, gain, threshold...).
        * ========================= */
-
-      // Toute sortie de type "modulator" peut moduler une entrée "modulatable"
       if (
-        sRole === "modulator" && // Le rôle de la source est 'modulator'
-        tRole === "modulatable"  // Le rôle de la cible est 'modulatable'
+        tRole === "modulatable" &&
+        (sRole === "modulator" || sRole === "audioOut")
       ) {
         return true;
       }

@@ -335,5 +335,72 @@ saveFromGraph({
   );
 }
 
+/* =========================================================
+ * Scénario 4 : modulation gain.out -> osc.detune / voice.frequency
+ * ========================================================= */
+{
+  const patch = {
+    mainPatch: {
+      modules: [
+        { id: "in1", type: "input", params: {}, position: {} },
+        { id: "mdest", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "in1", port: "out:out" }, to: { id: "mdest", port: "in:in" } },
+      ],
+    },
+    voicePatch: {
+      modules: [
+        { id: "gm", type: "gain", params: { gain: 0.5 }, position: {} },
+        { id: "o1", type: "osc", params: {}, position: {} },
+        { id: "v1", type: "voice", params: {}, position: {} },
+        { id: "vd", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "gm", port: "out:out" }, to: { id: "o1", port: "in:detune" } },
+        { from: { id: "gm", port: "out:out" }, to: { id: "v1", port: "in:frequency" } },
+        { from: { id: "v1", port: "out:out" }, to: { id: "vd", port: "in:in" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+
+  const ctx = synth.getContext();
+  const gainMod = ctx.created.find(
+    (n) => n.__type === "gain" && approx(n.gain.value, 0.5)
+  );
+  check("module gain modulateur créé", !!gainMod);
+
+  const oscNode = of(ctx, "osc").find((o) => approx(o.frequency.value, 440));
+  const voiceNode = of(ctx, "osc").find((o) =>
+    approx(o.frequency.value, noteToFreq(60))
+  );
+  check("osc (440 Hz) créé", !!oscNode);
+  check("voice (note 60) créée", !!voiceNode);
+
+  check(
+    "gain.out -> osc.detune câblé",
+    !!gainMod && gainMod.connections.includes(oscNode.detune)
+  );
+  check(
+    "gain.out -> voice.frequency câblé",
+    !!gainMod && gainMod.connections.includes(voiceNode.frequency)
+  );
+
+  // la chaîne audio classique reste intacte
+  const mainInputGain = ctx.created.find(
+    (n) => n.__type === "gain" && n.connections.includes(ctx.destination)
+  );
+  check(
+    "voice.out -> destination (mainInput)",
+    !!voiceNode &&
+      !!mainInputGain &&
+      voiceNode.connections.includes(mainInputGain)
+  );
+}
+
 console.log(failures === 0 ? "\nTous les tests passent." : `\n${failures} échec(s).`);
 process.exit(failures === 0 ? 0 : 1);
