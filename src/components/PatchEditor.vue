@@ -64,7 +64,7 @@ const handleModuleRemoved = (module) => {
   // connections (mutation, pas réassignation)
   for (let i = patch.connections.length - 1; i >= 0; i--) {
     const c = patch.connections[i];
-    if (c.from.moduleId === module.id || c.to.moduleId === module.id) {
+    if (c.from.id === module.id || c.to.id === module.id) {
       patch.connections.splice(i, 1);
     }
   }
@@ -95,9 +95,9 @@ const handleConnectionAdded = (conn) => {
 const handleConnectionRemoved = (conn) => {
   const idx = patch.connections.findIndex(
     (c) =>
-      c.from.moduleId === conn.from.moduleId &&
+      c.from.id === conn.from.id &&
       c.from.port === conn.from.port &&
-      c.to.moduleId === conn.to.moduleId &&
+      c.to.id === conn.to.id &&
       c.to.port === conn.to.port
   );
   if (idx !== -1) patch.connections.splice(idx, 1);

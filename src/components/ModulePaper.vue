@@ -322,12 +322,30 @@ const loadPatch = (patch) => {
  * ========================= */
 
 const onKeyDown = (e) => {
-  if (e.key === "Delete" && selectedModule.value) {
-    selectedModule.value.shape.remove();
-    modulesById.delete(selectedModule.value.id);
-    emit("module-removed", selectedModule.value);
-    selectedModule.value = null;
+  if (e.key !== "Delete") return;
+
+  // ne pas supprimer un module pendant l'édition d'un champ texte
+  const t = e.target;
+  if (
+    t &&
+    (t.tagName === "INPUT" ||
+      t.tagName === "TEXTAREA" ||
+      t.tagName === "SELECT" ||
+      t.isContentEditable)
+  ) {
+    return;
   }
+
+  // ignorer si ce paper est masqué (onglet inactif : voice/main/super)
+  // sinon la suppression toucherait aussi les sélections des autres patchs
+  if (!paperEl.value || paperEl.value.offsetParent === null) return;
+
+  if (!selectedModule.value) return;
+
+  selectedModule.value.shape.remove();
+  modulesById.delete(selectedModule.value.id);
+  emit("module-removed", selectedModule.value);
+  selectedModule.value = null;
 };
 
 onMounted(() => {
@@ -445,6 +463,22 @@ onMounted(() => {
     }
   });
 
+  // clic droit sur une connexion → suppression
+  paper.on("link:contextmenu", (linkView, evt) => {
+    evt.preventDefault();
+    evt.stopPropagation();
+
+    const link = linkView.model;
+    const source = link.get("source");
+    const target = link.get("target");
+
+    // complet uniquement (les liens en cours de tirage partent déjà)
+    if (!source.id || !target.id) return;
+
+    link.remove();
+    emit("connection-removed", { from: source, to: target });
+  });
+
   // suppression module
   window.addEventListener("keydown", onKeyDown);
 
@@ -542,6 +576,11 @@ defineExpose({
   width: 100%;
   height: 400px;
   border: 1px solid #ddd;
+}
+
+/* les connexions sont supprimables au clic droit */
+.paper :deep(.joint-link) {
+  cursor: pointer;
 }
 
 .paper.fill {
