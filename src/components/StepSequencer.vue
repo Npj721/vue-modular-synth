@@ -48,7 +48,7 @@ async function initAudio() {
  * Playback
  * ========================= */
 function start() {
-  if (!ready.value) return
+  if (playing.value) return
   playing.value = true
   currentStep.value = 0
   const interval = (60 / BPM.value / 4) * 1000
@@ -69,9 +69,13 @@ function stop() {
   currentStep.value = -1
 }
 
-function togglePlay() {
-  if (playing.value) stop()
-  else start()
+async function togglePlay() {
+  if (playing.value) {
+    stop()
+    return
+  }
+  if (!ready.value) await initAudio()
+  start()
 }
 
 function triggerStep(stepIndex) {
@@ -107,11 +111,7 @@ watch(
 
 <template>
   <div class="step-sequencer">
-    <button v-if="!ready" class="init-btn" @click="initAudio">
-      Init Audio
-    </button>
-
-    <div v-else>
+    <div>
       <div class="controls">
         <button @click="togglePlay">
           {{ playing ? 'Stop' : 'Play' }}
@@ -146,12 +146,6 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.init-btn {
-  padding: 8px 12px;
-  font-size: 14px;
-  cursor: pointer;
 }
 
 .controls {

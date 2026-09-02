@@ -19,12 +19,14 @@ const {
 const patchName = ref("")
 const filter = ref("")
 const selected = ref(null)
+const saveCounter = ref(0)
 
-const availablePatches = computed(() =>
-  names().filter(n =>
+const availablePatches = computed(() => {
+  saveCounter.value // reactive dependency
+  return names().filter(n =>
     n.toLowerCase().includes(filter.value.toLowerCase())
   )
-)
+})
 
 /* =========================
  * SAVE
@@ -38,6 +40,7 @@ const savePatch = () => {
   const exists = names().includes(patchName.value)
   if (exists && !confirm("Overwrite existing patch?")) return
   save(patchName.value, props.patch)
+  saveCounter.value++
 }
 
 /* =========================
@@ -63,6 +66,7 @@ const deletePatch = () => {
 
   remove(selected.value)
   selected.value = null
+  saveCounter.value++
 }
 
 /* =========================

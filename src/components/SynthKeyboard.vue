@@ -117,8 +117,9 @@ watch(
 /* =========================
  * Notes
  * ========================= */
-function noteOn(note) {
-  if (!ready.value || activeNotes.value.has(note)) return
+async function noteOn(note) {
+  if (activeNotes.value.has(note)) return
+  if (!ready.value) await initAudio()
   synth.value.noteOn(note)
   activeNotes.value.add(note)
 }
@@ -161,11 +162,7 @@ onUnmounted(() => {
 
 <template>
   <div class="synth-keyboard">
-    <button v-if="!ready" class="init-btn" @click="initAudio">
-      Init Audio
-    </button>
-
-    <div v-else class="keys">
+    <div class="keys">
       <button
         v-for="k in KEYS"
         :key="k.key"
@@ -187,12 +184,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.init-btn {
-  padding: 8px 12px;
-  font-size: 14px;
-  cursor: pointer;
 }
 
 .keys {
