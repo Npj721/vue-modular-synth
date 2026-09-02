@@ -533,7 +533,8 @@ defineExpose({
   modulesById,
   exportPatch,
   importPatch,
-  loadPatch
+  loadPatch,
+  clearGraph
 })
 
 </script>

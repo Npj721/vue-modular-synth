@@ -86,6 +86,18 @@ const handlePatchLoaded = (loadedPatch) => {
 };
 
 /* =========================================================
+ * CLEAR
+ * ========================================================= */
+const clearPatch = () => {
+  paperRef.value?.clearGraph();
+  patch.modules.splice(0, patch.modules.length);
+  patch.connections.splice(0, patch.connections.length);
+  selectedModuleId.value = null;
+};
+
+defineExpose({ clearPatch });
+
+/* =========================================================
  * CONNECTIONS
  * ========================================================= */
 const handleConnectionAdded = (conn) => {
