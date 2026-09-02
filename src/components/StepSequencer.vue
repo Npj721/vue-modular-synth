@@ -16,23 +16,28 @@ const currentStep = ref(-1)
 const intervalId = ref(null)
 
 const BPM = ref(120)
-const STEPS = 16
-
-const SCALE = [0, 2, 4, 5, 7, 9, 11]
-
-const baseNote = ref(48)
+const stepCount = ref(16)
 
 function buildSteps() {
-  return Array.from({ length: STEPS }, (_, i) => ({
-    note: baseNote.value + SCALE[i % SCALE.length] + Math.floor(i / SCALE.length) * 12,
+  return Array.from({ length: stepCount.value }, (_, i) => ({
+    note: 48 + i * 2,
     active: i % 4 === 0,
   }))
 }
 
 const steps = ref(buildSteps())
 
-watch(baseNote, () => {
-  steps.value = buildSteps()
+watch(stepCount, () => {
+  const current = steps.value
+  const next = buildSteps()
+  next.forEach((s, i) => {
+    if (current[i]) {
+      s.note = current[i].note
+      s.active = current[i].active
+    }
+  })
+  steps.value = next
+  if (currentStep.value >= stepCount.value) currentStep.value = -1
 })
 
 /* =========================
@@ -54,7 +59,7 @@ function start() {
   const interval = (60 / BPM.value / 4) * 1000
   triggerStep(0)
   intervalId.value = setInterval(() => {
-    currentStep.value = (currentStep.value + 1) % STEPS
+    currentStep.value = (currentStep.value + 1) % stepCount.value
     triggerStep(currentStep.value)
   }, interval)
 }
@@ -121,8 +126,8 @@ watch(
           <input v-model.number="BPM" type="number" min="40" max="300" />
         </label>
         <label>
-          Base:
-          <input v-model.number="baseNote" type="number" min="24" max="84" />
+          Steps:
+          <input v-model.number="stepCount" type="number" min="1" max="64" />
         </label>
       </div>
 
@@ -134,7 +139,15 @@ watch(
           :class="{ active: step.active, current: i === currentStep }"
           @click="step.active = !step.active"
         >
-          <div class="step-label">{{ step.note }}</div>
+          <span class="step-label">{{ i }}</span>
+          <input
+            v-model.number="step.note"
+            class="step-note"
+            type="number"
+            min="0"
+            max="127"
+            @click.stop
+          />
         </div>
       </div>
     </div>
@@ -166,17 +179,19 @@ watch(
 .steps {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .step {
-  width: 40px;
-  height: 60px;
+  width: 44px;
+  padding: 4px;
   border: 1px solid #999;
   background: #f0f0f0;
   cursor: pointer;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
   user-select: none;
 }
 
@@ -188,5 +203,16 @@ watch(
 .step.current {
   border-color: #ff6b6b;
   box-shadow: 0 0 0 2px #ff6b6b;
+}
+
+.step-label {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.step-note {
+  width: 34px;
+  text-align: center;
+  font-size: 12px;
 }
 </style>
