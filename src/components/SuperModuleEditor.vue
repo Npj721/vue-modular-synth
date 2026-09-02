@@ -89,6 +89,34 @@ function save() {
   }
 }
 
+/** Enregistrer sous : crée une copie sous un nouveau type sans toucher l'original */
+function saveAs() {
+  try {
+    const def = saveFromGraph({
+      name: name.value,
+      color: color.value,
+      graph: JSON.parse(JSON.stringify(draft)),
+      typeToUpdate: null,
+    });
+
+    // switch d'édition sur la nouvelle copie
+    editingType.value = def.type;
+    name.value = def.label;
+
+    const nbPorts = def.inputs.length + def.outputs.length;
+    const nbParams = Object.keys(def.params).length;
+    window.alert(
+      `Super-module "${def.label}" enregistré sous.\n` +
+        `Interface : ${def.inputs.length} entrée(s), ${def.outputs.length} sortie(s).\n` +
+        `${nbParams} paramètre(s) exposé(s).`
+    );
+
+    refreshDefs();
+  } catch (e) {
+    window.alert(e.message);
+  }
+}
+
 /** Supprimer un super-module */
 function deleteDef(def) {
   if (!window.confirm(`Supprimer le super-module "${def.label}" ?`)) return;
@@ -110,6 +138,7 @@ function deleteDef(def) {
       />
       <input v-model="color" type="color" class="super-color" />
       <button class="btn primary" @click="save">Enregistrer</button>
+      <button class="btn" @click="saveAs">Enregistrer sous</button>
       <button class="btn" @click="newSuper">Nouveau</button>
 
       <span class="hint">
