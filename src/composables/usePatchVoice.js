@@ -46,8 +46,9 @@ function normalizeGraph(graph) {
  * Envelope scheduler
  * ========================================================= */
 
-function scheduleStages(param, stages, ctx, velocity = 1, base = 1) {
+function scheduleStages(param, stages, ctx, velocity = 1, base = 1, startOffset = 0) {
   const now = ctx.currentTime
+  const t0 = now + startOffset
 
   if (param.cancelAndHoldAtTime) {
     param.cancelAndHoldAtTime(now)
@@ -57,7 +58,7 @@ function scheduleStages(param, stages, ctx, velocity = 1, base = 1) {
     param.setValueAtTime(v, now)
   }
 
-  let t = now
+  let t = t0
 
   for (const stage of stages) {
     let from =
@@ -82,7 +83,7 @@ function scheduleStages(param, stages, ctx, velocity = 1, base = 1) {
     }
   }
 
-  return t - now
+  return t - t0
 }
 
 /* =========================================================
@@ -175,12 +176,15 @@ export function usePatchVoice(patch) {
             ? (o.note !== undefined ? noteToFreq(o.note) : p.frequency ?? 440)
             : p.frequency ?? 440
         const detune = p.detune ?? 0
+        const delay = p.delay ?? 0
         osc.frequency.setValueAtTime(freq, now)
         osc.detune.setValueAtTime(detune, now)
-        if (!o.deferStart) safeStart(osc, now)
-        o.started.push(osc)
+        const startAt = now + delay
+        if (!o.deferStart) safeStart(osc, startAt)
+        o.started.push({ node: osc, delay, startAt })
         return {
           node: osc,
+          delay,
           params: { frequency: osc.frequency, detune: osc.detune },
           bases: { frequency: freq, detune },
         }
@@ -249,7 +253,7 @@ export function usePatchVoice(patch) {
         const value = p.value ?? 1
         constantNode.offset.setValueAtTime(value, now)
         if (!o.deferStart) safeStart(constantNode, now)
-        o.started.push(constantNode)
+        o.started.push({ node: constantNode, delay: 0, startAt: now })
         return {
           node: constantNode,
           params: { offset: constantNode.offset },
@@ -362,7 +366,7 @@ export function usePatchVoice(patch) {
    * CONNEXIONS
    * ========================================================= */
 
-  function wireConnection(ctx, c, nodes, o) {
+  function wireConnection(ctx, c, nodes, o, audioDelay) {
     const from = nodes.get(c.from?.id)
     const to = nodes.get(c.to?.id)
     if (!from || !to) return
@@ -393,7 +397,10 @@ export function usePatchVoice(patch) {
       const stages = from.modParams.stages
       if (!stages?.press?.length) return
 
-      scheduleStages(target, stages.press, ctx, o.velocity, baseValue)
+      // si la cible est alimentée par un oscillateur décalé, l'attaque
+      // de l'enveloppe démarre au même instant (release non décalé)
+      const shift = audioDelay?.get(c.to.id) ?? 0
+      scheduleStages(target, stages.press, ctx, o.velocity, baseValue, shift)
 
       o.activeEnvs.push({
         param: target,
@@ -413,6 +420,48 @@ export function usePatchVoice(patch) {
     if (!src || !target) return
 
     try { src.connect(target) } catch {}
+  }
+
+  /**
+   * Détermine le delay "audio" qui affecte chaque module :
+   * pour un module recevant le son d'un oscillateur décalé, retourne ce delay.
+   * En cas de plusieurs oscillateurs (delays différents) vers la même cible,
+   * on garde le PLUS PETIT delay (cohérence : on ne retarde pas un son déjà là).
+   */
+  function computeAudioDelays(graph, nodes) {
+    const delay = new Map()
+
+    for (const [id, entry] of nodes) {
+      if (entry.delay !== undefined) delay.set(id, entry.delay)
+    }
+
+    const edges = []
+    for (const c of graph.connections ?? []) {
+      const from = nodes.get(c.from?.id)
+      const to = nodes.get(c.to?.id)
+      if (!from || !to || from.modulator) continue
+      const [, toPort = "in"] = (c.to.port ?? "in:in").split(":")
+      // seul un flux audio entrant dans un module propage le delay
+      if (toPort !== "in") continue
+      edges.push([c.from.id, c.to.id])
+    }
+
+    let changed = true
+    let guard = 0
+    while (changed && guard++ < 500) {
+      changed = false
+      for (const [fromId, toId] of edges) {
+        const d = delay.get(fromId)
+        if (d === undefined) continue
+        const cur = delay.get(toId)
+        if (cur === undefined || d < cur) {
+          delay.set(toId, d)
+          changed = true
+        }
+      }
+    }
+
+    return delay
   }
 
   /**
@@ -439,9 +488,12 @@ export function usePatchVoice(patch) {
       if (entry) nodes.set(mod.id, entry)
     }
 
-    // passe 2 : câblage (+ déclenchement des enveloppes)
+    // passe 1bis : propagation du delay le long du chemin audio (osc → gain)
+    const audioDelay = computeAudioDelays(graph, nodes)
+
+    // passe 2 : câblage (+ déclenchement des enveloppes, décalées si besoin)
     for (const c of graph.connections ?? []) {
-      wireConnection(ctx, c, nodes, o)
+      wireConnection(ctx, c, nodes, o, audioDelay)
     }
 
     return { nodes }
@@ -476,8 +528,8 @@ export function usePatchVoice(patch) {
     if (mainRunning) return
     if (!audioCtx.value) return
     const now = audioCtx.value.currentTime
-    for (const node of mainStarted) {
-      safeStart(node, now)
+    for (const s of mainStarted) {
+      safeStart(s.node, now + (s.delay ?? 0))
     }
     mainRunning = true
   }
@@ -485,8 +537,8 @@ export function usePatchVoice(patch) {
   function stopMainPatch() {
     if (!mainRunning) return
     const now = audioCtx.value.currentTime
-    for (const node of mainStarted) {
-      safeStop(node, now + 0.001)
+    for (const s of mainStarted) {
+      safeStop(s.node, now + 0.001)
     }
     mainRunning = false
     mainStarted = []
@@ -589,8 +641,10 @@ export function usePatchVoice(patch) {
 
         const tail = hasAmpEnv ? maxRelease + 0.05 : 0.05
 
-        for (const node of started) {
-          safeStop(node, now + tail)
+        for (const s of started) {
+          // ne jamais stopper un osc décalé AVANT son démarrage prévu
+          const stopAt = Math.max(now + tail, s.startAt ?? now)
+          safeStop(s.node, stopAt)
         }
       },
     }
