@@ -93,6 +93,16 @@ export function usePatchVoice(patch) {
   const audioCtx = ref(null)
   const voices = new Map()
 
+  // accepte un objet patch direct OU une fonction getter (doit retourner
+  // l'objet patch courant). setPatch permet de changer la source vers un
+  // objet/reactif renouvelé sans recréer le contexte audio.
+  let patchRef = patch
+  const getPatch = () =>
+    typeof patchRef === "function" ? patchRef() : patchRef
+  function setPatch(p) {
+    patchRef = p
+  }
+
   const { get: getSuperDef } = useSuperModules()
 
   // MAIN PATCH (singleton)
@@ -100,6 +110,9 @@ export function usePatchVoice(patch) {
   let mainInputNode = null
   let mainStarted = [] // nœuds à cycle de vie global (oscs, constants...)
   let mainRunning = false
+
+  // GainNodes indépendants par piste de séquenceur (volume par piste)
+  const trackGains = new Set()
 
   /* =========================
    * Init (lazy safe)
@@ -443,7 +456,7 @@ export function usePatchVoice(patch) {
 
     const started = []
 
-    const { nodes } = buildGraph(ctx, normalizeGraph(patch?.mainPatch), {
+    const { nodes } = buildGraph(ctx, normalizeGraph(getPatch()?.mainPatch), {
       destinationNode: ctx.destination,
       deferStart: true, // démarrés explicitement dans startMainPatch
       started,
@@ -503,22 +516,58 @@ export function usePatchVoice(patch) {
     teardownMainPatch()
     buildMainPatch()
     startMainPatch()
+    reconnectTrackGains()
+  }
+
+  /* =========================================================
+   * GAIN PAR PISTE (volume indépendant)
+   * Chaque piste du séquenceur possède son GainNode inséré
+   * entre les voix de la piste et l'entrée du patch principal.
+   * ========================================================= */
+
+  function connectTrackGain(gain) {
+    if (!mainInputNode) return
+    try { gain.connect(mainInputNode) } catch {}
+  }
+
+  function reconnectTrackGains() {
+    for (const g of trackGains) connectTrackGain(g)
+  }
+
+  function createTrackGainNode() {
+    const ctx = audioCtx.value
+    const gain = ctx.createGain()
+    gain.gain.setValueAtTime(1, ctx.currentTime)
+
+    trackGains.add(gain)
+    connectTrackGain(gain)
+
+    return {
+      node: gain,
+      setVolume(v) {
+        gain.gain.setValueAtTime(v, audioCtx.value.currentTime)
+      },
+      dispose() {
+        safeDisconnect(gain)
+        trackGains.delete(gain)
+      },
+    }
   }
 
   /* =========================================================
    * VOICES
    * ========================================================= */
 
-  function createVoice(note, velocity = 1) {
+  function createVoice(note, velocity = 1, destinationNode = mainInputNode) {
     const ctx = audioCtx.value
 
     const started = []
     const activeEnvs = []
 
-    const { nodes } = buildGraph(ctx, normalizeGraph(patch?.voicePatch), {
+    const { nodes } = buildGraph(ctx, normalizeGraph(getPatch()?.voicePatch), {
       note,
       velocity,
-      destinationNode: mainInputNode,
+      destinationNode,
       started,
       activeEnvs,
     })
@@ -551,23 +600,26 @@ export function usePatchVoice(patch) {
    * Public API
    * ========================================================= */
 
-  async function noteOn(note, velocity = 1) {
+  async function noteOn(note, velocity = 1, destinationNode = mainInputNode, voiceKey = null) {
     await init()
     startMainPatch()
 
-    if (voices.has(note)) {
-      voices.get(note).stop()
-      voices.delete(note)
+    const key = voiceKey ?? note
+
+    if (voices.has(key)) {
+      voices.get(key).stop()
+      voices.delete(key)
     }
 
-    voices.set(note, createVoice(note, velocity))
+    voices.set(key, createVoice(note, velocity, destinationNode))
   }
 
-  function noteOff(note) {
-    const voice = voices.get(note)
+  function noteOff(note, voiceKey = null) {
+    const key = voiceKey ?? note
+    const voice = voices.get(key)
     if (!voice) return
     voice.stop()
-    voices.delete(note)
+    voices.delete(key)
   }
 
   function stopAll() {
@@ -604,6 +656,8 @@ export function usePatchVoice(patch) {
     noteOff,
     stopAll,
     updateConstantValue,
+    createTrackGainNode,
+    setPatch,
     getContext: () => audioCtx.value,
   }
 }
