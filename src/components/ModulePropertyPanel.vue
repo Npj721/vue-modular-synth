@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, watch } from 'vue'
 import { useModuleCatalog } from '../composables/useModuleCatalog'
-import EnvelopeEditor from './EnvelopeEditor.vue'
+import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
 
 const props = defineProps({
@@ -61,7 +61,7 @@ const updateEnveloppe= (key, value) => {
   <div v-if="module" class="property-panel">
     {{ module }}
     <h3>{{ module.type }} Parameters</h3>
-    <div v-for="(def, key) in paramDefs" :key="key" class="param-row">
+    <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' }">
       <label>{{ key }}</label>  
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
@@ -91,10 +91,15 @@ const updateEnveloppe= (key, value) => {
              type="checkbox"
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
-      <!-- Enveloppe -->
-      <EnvelopeEditor
+      <!-- Enveloppe : éditeur graphique -->
+      <GraphEnvelopeEditor
         v-else-if="def.type === 'envelope'"
         :stages="params.stages"
+        :min="def.min != null ? def.min : 0"
+        :max="def.max != null ? def.max : 1"
+        :step="def.step != null ? def.step : 0.0001"
+        :unit="def.unit || ''"
+        :presets-key="'env:' + module.type"
         @update="val => updateEnveloppe(key, val)"
       />
       <AudioFilePicker
@@ -121,6 +126,15 @@ const updateEnveloppe= (key, value) => {
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
+}
+
+.param-envelope {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+.param-envelope > label {
+  align-self: flex-start;
 }
 
 
