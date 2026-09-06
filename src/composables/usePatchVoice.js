@@ -112,6 +112,12 @@ export function usePatchVoice(patch) {
   let mainStarted = [] // nœuds à cycle de vie global (oscs, constants...)
   let mainRunning = false
 
+  // AnalyserNode branché "juste avant la sortie" (pas une partie du patch) :
+  // il est inséré automatiquement dans le câblage de tout module qui se
+  // connecte au module "output" (destination) : module -> analyser -> sortie.
+  // Il observe donc toujours le mix final réellement entendu.
+  let masterAnalyser = null
+
   // GainNodes indépendants par piste de séquenceur (volume par piste)
   const trackGains = new Set()
 
@@ -142,13 +148,32 @@ export function usePatchVoice(patch) {
   async function ensureContext() {
     if (!audioCtx.value) {
       audioCtx.value = new AudioContext()
+      // chaîne maîtresse créée de façon synchrone avec le contexte :
+      // le prochain buildMainPatch y routera forcément le son.
+      ensureMasterAnalyser()
     }
     if (audioCtx.value.state !== "running") {
-      await audioCtx.value.resume()
+      try { await audioCtx.value.resume() } catch {}
     }
     if (audioCtx.value.state === "running") {
       startKeepAlive()
+      ensureMasterAnalyser()
     }
+  }
+
+  /* Crée l'analyser de sortie (une seule fois), branché sur les haut-parleurs.
+   * Il est PERMANENT : jamais déconnecté. Les modules sortant vers le module
+   * "output" lui sont connectés dans wireConnection. */
+  function ensureMasterAnalyser() {
+    if (!audioCtx.value) return
+    if (masterAnalyser) return
+    const ctx = audioCtx.value
+
+    masterAnalyser = ctx.createAnalyser()
+    masterAnalyser.fftSize = 2048
+    masterAnalyser.smoothingTimeConstant = 0.8
+
+    masterAnalyser.connect(ctx.destination)
   }
 
   async function init() {
@@ -499,6 +524,13 @@ export function usePatchVoice(patch) {
     }
     if (!src || !target) return
 
+    // Tout flux audio qui atteint la sortie (module "output" du patch) passe
+    // par l'analyser : module -> analyser -> haut-parleurs.
+    // Un seul analyser suffit pour tous les cas (input -> comp -> output, etc).
+    if (target === ctx.destination && masterAnalyser) {
+      target = masterAnalyser
+    }
+
     try { src.connect(target) } catch {}
   }
 
@@ -626,7 +658,10 @@ export function usePatchVoice(patch) {
 
   function disconnectEntry(entry) {
     if (!entry) return
-    safeDisconnect(entry.node)
+    // la sortie globale (ctx.destination) et l'analyser sont PERMANENTS :
+    // on ne les déconnecte jamais (sinon plus rien ne sort des haut-parleurs).
+    const dest = audioCtx.value?.destination
+    if (entry.node !== dest && entry.node !== masterAnalyser) safeDisconnect(entry.node)
     entry.inputsByPort?.forEach((g) => safeDisconnect(g))
     entry.outputsByPort?.forEach((g) => safeDisconnect(g))
   }
@@ -649,6 +684,7 @@ export function usePatchVoice(patch) {
     buildMainPatch()
     startMainPatch()
     reconnectTrackGains()
+    ensureMasterAnalyser()
   }
 
   /* =========================================================
@@ -738,6 +774,10 @@ export function usePatchVoice(patch) {
     await init()
     startMainPatch()
 
+    // Les voix sortent vers l'entrée du patch principal si elle existe,
+    // sinon directement sur la sortie (via l'analyser).
+    if (!destinationNode) destinationNode = audioCtx.value?.destination
+
     const key = voiceKey ?? note
 
     if (voices.has(key)) {
@@ -793,5 +833,6 @@ export function usePatchVoice(patch) {
     createTrackGainNode,
     setPatch,
     getContext: () => audioCtx.value,
+    getAnalyser: () => masterAnalyser,
   }
 }

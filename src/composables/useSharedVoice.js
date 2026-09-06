@@ -34,3 +34,8 @@ export function setSharedPatch(patch) {
 export async function initSharedVoice() {
   return getSharedVoice().init()
 }
+
+/** Renvoie l'AnalyserNode branché juste avant la sortie (pour la visualisation). */
+export function getSharedAnalyser() {
+  return getSharedVoice().getAnalyser()
+}
