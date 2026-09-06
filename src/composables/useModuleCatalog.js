@@ -291,6 +291,171 @@ const catalog = reactive({
     },
 
     /* =========================
+     * ROUTING : SPLITTER / MERGER
+     * ========================= */
+
+    channelSplitter: {
+      label: "Splitter",
+      color: "#00BCD4",
+      category: "routing",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "audioIn",
+            multiple: true,
+          },
+        ],
+        outputs: [0, 1, 2, 3].map((ch) => ({
+          id: String(ch),
+          label: "Ch " + ch,
+          kind: "audio",
+          role: "audioOut",
+          multiple: true,
+        })),
+      },
+
+      params: {},
+    },
+
+    channelMerger: {
+      label: "Merger",
+      color: "#8BC34A",
+      category: "routing",
+      singleton: false,
+
+      ports: {
+        inputs: [0, 1, 2, 3].map((ch) => ({
+          id: String(ch),
+          label: "Ch " + ch,
+          kind: "audio",
+          role: "audioIn",
+          multiple: true,
+        })),
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {},
+    },
+
+    /* =========================
+     * SPATIAL : PANNER / STEREO PANNER
+     * ========================= */
+
+    panner: {
+      label: "Panner",
+      color: "#FF6FB5",
+      category: "spatial",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "audioIn",
+            multiple: true,
+          },
+          ...paramPorts([
+            "positionX",
+            "positionY",
+            "positionZ",
+            "orientationX",
+            "orientationY",
+            "orientationZ",
+          ]),
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        panningModel: {
+          type: "enum",
+          values: ["equalpower", "HRTF"],
+          default: "equalpower",
+        },
+        distanceModel: {
+          type: "enum",
+          values: ["linear", "inverse", "exponential"],
+          default: "inverse",
+        },
+        positionX: num(-100, 100, 0.1, 0),
+        positionY: num(-100, 100, 0.1, 0),
+        positionZ: num(-100, 100, 0.1, 1),
+        orientationX: num(-1, 1, 0.01, 1),
+        orientationY: num(-1, 1, 0.01, 0),
+        orientationZ: num(-1, 1, 0.01, 0),
+        refDistance: num(0.0001, 1000, 0.1, 1),
+        maxDistance: num(0.0001, 20000, 1, 10000),
+        rolloffFactor: num(0, 10, 0.01, 1),
+        coneInnerAngle: num(0, 360, 1, 360),
+        coneOuterAngle: num(0, 360, 1, 360),
+        coneOuterGain: num(0, 1, 0.01, 0),
+      },
+    },
+
+    stereoPanner: {
+      label: "Stereo Panner",
+      color: "#FF9671",
+      category: "spatial",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "audioIn",
+            multiple: true,
+          },
+          {
+            id: "pan",
+            label: "Pan",
+            kind: "param",
+            role: "modulatable",
+            rate: "a-rate",
+            multiple: true,
+          },
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        pan: num(-1, 1, 0.01, 0),
+      },
+    },
+
+    /* =========================
      * ENVELOPE (modulator pur)
      * ========================= */
 

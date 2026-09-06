@@ -224,6 +224,63 @@ export function usePatchVoice(patch) {
         }
       }
 
+      case "channelSplitter": {
+        const s = ctx.createChannelSplitter(4)
+        return { node: s, params: {}, bases: {} }
+      }
+
+      case "channelMerger": {
+        const m = ctx.createChannelMerger(4)
+        return { node: m, params: {}, bases: {} }
+      }
+
+      case "panner": {
+        const pn = ctx.createPanner()
+        pn.panningModel = p.panningModel || "equalpower"
+        pn.distanceModel = p.distanceModel || "inverse"
+        pn.refDistance = p.refDistance ?? 1
+        pn.maxDistance = p.maxDistance ?? 10000
+        pn.rolloffFactor = p.rolloffFactor ?? 1
+        pn.coneInnerAngle = p.coneInnerAngle ?? 360
+        pn.coneOuterAngle = p.coneOuterAngle ?? 360
+        pn.coneOuterGain = p.coneOuterGain ?? 0
+
+        const pos = {
+          X: p.positionX ?? 0,
+          Y: p.positionY ?? 0,
+          Z: p.positionZ ?? 1,
+          oX: p.orientationX ?? 1,
+          oY: p.orientationY ?? 0,
+          oZ: p.orientationZ ?? 0,
+        }
+        pn.positionX.setValueAtTime(pos.X, now)
+        pn.positionY.setValueAtTime(pos.Y, now)
+        pn.positionZ.setValueAtTime(pos.Z, now)
+        pn.orientationX.setValueAtTime(pos.oX, now)
+        pn.orientationY.setValueAtTime(pos.oY, now)
+        pn.orientationZ.setValueAtTime(pos.oZ, now)
+
+        return {
+          node: pn,
+          params: {
+            positionX: pn.positionX,
+            positionY: pn.positionY,
+            positionZ: pn.positionZ,
+            orientationX: pn.orientationX,
+            orientationY: pn.orientationY,
+            orientationZ: pn.orientationZ,
+          },
+          bases: { ...pos },
+        }
+      }
+
+      case "stereoPanner": {
+        const sp = ctx.createStereoPanner()
+        const pan = p.pan ?? 0
+        sp.pan.setValueAtTime(pan, now)
+        return { node: sp, params: { pan: sp.pan }, bases: { pan } }
+      }
+
       /* Filtres biquad (filter_lowpass, filter_highpass, ...) */
       case "filter_lowpass":
       case "filter_highpass":

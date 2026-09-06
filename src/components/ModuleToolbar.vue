@@ -22,6 +22,8 @@ const CATEGORY_LABELS = {
   dynamics: 'Dynamics',
   effect: 'Effects',
   control: 'Control',
+  routing: 'Routing',
+  spatial: 'Spatial',
   input: 'I/O',
   output: 'I/O',
   interface: 'Interface',
