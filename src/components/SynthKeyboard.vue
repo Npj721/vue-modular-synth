@@ -1,6 +1,7 @@
 <script setup>
-import { ref, watch, computed, onMounted, onUnmounted, nextTick } from "vue"
-import { usePatchVoice } from "../composables/usePatchVoice"
+import { ref, watch, computed, onMounted, onUnmounted } from "vue"
+import { getSharedVoice, initSharedVoice } from "../composables/useSharedVoice"
+import { registerMidiNoteHandler } from "../composables/useMidiBus"
 
 const props = defineProps({
   patch: {
@@ -12,7 +13,6 @@ const props = defineProps({
 /* =========================
  * State
  * ========================= */
-const synth = ref(null)
 const ready = ref(false)
 const activeNotes = ref(new Set())
 
@@ -85,31 +85,23 @@ function octaveDown() {
 }
 
 /* =========================
- * Init Audio
+ * Init Audio (contexte partagé)
  * ========================= */
 async function initAudio() {
-  synth.value = usePatchVoice(props.patch)
-  await synth.value.init()
+  await initSharedVoice()
   ready.value = true
 }
 
 /* =========================
- * Patch updates
+ * Patch updates (reconstruction sur la voix partagée)
  * ========================= */
 watch(
   () => props.patch,
-  async () => {
+  () => {
     if (!ready.value) return
-
-    // 1. stop toutes les voix
-    synth.value.stopAll()
+    // le patch partagé est resynchronisé (setSharedPatch géré par le séquenceur)
+    // ici nous ne faisons que couper les notes actives du clavier à l'écran
     activeNotes.value.clear()
-
-    // 2. attendre que Vue ait fini
-    await nextTick()
-
-
-    synth.value.rebuildMainPatch()
   },
   { deep: true }
 )
@@ -117,16 +109,16 @@ watch(
 /* =========================
  * Notes
  * ========================= */
-async function noteOn(note) {
+async function noteOn(note, velocity = 1) {
   if (activeNotes.value.has(note)) return
   if (!ready.value) await initAudio()
-  synth.value.noteOn(note)
+  getSharedVoice().noteOn(note, velocity)
   activeNotes.value.add(note)
 }
 
 function noteOff(note) {
   if (!ready.value || !activeNotes.value.has(note)) return
-  synth.value.noteOff(note)
+  getSharedVoice().noteOff(note)
   activeNotes.value.delete(note)
 }
 
@@ -151,12 +143,22 @@ function handleKeyUp(e) {
 onMounted(() => {
   window.addEventListener("keydown", handleKeyDown)
   window.addEventListener("keyup", handleKeyUp)
+
+  // Reçoit les notes du clavier MIDI et les joue comme si elles venaient
+  // du clavier à l'écran : même chemin audio + la touche s'allume.
+  unregisterMidi = registerMidiNoteHandler((msg) => {
+    if (msg.type === "noteOn") noteOn(msg.note, msg.velocity ?? 1)
+    else if (msg.type === "noteOff") noteOff(msg.note)
+  })
 })
+
+let unregisterMidi = null
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown)
   window.removeEventListener("keyup", handleKeyUp)
-  synth.value?.stopAll()
+  if (unregisterMidi) unregisterMidi()
+  getSharedVoice()?.stopAll()
 })
 </script>
 

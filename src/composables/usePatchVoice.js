@@ -119,12 +119,35 @@ export function usePatchVoice(patch) {
    * Init (lazy safe)
    * ========================= */
 
+  /* Garde le contexte audio "running" en continu. Sans cette boucle, Chrome
+   * suspend le AudioContext après un court moment sans interaction dans la page.
+   * Or jouer via un clavier MIDI externe ne compte PAS comme interaction,
+   * ce qui produit des "micros coupures" (pop) au début de chaque note. */
+  let keepAlive = null
+  function startKeepAlive() {
+    if (keepAlive || !audioCtx.value) return
+    try {
+      const osc = audioCtx.value.createOscillator()
+      const gain = audioCtx.value.createGain()
+      gain.gain.value = 0
+      osc.connect(gain)
+      gain.connect(audioCtx.value.destination)
+      osc.start()
+      keepAlive = { osc, gain }
+    } catch (e) {
+      /* silencieux : le keep-alive est une optimisation, pas une nécessité */
+    }
+  }
+
   async function ensureContext() {
     if (!audioCtx.value) {
       audioCtx.value = new AudioContext()
     }
     if (audioCtx.value.state !== "running") {
       await audioCtx.value.resume()
+    }
+    if (audioCtx.value.state === "running") {
+      startKeepAlive()
     }
   }
 
