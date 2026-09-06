@@ -58,6 +58,55 @@ const catalog = reactive({
         },
       },
     },
+    fx: {
+      label: "FX / Sample",
+      color: "#9c6a00",
+      category: "source",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "frequency",
+            label: "Freq",
+            kind: "param",
+            role: "modulatable",
+            rate: "a-rate",
+            multiple: true,
+          },
+          {
+            id: "detune",
+            label: "Detune",
+            kind: "param",
+            role: "modulatable",
+            rate: "a-rate",
+            multiple: true,
+          },
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        buffer: {
+          type: "audioFile",
+          default: null,
+        },
+        detune: num(-1200, 1200, 1, 0),
+        delay: num(0, 5, 0.001, 0),
+        loop: {
+          type: "boolean",
+          default: false,
+        },
+      },
+    },
     osc: {
       label: "Oscillator",
       color: "#9c6a00",

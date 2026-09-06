@@ -239,6 +239,42 @@ export function usePatchVoice(patch) {
         }
       }
 
+      case "fx": {
+        // "Sampler" : joue un fichier audio à la fréquence de la note.
+        // Le playbackRate est dérivé de la note MIDI (comme l'oscillateur voice).
+        const src = ctx.createBufferSource()
+        const buffer = p.buffer ? getAudioBuffer(p.buffer) : null
+        if (buffer) src.buffer = buffer
+
+        const freq =
+          o.note !== undefined ? noteToFreq(o.note) : p.frequency ?? 440
+        const detune = p.detune ?? 0
+        // vitesse de lecture : relative à C4=261.63 Hz (fréquence de référence
+        // du sample, supposée rendue en MIDI 60 → ratio 1.0 pour la note 60 ? Non :
+        // on normalise sur 440 Hz / A4 pour une transposition musicale cohérente)
+        src.playbackRate.setValueAtTime(freq / 440, now)
+        src.detune.setValueAtTime(detune, now)
+
+        const delay = p.delay ?? 0
+        if (p.loop && buffer) {
+          src.loop = true
+          src.loopStart = 0
+          src.loopEnd = buffer.duration
+        }
+        if (buffer) {
+          const startAt = now + delay
+          if (!o.deferStart) safeStart(src, startAt)
+          o.started.push({ node: src, delay, startAt })
+        }
+
+        return {
+          node: src,
+          delay,
+          params: { playbackRate: src.playbackRate, detune: src.detune },
+          bases: { playbackRate: freq / 440, detune },
+        }
+      }
+
       case "gain": {
         const g = ctx.createGain()
         const gain = p.gain ?? 1
