@@ -1,4 +1,8 @@
 <script setup>
+import { ref } from "vue"
+import { initSharedVoice, getSharedVoice } from "../composables/useSharedVoice"
+import { setAudioBuffer } from "../composables/useAudioBufferCache"
+
 const props = defineProps({
   value: {
     type: String,
@@ -8,12 +12,26 @@ const props = defineProps({
 
 const emit = defineEmits(["update"])
 
-const onFileSelected = (e) => {
+const loading = ref(false)
+
+const onFileSelected = async (e) => {
   const file = e.target.files[0]
   if (!file) return
-
-  // 👉 ici on stocke JUSTE une référence
-  emit("update", file.name)
+  try {
+    loading.value = true
+    const args = await file.arrayBuffer()
+    // garantit l'existence du contexte audio partagé (décodage + conv engine)
+    await initSharedVoice()
+    const ctx = getSharedVoice().getContext()
+    const buffer = await ctx.decodeAudioData(args)
+    // Clé stable = nom du fichier : les rebuilds du patch retrouveront le buffer.
+    setAudioBuffer(file.name, buffer)
+    emit("update", file.name)
+  } catch (err) {
+    console.error("Impossible de décoder le fichier audio :", err)
+  } finally {
+    loading.value = false
+  }
 }
 
 const clear = () => {
@@ -31,6 +49,7 @@ const clear = () => {
     <input
       type="file"
       accept="audio/*"
+      :disabled="loading"
       @change="onFileSelected"
     />
   </div>

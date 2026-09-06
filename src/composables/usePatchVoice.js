@@ -1,6 +1,7 @@
 // composables/usePatchVoice.js
 import { ref } from "vue"
 import { useSuperModules } from "./useSuperModules"
+import { getAudioBuffer } from "./useAudioBufferCache"
 
 /* =========================================================
  * Utils
@@ -250,6 +251,16 @@ export function usePatchVoice(patch) {
         const time = p.delayTime ?? 0.3
         d.delayTime.setValueAtTime(time, now)
         return { node: d, params: { delayTime: d.delayTime }, bases: { delayTime: time } }
+      }
+
+      case "convolver": {
+        const cv = ctx.createConvolver()
+        cv.normalize = p.normalize ?? true
+        if (p.buffer) {
+          const buf = getAudioBuffer(p.buffer)
+          if (buf) cv.buffer = buf
+        }
+        return { node: cv, params: {}, bases: {} }
       }
 
       case "compressor": {
