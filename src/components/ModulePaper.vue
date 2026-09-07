@@ -26,6 +26,7 @@ let resizeObserver = null;
 
 let onDocKeyDown;
 let onDocPointerDown;
+let onPaperContextMenu;
 
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
@@ -538,6 +539,7 @@ onMounted(() => {
     drawGrid: true,
     background: { color: "#F5F5F5" },
     cellViewNamespace: shapes,
+    preventContextMenu: true,
     defaultLink: () =>
       new shapes.standard.Link({
         attrs: { line: { stroke: "#333", strokeWidth: 2 } },
@@ -595,6 +597,13 @@ onMounted(() => {
   paper.on("blank:contextmenu", openContextMenu);
   // clic droit sur un module → même menu (les liens gardent leur suppression)
   paper.on("element:contextmenu", openContextMenu);
+
+  // interdit le menu contextuel natif dans toute la zone du paper
+  onPaperContextMenu = (e) => e.preventDefault();
+  paperEl.value.parentElement.addEventListener(
+    "contextmenu",
+    onPaperContextMenu
+  );
 
   // début du drag : mémoriser la position de départ
   paper.on("cell:pointerdown", (cellView) => {
@@ -741,6 +750,10 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeyDown);
   document.removeEventListener("keydown", onDocKeyDown);
   document.removeEventListener("pointerdown", onDocPointerDown, true);
+  paperEl.value?.parentElement?.removeEventListener(
+    "contextmenu",
+    onPaperContextMenu
+  );
   paper?.remove();
   graph?.clear();
 });
