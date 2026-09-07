@@ -340,6 +340,57 @@ const catalog = reactive({
     },
 
     /* =========================
+     * WAVESHAPER (distorsion)
+     * Le drive est un pré-gain devant la courbe tanh : c'est un vrai
+     * AudioParam, donc modulable par une enveloppe/CV en temps réel.
+     * ========================= */
+
+    waveshaper: {
+      label: "WaveShaper",
+      color: "#E67E22",
+      category: "effect",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "audioIn",
+            multiple: true,
+          },
+          {
+            id: "drive",
+            label: "Drive",
+            kind: "param",
+            role: "modulatable",
+            rate: "a-rate",
+            multiple: true,
+          },
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        drive: num(0, 10, 0.01, 1),
+        oversample: {
+          type: "enum",
+          values: ["none", "2x", "4x"],
+          default: "none",
+        },
+      },
+    },
+
+    /* =========================
      * ROUTING : SPLITTER / MERGER
      * ========================= */
 

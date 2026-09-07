@@ -16,6 +16,19 @@ function getEnvelopeDuration(stages = []) {
   return stages.reduce((t, s) => t + s.duration, 0)
 }
 
+/* Courbe de distorsion "soft clip" (tangente hyperbolique), normalisée pour
+ * restituer l'unité au pic (x=1 → y=1). La saturation se règle avec le
+ * pré-gain "drive" devant le WaveShaper. */
+function buildTanhCurve(length = 8192) {
+  const curve = new Float32Array(length)
+  const norm = Math.tanh(1)
+  for (let i = 0; i < length; i++) {
+    const x = (i / (length - 1)) * 2 - 1 // -1..1
+    curve[i] = Math.tanh(x) / norm
+  }
+  return curve
+}
+
 const safeStart = (node, t) => {
   try { node.start(t) } catch {}
 }
@@ -299,6 +312,28 @@ export function usePatchVoice(patch) {
         return { node: cv, params: {}, bases: {} }
       }
 
+      case "waveshaper": {
+        // drive = pré-gain devant la courbe tanh : c'est un AudioParam
+        // modulable (enveloppe/CV). node = le WaveShaper (sortie) ;
+        // inputNode = le gain de drive (le son entre par là).
+        const driveGain = ctx.createGain()
+        const drive = p.drive ?? 1
+        driveGain.gain.setValueAtTime(drive, now)
+
+        const ws = ctx.createWaveShaper()
+        ws.curve = buildTanhCurve()
+        ws.oversample = p.oversample || "none"
+
+        driveGain.connect(ws)
+
+        return {
+          node: ws,
+          inputNode: driveGain,
+          params: { drive: driveGain.gain },
+          bases: { drive },
+        }
+      }
+
       case "compressor": {
         const c = ctx.createDynamicsCompressor()
         c.threshold.setValueAtTime(p.threshold ?? -24, now)
@@ -531,7 +566,9 @@ export function usePatchVoice(patch) {
     if (to.isSuper) {
       target = to.inputsByPort.get(toPort) ?? to.params?.[toPort] ?? null
     } else if (toPort === "in") {
-      target = to.node
+      // certains modules (ex: waveshaper) ont un nœud d'entrée distinct
+      // de leur nœud de sortie (pré-gain → node)
+      target = to.inputNode ?? to.node
     } else {
       target = to.params?.[toPort] ?? null
     }
