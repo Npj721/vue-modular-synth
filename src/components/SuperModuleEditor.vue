@@ -196,8 +196,8 @@ function deleteDef(def) {
   border: 1px solid #ddd;
   border-radius: 4px;
   overflow: hidden;
-  /* même gabarit que les éditeurs Voice / Main (PatchEditor = 100vh) */
-  height: 100vh;
+  /* même gabarit que les éditeurs Voice / Main (PatchEditor = 100vh moins le dock) */
+  height: calc(100vh - var(--dock-height, 0px));
 }
 
 /* =========================

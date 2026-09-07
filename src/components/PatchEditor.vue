@@ -200,7 +200,8 @@ onMounted(async () => {
         />
       </aside>
 
-      <!-- Center column -->
+      <!-- Center column : le paper occupe ici une hauteur fixe élevée,
+           le panneau de propriétés est une colonne à part (droite) -->
       <section class="editor-center">
         <!-- Paper -->
         <ModulePaper
@@ -214,21 +215,21 @@ onMounted(async () => {
           @module-added="handleModuleAdded"
           @module-moved="handleModuleMoved"
         />
+      </section>
 
-        <!-- Properties -->
-        <ModulePropertyPanel
-          v-if="selectedModule()"
-          class="editor-properties"
-          :module="selectedModule()"
-          @param-changed="handleParamChanged"
-          :style="'width:98.75%'"
-        />
+      <!-- Properties (colonne dédiée : ne peut pas écraser le paper) -->
+      <ModulePropertyPanel
+        v-if="selectedModule()"
+        class="editor-properties"
+        :module="selectedModule()"
+        @param-changed="handleParamChanged"
+        :style="'width:98.75%'"
+      />
         <!-- <SynthKeyboard
           :patch="patch"
         /> -->
 
         
-      </section>
     </div>
   </div>
 </template>
@@ -237,7 +238,7 @@ onMounted(async () => {
   .editor-root {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: calc(100vh - var(--dock-height, 0px));
     overflow: hidden;
   }
 
@@ -259,7 +260,7 @@ onMounted(async () => {
     display: grid;
     grid-template-columns:
       auto /* patch manager */
-      1fr /* paper */
+      minmax(720px, 1fr) /* paper : jamais plus petit que 720px */
       auto; /* properties */
     overflow: hidden;
   }
@@ -267,7 +268,7 @@ onMounted(async () => {
   /* sans patch manager, le canvas prend toute la largeur
      (sinon il tombe dans la colonne "auto" et rétrécit) */
   .editor-main.no-manager {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(720px, 1fr) auto;
   }
 
   /* =========================
@@ -318,6 +319,7 @@ onMounted(async () => {
   * ========================= */
   .editor-properties {
     width: 300px;
+    max-width: 60%;
     border-left: 1px solid #ddd;
     background: #fafafa;
     max-height: 400px;

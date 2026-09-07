@@ -28,7 +28,7 @@
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :style="{ '--dock-height': dockHeight + 'px' }">
     <div class="app-main" :style="{ paddingBottom: dockHeight + 'px' }">
       <SynthEditor v-model:patch="patch"/>
       <MidiController :patch="patch.value ? patch.value : patch" />

@@ -355,7 +355,7 @@ onMounted(() => {
     el: paperEl.value,
     model: graph,
     width: "100%",
-    height: 400,
+    height: 700,
     gridSize: 10,
     drawGrid: true,
     background: { color: "#F5F5F5" },
@@ -580,7 +580,7 @@ defineExpose({
 
 .paper {
   width: 100%;
-  height: 400px;
+  height: 700px;
   border: 1px solid #ddd;
 }
 
