@@ -74,8 +74,7 @@ const emit = defineEmits(["update:patch"])
 </script>
 <template>
 <div>
-    <h1>Sélection du patch</h1>
-    <div>
+    <div class="top-panel">
         <button :class="currentPatch === 'voice' ? 'button actif' : 'button'" @click="toggleVoicePatch">Voice</button>
         <button :class="currentPatch === 'main' ? 'button actif' : 'button'" class="button" @click="toggleMainPatch">Main</button>
         <button :class="currentPatch === 'super' ? 'button actif' : 'button'" class="button" @click="toggleSuperModules">Super Modules</button>
@@ -127,5 +126,9 @@ h1{
   background: #aaa;
   cursor: not-allowed;
   transform: none;
+}
+
+.top-panel{
+  background-color: #aaa;
 }
 </style>

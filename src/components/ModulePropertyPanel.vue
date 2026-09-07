@@ -59,7 +59,6 @@ const updateEnveloppe= (key, value) => {
 
 <template>
   <div v-if="module" class="property-panel">
-    {{ module }}
     <h3>{{ module.type }} Parameters</h3>
     <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' }">
       <label>{{ key }}</label>  

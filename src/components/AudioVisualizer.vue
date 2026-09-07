@@ -14,9 +14,9 @@ const oscCanvas = ref(null)
 const spectrumCanvas = ref(null)
 const specCanvas = ref(null)
 
-const OSC_HEIGHT = 160
-const SPECTRUM_HEIGHT = 160
-const SPEC_HEIGHT = 160
+const OSC_HEIGHT = 80
+const SPECTRUM_HEIGHT = 80
+const SPEC_HEIGHT = 80
 
 let analyser = null
 let rafId = 0

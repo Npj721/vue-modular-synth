@@ -194,8 +194,8 @@ onUnmounted(() => {
 }
 
 .key {
-  width: 56px;
-  height: 140px;
+  width: 28px;
+  height: 70px;
   border: 1px solid #999;
   background: #fdfdfd;
   cursor: pointer;
