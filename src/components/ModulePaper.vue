@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, toRaw } from "vue";
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, toRaw } from "vue";
 import { dia, shapes } from "@joint/core";
 import { useModuleCatalog } from "../composables/useModuleCatalog";
 
@@ -15,12 +15,17 @@ const emit = defineEmits([
 const props = defineProps({
   // étirer le canvas sur la hauteur du conteneur parent
   fillHeight: { type: Boolean, default: false },
+  // catégories à masquer dans le menu contextuel (ex: ["interface"])
+  excludeCategories: { type: Array, default: () => [] },
 });
 
 const paperEl = ref(null);
 let graph;
 let paper;
 let resizeObserver = null;
+
+let onDocKeyDown;
+let onDocPointerDown;
 
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
@@ -57,7 +62,141 @@ const zoomOut = () =>
 
 const modulesById = new Map();
 const selectedModule = ref(null);
-const { getModuleByType } = useModuleCatalog();
+const { getModuleByType, getCatalog, getModuleTypes } = useModuleCatalog();
+
+/* =========================
+ * CONTEXT MENU (clic droit)
+ * ========================= */
+const contextMenu = ref(null); // { x, y, graphX, graphY } | null
+const menuRef = ref(null);
+
+const CATEGORY_LABELS = {
+  source: 'Sources',
+  utility: 'Utility',
+  time: 'Time',
+  filter: 'Filters',
+  dynamics: 'Dynamics',
+  effect: 'Effects',
+  control: 'Control',
+  routing: 'Routing',
+  spatial: 'Spatial',
+  input: 'I/O',
+  output: 'I/O',
+  interface: 'Interface',
+  super: 'Super Modules',
+};
+
+const menuGroups = computed(() => {
+  const catalog = getCatalog();
+  const byCategory = new Map();
+
+  for (const type of getModuleTypes()) {
+    const def = catalog[type];
+    if (!def) continue;
+    if (props.excludeCategories.includes(def.category)) continue;
+
+    const category = def.category ?? 'other';
+    if (!byCategory.has(category)) byCategory.set(category, []);
+    byCategory.get(category).push({
+      type,
+      label: def.label,
+      color: def.color,
+    });
+  }
+
+  return [...byCategory.entries()].map(([category, modules]) => ({
+    category,
+    label: CATEGORY_LABELS[category] ?? category,
+    modules,
+  }));
+});
+
+const closeContextMenu = () => {
+  contextMenu.value = null;
+};
+
+const openContextMenu = async (evt) => {
+  evt.preventDefault();
+  evt.stopPropagation();
+
+  const rect = paperEl.value.getBoundingClientRect();
+  let x = evt.clientX - rect.left;
+  let y = evt.clientY - rect.top;
+
+  const graphPoint = paper.clientToLocalPoint({ x: evt.clientX, y: evt.clientY });
+  contextMenu.value = { x, y, graphX: graphPoint.x, graphY: graphPoint.y };
+
+  // garder le menu dans les limites du paper
+  await nextTick();
+  const menu = menuRef.value;
+  if (!menu) return;
+  const { width, height } = paperEl.value.getBoundingClientRect();
+  if (x + menu.offsetWidth > width) x = Math.max(0, width - menu.offsetWidth);
+  if (y + menu.offsetHeight > height) y = Math.max(0, height - menu.offsetHeight);
+  contextMenu.value.x = x;
+  contextMenu.value.y = y;
+};
+
+const addFromContextMenu = (type) => {
+  const menu = contextMenu.value;
+  if (!menu) return;
+  addModule(type, menu.graphX, menu.graphY);
+  closeContextMenu();
+};
+
+/* =========================
+ * COLLISION DETECTION
+ * ========================= */
+const MODULE_PADDING = 10;
+
+const checkCollision = (rect1, rect2) => {
+  return !(
+    rect1.x + rect1.width + MODULE_PADDING <= rect2.x ||
+    rect2.x + rect2.width + MODULE_PADDING <= rect1.x ||
+    rect1.y + rect1.height + MODULE_PADDING <= rect2.y ||
+    rect2.y + rect2.height + MODULE_PADDING <= rect1.y
+  );
+};
+
+const findFreePosition = (width, height, preferredX, preferredY) => {
+  const step = 20;
+  const maxRings = 20;
+
+  const isFree = (x, y) => {
+    const testRect = { x, y, width, height };
+    for (const [, mod] of modulesById) {
+      const pos = mod.shape.position();
+      const size = mod.shape.size();
+      const otherRect = { x: pos.x, y: pos.y, width: size.width, height: size.height };
+      if (checkCollision(testRect, otherRect)) return false;
+    }
+    return true;
+  };
+
+  if (isFree(preferredX, preferredY)) {
+    return { x: preferredX, y: preferredY };
+  }
+
+  for (let ring = 1; ring <= maxRings; ring++) {
+    const d = ring * step;
+
+    const positions = [];
+    for (let dx = -d; dx <= d; dx += step) {
+      positions.push({ x: preferredX + dx, y: preferredY - d });
+      positions.push({ x: preferredX + dx, y: preferredY + d });
+    }
+    for (let dy = -d + step; dy < d; dy += step) {
+      positions.push({ x: preferredX - d, y: preferredY + dy });
+      positions.push({ x: preferredX + d, y: preferredY + dy });
+    }
+
+    for (const pos of positions) {
+      if (isFree(pos.x, pos.y)) return pos;
+    }
+  }
+
+  return { x: preferredX, y: preferredY };
+};
 
 /* =========================
  * PORT GROUPS (Community Edition)
@@ -77,6 +216,41 @@ const portGroups = {
       text: { fill: "#000", fontSize: 10, textAnchor: "start", y: 0 },
     },
   },
+};
+
+/* =========================
+ * COLLISION PREVENTION (drag)
+ * ========================= */
+const dragOffset = { x: 0, y: 0 }; // position de départ du module en cours de drag
+
+const wouldCollide = (shape, x, y) => {
+  const size = shape.size();
+  const testRect = { x, y, width: size.width, height: size.height };
+
+  for (const [, mod] of modulesById) {
+    if (mod.shape === shape) continue;
+    const pos = mod.shape.position();
+    const otherRect = { x: pos.x, y: pos.y, width: mod.shape.size().width, height: mod.shape.size().height };
+    if (checkCollision(testRect, otherRect)) return true;
+  }
+  return false;
+};
+
+// retourne la position la plus proche (sans collision) d'une position demandée
+const clampToFree = (shape, x, y) => {
+  if (!wouldCollide(shape, x, y)) {
+    return { x, y };
+  }
+
+  // on garde la position de départ si elle est valide
+  if (!wouldCollide(shape, dragOffset.x, dragOffset.y)) {
+    return { x: dragOffset.x, y: dragOffset.y };
+  }
+
+  // sinon recherche une position libre autour de la position souhaitée
+  const size = shape.size();
+  const freePos = findFreePosition(size.width, size.height, x, y);
+  return freePos;
 };
 
 /* =========================
@@ -123,9 +297,11 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
 
   const height = Math.max(60, ports.length * 20);
 
+  const freePos = findFreePosition(160, height, x, y);
+
   const shape = new shapes.standard.Rectangle({
     id,
-    position: { x, y },
+    position: freePos,
     size: { width: 160, height },
     attrs: {
       body: { fill: def.color, strokeWidth: 2 },
@@ -185,7 +361,9 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
   };
 
   updatePortLabels();
-  shape.on("change:position", () => { updatePortLabels(); });
+  shape.on("change:position", () => {
+    updatePortLabels();
+  });
 
   return id;
 };
@@ -413,6 +591,31 @@ onMounted(() => {
     if (modulesById.has(view.model.id)) selectModule(view.model.id);
   });
 
+  // clic droit sur fond vide → menu d'ajout de modules
+  paper.on("blank:contextmenu", openContextMenu);
+  // clic droit sur un module → même menu (les liens gardent leur suppression)
+  paper.on("element:contextmenu", openContextMenu);
+
+  // début du drag : mémoriser la position de départ
+  paper.on("cell:pointerdown", (cellView) => {
+    const pos = cellView.model.position();
+    dragOffset.x = pos.x;
+    dragOffset.y = pos.y;
+  });
+
+  // pendant le drag : interdire les collisions (retour à la position libre)
+  paper.on("cell:pointermove", (cellView) => {
+    const model = cellView.model;
+    if (!modulesById.has(model.id)) return;
+
+    const pos = model.position();
+    const clamped = clampToFree(model, pos.x, pos.y);
+
+    if (clamped.x !== pos.x || clamped.y !== pos.y) {
+      model.position(clamped.x, clamped.y);
+    }
+  });
+
   paper.on("blank:pointerdown", (evt) => {
     if (!evt.ctrlKey) return;
 
@@ -487,6 +690,18 @@ onMounted(() => {
   // suppression module
   window.addEventListener("keydown", onKeyDown);
 
+  // fermeture du menu contextuel
+  onDocPointerDown = (evt) => {
+    if (!contextMenu.value) return;
+    if (menuRef.value && menuRef.value.contains(evt.target)) return;
+    closeContextMenu();
+  };
+  onDocKeyDown = (e) => {
+    if (e.key === "Escape") closeContextMenu();
+  };
+  document.addEventListener("pointerdown", onDocPointerDown, true);
+  document.addEventListener("keydown", onDocKeyDown);
+
   // hauteur responsive
   if (props.fillHeight && typeof ResizeObserver !== "undefined") {
     resizeObserver = new ResizeObserver((entries) => {
@@ -524,6 +739,8 @@ onBeforeUnmount(() => {
     resizeObserver = null;
   }
   window.removeEventListener("keydown", onKeyDown);
+  document.removeEventListener("keydown", onDocKeyDown);
+  document.removeEventListener("pointerdown", onDocPointerDown, true);
   paper?.remove();
   graph?.clear();
 });
@@ -548,6 +765,26 @@ defineExpose({
       <button @click="zoomIn">+</button>
     </div>
     <div ref="paperEl" class="paper" :class="{ fill: fillHeight }"></div>
+
+    <div
+      v-if="contextMenu"
+      ref="menuRef"
+      class="context-menu"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+    >
+      <div v-for="group in menuGroups" :key="group.category" class="ctx-group">
+        <div class="ctx-category">{{ group.label }}</div>
+        <button
+          v-for="mod in group.modules"
+          :key="mod.type"
+          class="ctx-item"
+          @click="addFromContextMenu(mod.type)"
+        >
+          <span class="ctx-dot" :style="{ backgroundColor: mod.color }"></span>
+          {{ mod.label }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -555,6 +792,7 @@ defineExpose({
 .paper-container {
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .paper-container.fill {
@@ -592,5 +830,60 @@ defineExpose({
 .paper.fill {
   flex: 1;
   min-height: 300px;
+}
+
+/* =========================
+ * CONTEXT MENU
+ * ========================= */
+.context-menu {
+  position: absolute;
+  z-index: 50;
+  min-width: 180px;
+  max-height: 70%;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.ctx-group + .ctx-group {
+  border-top: 1px solid #eee;
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.ctx-category {
+  padding: 2px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #666;
+  background: #fafafa;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-item:hover {
+  background: #eef4ff;
+}
+
+.ctx-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
 }
 </style>

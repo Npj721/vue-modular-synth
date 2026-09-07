@@ -1,6 +1,5 @@
 <script setup>
 import { ref, reactive, watch, onMounted, nextTick, toRaw } from "vue";
-import ModuleToolbar from "./ModuleToolbar.vue";
 import ModulePaper from "./ModulePaper.vue";
 import PatchManager from "./PatchManager.vue";
 import ModulePropertyPanel from "./ModulePropertyPanel.vue";
@@ -38,13 +37,6 @@ const emit = defineEmits(["update:patch"])
  * Sélection
  * -------------------- */
 const selectedModuleId = ref(null);
-
-/* =========================================================
- * TOOLBAR
- * ========================================================= */
-const handleAddModule = (type) => {
-  const id = paperRef.value.addModule(type, 150, 100);
-};
 
 /* =========================================================
  * MODULE SELECTION
@@ -181,14 +173,6 @@ onMounted(async () => {
 
 <template>
   <div class="editor-root">
-    <!-- Toolbar -->
-    <header class="editor-toolbar">
-      <ModuleToolbar
-        :exclude-categories="allowInterfaceModules ? [] : ['interface']"
-        @add-module="handleAddModule"
-      />
-    </header>
-
     <!-- Main area -->
     <div class="editor-main" :class="{ 'no-manager': !showPatchManager }">
       <!-- Patch manager (left) -->
@@ -208,6 +192,7 @@ onMounted(async () => {
           ref="paperRef"
           class="editor-paper"
           :fill-height="paperFillHeight"
+          :exclude-categories="allowInterfaceModules ? [] : ['interface']"
           @module-selected="handleModuleSelected"
           @module-removed="handleModuleRemoved"
           @connection-added="handleConnectionAdded"
@@ -223,7 +208,6 @@ onMounted(async () => {
         class="editor-properties"
         :module="selectedModule()"
         @param-changed="handleParamChanged"
-        :style="'width:98.75%'"
       />
         <!-- <SynthKeyboard
           :patch="patch"
@@ -240,16 +224,6 @@ onMounted(async () => {
     flex-direction: column;
     height: calc(100vh - var(--dock-height, 0px));
     overflow: hidden;
-  }
-
-  /* =========================
-  * TOOLBAR
-  * ========================= */
-  .editor-toolbar {
-    flex: 0 0 auto;
-    border-bottom: 1px solid #ccc;
-    background: #f5f5f5;
-    padding: 4px;
   }
 
   /* =========================
@@ -318,11 +292,11 @@ onMounted(async () => {
   * PROPERTIES
   * ========================= */
   .editor-properties {
-    width: 300px;
+    width: 600px;
     max-width: 60%;
     border-left: 1px solid #ddd;
     background: #fafafa;
-    max-height: 400px;
-    overflow: auto;
+    align-self: stretch;
+    overflow-y: auto;
   }
 </style>

@@ -113,11 +113,19 @@ const updateEnveloppe= (key, value) => {
 
 <style scoped>
 .property-panel {
-  border: 1px solid #ddd;
-  padding: 8px;
-  border-radius: 4px;
-  margin-top: 8px;
+  height: 100%;
+  padding: 12px;
   background-color: #f9f9f9;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.property-panel h3 {
+  margin-top: 0;
+  font-size: 14px;
+  text-transform: capitalize;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 8px;
 }
 
 .param-row {
