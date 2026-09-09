@@ -10,11 +10,18 @@ import { getSharedAnalyser, initSharedVoice } from "../composables/useSharedVoic
  * partie du patch : il observe le mix final réellement entendu.
  * ========================================================= */
 
+const props = defineProps({
+  notePreview: { type: Boolean, default: false }, // affiche la note jouée par défaut
+})
+
 const oscCanvas = ref(null)
 const spectrumCanvas = ref(null)
 const specCanvas = ref(null)
 
 const debug = false
+
+// état local piloté par la prop, basculable via le bouton
+const notePreviewEnabled = ref(props.notePreview)
 
 const OSC_HEIGHT = 80
 const SPECTRUM_HEIGHT = 80
@@ -31,10 +38,17 @@ let running = false
 const debugState = ref("initialisation…")
 
 /* ------------------------------------------------------------------
- * Détection de la note jouée (pitch tracking par autocorrélation
- * sur le signal temporel de l'analyser, en sortie réelle du mix).
- * Fonctionne bien en monophonie ; en polyphonie le fondamental
- * dominant est affiché.
+ * Détection de la note jouée.
+ *
+ * Le max global de l'autocorrélation est instable sur un synthé :
+ * dès que la périodicité au fondamental faiblit (enveloppe, harmoniques
+ * riches), un petit lag (≈ 4 kHz) devient le pic dominant → affichage
+ * qui "saute" (ex: B7/C4 en alternance sur une même note). On corrige :
+ *  - corrélation NORMALISÉE (critère -1..1, compense le biais des petits retards)
+ *  - sélection parmi les PICS LOCAUX seulement
+ *  - CONTINUITÉ DE PITCH : tant qu'une note est verrouillée, seuls les
+ *    pics dans ±1 octave du retard précédent concourent ; sinon (nouvelle
+ *    note ou incertitude forte) on retombe sur le meilleur pic global.
  * ------------------------------------------------------------------ */
 
 const noteLabel = ref("—")
@@ -44,14 +58,18 @@ const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", 
 const MIN_FREQ = 40 // plage utile du tracking (40 Hz → 4 kHz)
 const MAX_FREQ = 4000
 const SILENCE_MS = 250 // efface la note après ce délai de silence
-const CORRELATION_MIN = 0.8 // confiance minimale de l'autocorrélation
+const CORRELATION_MIN = 0.7 // confiance minimale d'un pic d'autocorrélation
 const VOICED_MIN = 0.004 // énergie RMS minimale (signal quasi nul = silence)
 const SMOOTH_FRAMES = 8 // médiane glissante pour stabiliser l'affichage
+const OCTAVES_WINDOW = 2 // ±1 octave autour du pitch verrouillé (facteur 2)
+const OCTAVES_WIDER = 8 // ±3 octaves seulement si aucun pic proche
 
 let pitchBuffer = []
 let pitchLastVoicedAt = 0
 let pitchSamples = null
 let pitchCorr = null
+let pitchEnergy = null
+let lastFreq = null // fréquence verrouillée de la note en cours
 
 /* fréquence → note la plus proche + cents d'écart */
 function freqToNote(freq) {
@@ -65,22 +83,26 @@ function freqToNote(freq) {
   }
 }
 
-/* autocorrélation → fréquence fondamentale, ou null si silence/infiable */
+/* autocorrélation normalisée → fréquence fondamentale, ou null si infiable */
 function detectPitch() {
   const n = timeData ? timeData.length : 0
   if (!n || !analyser) return null
 
   if (!pitchSamples || pitchSamples.length < n) pitchSamples = new Float32Array(n)
   if (!pitchCorr || pitchCorr.length < n) pitchCorr = new Float32Array(n)
+  if (!pitchEnergy || pitchEnergy.length < n + 1) pitchEnergy = new Float64Array(n + 1)
 
-  // signal centré (128 = zéro dans un Uint8Array) + énergie
   const sr = analyser.context.sampleRate
-  let energy = 0
   analyser.getByteTimeDomainData(timeData)
+
+  // signal centré (128 = zéro dans un Uint8Array) + énergie cumulée
+  let energy = 0
+  pitchEnergy[0] = 0
   for (let i = 0; i < n; i++) {
     const s = (timeData[i] - 128) / 128
     pitchSamples[i] = s
     energy += s * s
+    pitchEnergy[i + 1] = pitchEnergy[i] + s * s
   }
   const rms = Math.sqrt(energy / n)
   if (rms < VOICED_MIN) return null // silence
@@ -88,35 +110,70 @@ function detectPitch() {
   const minLag = Math.max(2, Math.round(sr / MAX_FREQ))
   const maxLag = Math.min(n - 2, Math.round(sr / MIN_FREQ))
 
-  let bestLag = -1
-  let bestCorr = -1
+  // corrélation normalisée : r(lag) = Σ x[i]·x[i+lag] / sqrt(Σx[i]²·Σx[i+lag]²)
   for (let lag = minLag; lag <= maxLag; lag++) {
-    let sum = 0
     const lim = n - lag
-    for (let i = 0; i < lim; i++) sum += pitchSamples[i] * pitchSamples[i + lag]
-    pitchCorr[lag] = sum
-    if (sum > bestCorr) {
-      bestCorr = sum
-      bestLag = lag
+    const e0 = pitchEnergy[lim]
+    const e1 = pitchEnergy[n] - pitchEnergy[lag]
+    const denom = Math.sqrt(e0 * e1)
+    if (denom < 1e-12) {
+      pitchCorr[lag] = 0
+      continue
     }
+    let sum = 0
+    for (let i = 0; i < lim; i++) sum += pitchSamples[i] * pitchSamples[i + lag]
+    pitchCorr[lag] = sum / denom
   }
 
-  if (bestLag < 0 || bestCorr / energy < CORRELATION_MIN) return null
+  // maxima locaux au-dessus du seuil de confiance
+  const peaks = []
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    const c = pitchCorr[lag]
+    if (c >= pitchCorr[lag - 1] && c > pitchCorr[lag + 1] && c >= CORRELATION_MIN) {
+      peaks.push({ lag, c })
+    }
+  }
+  if (!peaks.length) return null
+
+  const maxPeak = peaks.reduce((a, b) => (b.c > a.c ? b : a))
+  const inWindow = (p, factor) => {
+    const center = sr / lastFreq
+    return p.lag >= center / factor && p.lag <= center * factor
+  }
+
+  // continuité : tant que la note est verrouillée, on reste près du lag précédent
+  let best = null
+  if (lastFreq && lastFreq >= MIN_FREQ && lastFreq <= MAX_FREQ) {
+    const near = peaks.filter((p) => inWindow(p, OCTAVES_WINDOW))
+    if (near.length) {
+      best = near.reduce((a, b) => (b.c > a.c ? b : a))
+    } else {
+      // aucun pic proche : n'accepter un pic lointain que si la meilleure
+      // corrélation de la fenêtre élargie reste comparable au meilleur pic global
+      const wider = peaks.filter((p) => inWindow(p, OCTAVES_WIDER))
+      if (wider.length) {
+        const wm = wider.reduce((a, b) => (b.c > a.c ? b : a))
+        if (wm.c >= 0.7 * maxPeak.c) best = wm
+      }
+    }
+  }
+  if (!best) best = maxPeak
 
   // interpolation parabolique autour du pic pour une précision sub-échantillon
-  let lag = bestLag
-  if (bestLag > minLag && bestLag < maxLag) {
-    const r1 = pitchCorr[bestLag - 1]
-    const r2 = pitchCorr[bestLag + 1]
-    const denom = r1 - 2 * bestCorr + r2
+  let lag = best.lag
+  if (best.lag > minLag && best.lag < maxLag) {
+    const r1 = pitchCorr[best.lag - 1]
+    const r2 = pitchCorr[best.lag + 1]
+    const denom = r1 - 2 * best.c + r2
     if (Math.abs(denom) > 1e-9) {
       const delta = 0.5 * (r1 - r2) / denom
-      if (delta > -1 && delta < 1) lag = bestLag + delta
+      if (delta > -1 && delta < 1) lag = best.lag + delta
     }
   }
 
   const freq = sr / lag
   if (!isFinite(freq) || freq <= 0) return null
+  lastFreq = freq
   return freq
 }
 
@@ -272,27 +329,35 @@ function frame() {
     if (spectrumCanvas.value) drawSpectrum(spectrumCanvas.value, SPECTRUM_HEIGHT)
     if (specCanvas.value) drawSpectrogram()
 
-    // --- détection de la note courante ---
-    let freq = null
-    try {
-      freq = detectPitch()
-    } catch {
-      /* analyseur trop récent : on attend la frame suivante */
-    }
-    if (freq !== null) {
-      pitchBuffer.push(freq)
-      if (pitchBuffer.length > SMOOTH_FRAMES) pitchBuffer.shift()
-      pitchLastVoicedAt = performance.now()
-    } else if (performance.now() - pitchLastVoicedAt > SILENCE_MS) {
-      pitchBuffer.length = 0
-    }
+    // --- détection de la note courante (si la vue est activée) ---
+    if (notePreviewEnabled.value) {
+      let freq = null
+      try {
+        freq = detectPitch()
+      } catch {
+        /* analyseur trop récent : on attend la frame suivante */
+      }
+      if (freq !== null) {
+        pitchBuffer.push(freq)
+        if (pitchBuffer.length > SMOOTH_FRAMES) pitchBuffer.shift()
+        pitchLastVoicedAt = performance.now()
+      } else if (performance.now() - pitchLastVoicedAt > SILENCE_MS) {
+        pitchBuffer.length = 0
+        lastFreq = null // nouvelle note → on relance la détection libre
+      }
 
-    if (pitchBuffer.length) {
-      const sorted = pitchBuffer.slice().sort((a, b) => a - b)
-      const { label, cents } = freqToNote(sorted[Math.floor(sorted.length / 2)])
-      noteLabel.value = label
-      noteCents.value = cents
+      if (pitchBuffer.length) {
+        const sorted = pitchBuffer.slice().sort((a, b) => a - b)
+        const { label, cents } = freqToNote(sorted[Math.floor(sorted.length / 2)])
+        noteLabel.value = label
+        noteCents.value = cents
+      } else {
+        noteLabel.value = "—"
+        noteCents.value = null
+      }
     } else {
+      pitchBuffer.length = 0
+      lastFreq = null
       noteLabel.value = "—"
       noteCents.value = null
     }
@@ -349,9 +414,20 @@ onUnmounted(() => {
 
 <template>
   <div class="audio-visualizer">
-    <div v-if="debug" class="viz-title">Visualisation de la sortie</div>
+    <div class="viz-toolbar">
+      <span class="viz-title">Visualisation de la sortie</span>
+      <button
+        class="viz-toggle"
+        :class="{ active: notePreviewEnabled }"
+        type="button"
+        :aria-pressed="notePreviewEnabled"
+        @click="notePreviewEnabled = !notePreviewEnabled"
+      >
+        Note jouée : {{ notePreviewEnabled ? "activée" : "désactivée" }}
+      </button>
+    </div>
     <div v-if="debug" class="viz-debug">{{ debugState }}</div>
-    <div class="viz-note-panel">
+    <div v-if="notePreviewEnabled" class="viz-note-panel">
       <span class="viz-label">Note jouée</span>
       <span class="viz-note-name">{{ noteLabel }}</span>
       <span v-if="noteCents != null" class="viz-note-cents">
@@ -382,7 +458,32 @@ onUnmounted(() => {
 }
 .viz-title {
   font-weight: bold;
+  color: #00ffd0;
+}
+.viz-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 8px;
+}
+.viz-toggle {
+  background: #04120e;
+  color: #7ad4c0;
+  border: 1px solid #1e3a30;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.viz-toggle:hover {
+  border-color: #00ffd0;
+}
+.viz-toggle.active {
+  background: #0a2b22;
+  border-color: #00ffd0;
   color: #00ffd0;
 }
 .viz-debug {
