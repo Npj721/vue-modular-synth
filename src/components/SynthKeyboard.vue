@@ -8,6 +8,10 @@ const props = defineProps({
     type: Object,
     required: true,
   },
+  numOctaves: {
+    type: Number,
+    default: 5,
+  },
 })
 
 /* =========================
@@ -21,7 +25,6 @@ const heldByTouch = ref(new Map())
 /* =========================
  * Piano layout (from example/synth.js)
  * ========================= */
-const NUM_OCTAVES = 2
 const START_MIDI = 60 // C4
 const WHITE_SEMITONES = [0, 2, 4, 5, 7, 9, 11]
 const BLACK_SEMITONES = [1, 3, 6, 8, 10]
@@ -48,7 +51,7 @@ function midiFreq(m) {
 const pianoKeys = computed(() => {
   const keys = []
 
-  for (let oct = 0; oct < NUM_OCTAVES; oct++) {
+  for (let oct = 0; oct < props.numOctaves; oct++) {
     for (let i = 0; i < 7; i++) {
       const midi = START_MIDI + oct * 12 + WHITE_SEMITONES[i]
       keys.push({
@@ -62,7 +65,7 @@ const pianoKeys = computed(() => {
   }
 
   const blackPositions = [0, 1, 3, 4, 5]
-  for (let oct = 0; oct < NUM_OCTAVES; oct++) {
+  for (let oct = 0; oct < props.numOctaves; oct++) {
     for (let i = 0; i < 5; i++) {
       const midi = START_MIDI + oct * 12 + BLACK_SEMITONES[i]
       keys.push({
@@ -227,6 +230,7 @@ onUnmounted(() => {
   <div class="synth-keyboard">
     <div
       class="piano"
+      :style="{ '--num-white-keys': numOctaves * 7 }"
       @touchstart="onTouchStart"
       @touchmove="onTouchMove"
       @touchend="onTouchEnd"
@@ -245,7 +249,7 @@ onUnmounted(() => {
         :style="
           key.type === 'black'
             ? {
-                left: `calc(${(key.oct * 7 + key.idx + 1) * (100 / (NUM_OCTAVES * 7))}% - ${8}px)`,
+                left: `calc(${(key.oct * 7 + key.idx + 1) * (100 / (numOctaves * 7))}% - ${8}px)`,
               }
             : {}
         "
@@ -286,7 +290,7 @@ onUnmounted(() => {
 .piano-key.white {
   position: relative;
   float: left;
-  width: calc(100% / 14);
+  width: calc(100% / var(--num-white-keys));
   height: 100%;
   background: linear-gradient(to bottom, #f8f8f8, #fff);
   border: 1px solid #bbb;
