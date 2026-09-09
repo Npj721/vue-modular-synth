@@ -589,6 +589,7 @@ const catalog = reactive({
         stages: {
           type: "envelope",
           default: {
+            loop: false,
             press: [
               {
                 from: 0,
@@ -670,6 +671,7 @@ const catalog = reactive({
         stages: {
           type: "envelope",
           default: {
+            loop: false,
             press: [
               {
                 from: 0,

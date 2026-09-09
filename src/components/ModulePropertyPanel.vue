@@ -59,8 +59,17 @@ const emitLabel = () => {
 }
 
 const updateEnveloppe= (key, value) => {
-  params.stages = value
-  emit('param-changed', { key, value })
+  // le GraphEnvelopeEditor n'émet que { press, release } :
+  // préserver le drapeau "loop" du modèle
+  const loop = params.stages?.loop ?? false
+  params.stages = { ...value, loop }
+  emit('param-changed', { key, value: params.stages })
+}
+
+const toggleLoop = () => {
+  const value = !(params.stages?.loop ?? false)
+  params.stages = { ...(params.stages || {}), loop: value }
+  emit('param-changed', { key: 'stages', value: params.stages })
 }
 </script>
 
@@ -117,6 +126,14 @@ const updateEnveloppe= (key, value) => {
         :presets-key="'env:' + module.type"
         @update="val => updateEnveloppe(key, val)"
       />
+      <label v-if="def.type === 'envelope'" class="param-loop">
+        <input
+          type="checkbox"
+          :checked="!!(params.stages && params.stages.loop)"
+          @change="toggleLoop"
+        />
+        <span>Loop continue (sustain très long)</span>
+      </label>
       <AudioFilePicker
         v-else-if="def.type === 'audioFile'"
         :value="params[key]"
@@ -179,5 +196,15 @@ const updateEnveloppe= (key, value) => {
   align-self: flex-start;
 }
 
+.param-loop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #333;
+  margin-bottom: 8px;
+  user-select: none;
+  cursor: pointer;
+}
 
 </style>

@@ -9,6 +9,12 @@ import { getAudioBuffer } from "./useAudioBufferCache"
 
 const EPS = 0.0001
 
+// Enveloppes loopables : durée totale couverte par les cycles planifiés
+// d'avance dans la timeline Web Audio (un très long "sustain" simulé par
+// la répétition des stages press). Pas de timer pendant la lecture.
+const LOOP_HORIZON_SECONDS = 180 // ≈ 3 min d'automation
+const LOOP_MAX_SCHEDULES = 4096 // garde-fou si le cycle est ultracourt
+
 const noteToFreq = (note) =>
   440 * Math.pow(2, (note - 69) / 12)
 
@@ -60,18 +66,9 @@ function normalizeGraph(graph) {
  * Envelope scheduler
  * ========================================================= */
 
-function scheduleStages(param, stages, ctx, velocity = 1, base = 1, startOffset = 0) {
-  const now = ctx.currentTime
-  const t0 = now + startOffset
-
-  if (param.cancelAndHoldAtTime) {
-    param.cancelAndHoldAtTime(now)
-  } else {
-    const v = param.value
-    param.cancelScheduledValues(now)
-    param.setValueAtTime(v, now)
-  }
-
+/* Programme un cycle complet d'enveloppe sur le param, à partir de la date
+ * absolue t0, sans toucher aux évènements déjà planifiés. */
+function scheduleCycle(param, stages, ctx, velocity = 1, base = 1, t0) {
   let t = t0
 
   for (const stage of stages) {
@@ -87,7 +84,7 @@ function scheduleStages(param, stages, ctx, velocity = 1, base = 1, startOffset 
       to = Math.max(EPS, to)
     }
 
-    param.setValueAtTime(from, t)
+    //param.setValueAtTime(from, t)
     t += stage.duration
 
     if (stage.curve === "exponential") {
@@ -98,6 +95,52 @@ function scheduleStages(param, stages, ctx, velocity = 1, base = 1, startOffset 
   }
 
   return t - t0
+}
+
+function scheduleStages(param, stages, ctx, velocity = 1, base = 1, startOffset = 0) {
+  const now = ctx.currentTime
+  const t0 = now + startOffset
+
+  if (param.cancelAndHoldAtTime) {
+    param.cancelAndHoldAtTime(now)
+  } else {
+    const v = param.value
+    param.cancelScheduledValues(now)
+    param.setValueAtTime(v, now)
+  }
+
+  return scheduleCycle(param, stages, ctx, velocity, base, t0)
+}
+
+/* Enveloppe LOOPABLE : répète les stages "press" N fois en incrémentant le
+ * décalage de la durée totale d'un cycle. Tout est planifié d'avance dans la
+ * timeline Web Audio (les évènements se touchent exactement), aucune boucle
+ * JS n'est exécutée pendant la lecture → précision échantillon, même pour
+ * des cycles plus courts qu'un millisecond. */
+function scheduleLoopingEnvelope(param, stages, ctx, velocity = 1, base = 1, startOffset = 0) {
+  const cycle = getEnvelopeDuration(stages)
+  if (!(cycle > 0)) {
+    return scheduleStages(param, stages, ctx, velocity, base, startOffset)
+  }
+
+  const now = ctx.currentTime
+
+  // reset UNE seule fois : cancelAndHoldAtTime annulerait les itérations posées
+  if (param.cancelAndHoldAtTime) {
+    param.cancelAndHoldAtTime(now)
+  } else {
+    const v = param.value
+    param.cancelScheduledValues(now)
+    param.setValueAtTime(v, now)
+  }
+
+  const total = Math.max(1, Math.ceil(LOOP_HORIZON_SECONDS / cycle))
+  const n = Math.min(total, LOOP_MAX_SCHEDULES)
+  const t0 = now + startOffset
+
+  for (let i = 0; i < n; i++) {
+    scheduleCycle(param, stages, ctx, velocity, base, t0 + i * cycle)
+  }
 }
 
 /* =========================================================
@@ -589,7 +632,11 @@ export function usePatchVoice(patch) {
       // si la cible est alimentée par un oscillateur décalé, l'attaque
       // de l'enveloppe démarre au même instant (release non décalé)
       const shift = audioDelay?.get(c.to.id) ?? 0
-      scheduleStages(target, stages.press, ctx, o.velocity, baseValue, shift)
+      if (stages.loop === true) {
+        scheduleLoopingEnvelope(target, stages.press, ctx, o.velocity, baseValue, shift)
+      } else {
+        scheduleStages(target, stages.press, ctx, o.velocity, baseValue, shift)
+      }
 
       o.activeEnvs.push({
         param: target,
