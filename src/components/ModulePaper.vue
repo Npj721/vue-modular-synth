@@ -387,6 +387,14 @@ const selectModule = (id) => {
   emit("module-selected", module);
 };
 
+const deselectModule = () => {
+  if (selectedModule.value) {
+    selectedModule.value.shape.attr("body/class", "module-body");
+    selectedModule.value = null;
+    emit("module-selected", null);
+  }
+};
+
 const clearGraph = () => {
   selectedModule.value = null
   modulesById.clear()
@@ -591,6 +599,11 @@ onMounted(() => {
   // click sur module
   paper.on("cell:pointerclick", (view) => {
     if (modulesById.has(view.model.id)) selectModule(view.model.id);
+  });
+
+  // clic sur fond vide → désélection du module courant
+  paper.on("blank:pointerclick", () => {
+    deselectModule();
   });
 
   // clic droit sur fond vide → menu d'ajout de modules

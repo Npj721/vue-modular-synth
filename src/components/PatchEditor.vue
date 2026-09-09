@@ -42,7 +42,7 @@ const selectedModuleId = ref(null);
  * MODULE SELECTION
  * ========================================================= */
 const handleModuleSelected = (module) => {
-  selectedModuleId.value = module.id;
+  selectedModuleId.value = module ? module.id : null;
 };
 
 /* =========================================================
