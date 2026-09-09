@@ -87,7 +87,17 @@ const clearPatch = () => {
   selectedModuleId.value = null;
 };
 
-defineExpose({ clearPatch });
+/* Charge un patch externe (redessin du paper + source de vérité).
+   Utilisé par le Patch Manager du "synthé complet". */
+const loadPatchExternal = (data) => {
+  const clone = JSON.parse(JSON.stringify(toRaw(data) ?? {}));
+  paperRef.value?.loadPatch(clone);
+  patch.modules.splice(0, patch.modules.length, ...(clone.modules ?? []));
+  patch.connections.splice(0, patch.connections.length, ...(clone.connections ?? []));
+  selectedModuleId.value = null;
+};
+
+defineExpose({ clearPatch, loadPatch: loadPatchExternal });
 
 /* =========================================================
  * CONNECTIONS

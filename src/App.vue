@@ -33,10 +33,6 @@
       <SynthEditor v-model:patch="patch"/>
       <MidiController :patch="patch.value ? patch.value : patch" />
       <MultiTrackSequencer :patch="patch.value ? patch.value : patch" />
-      <h1>patch</h1>
-      <div>
-        {{ patch }}
-      </div>
     </div>
 
     <div class="bottom-dock" ref="dock">

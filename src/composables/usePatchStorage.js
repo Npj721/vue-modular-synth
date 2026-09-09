@@ -1,8 +1,8 @@
-const STORAGE_KEY = "modular-patches"
+const DEFAULT_KEY = "modular-patches"
 
-export function usePatchStorage() {
+export function usePatchStorage(key = DEFAULT_KEY) {
   const list = () => {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(key)
     return raw ? JSON.parse(raw) : {}
   }
 
@@ -12,7 +12,7 @@ export function usePatchStorage() {
       ...patch,
       savedAt: Date.now()
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(patches))
+    localStorage.setItem(key, JSON.stringify(patches))
   }
 
   const load = (name) => {
@@ -22,7 +22,7 @@ export function usePatchStorage() {
   const remove = (name) => {
     const patches = list()
     delete patches[name]
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(patches))
+    localStorage.setItem(key, JSON.stringify(patches))
   }
 
   const names = () => Object.keys(list())

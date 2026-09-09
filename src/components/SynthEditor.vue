@@ -2,6 +2,7 @@
 import { ref, reactive, watch } from "vue"
 import PatchEditor from "./PatchEditor.vue";
 import SuperModuleEditor from "./SuperModuleEditor.vue";
+import SynthPatchManager from "./SynthPatchManager.vue";
 
 const currentPatch = ref("voice")
 
@@ -35,6 +36,22 @@ const clearCurrentPatch = () => {
   if (!editor) return
   if (!confirm(`Effacer entièrement le patch ${currentPatch.value} ?`)) return
   editor.clearPatch()
+}
+
+/* =========================
+ * Synthé complet (voice + main) : chargement dans les deux éditeurs.
+ * Chaque PatchEditor redessine son paper puis resynchronise sa source
+ * de vérité ; le watch deep de SynthEditor propage le nouveau synthé
+ * à l'App (MidiController, MultiTrackSequencer) et déclenche le
+ * rebuild du moteur audio partagé.
+ * ========================= */
+const handleSynthPatchLoaded = (synthPatch) => {
+  const voiceData = synthPatch.voicePatch || { modules: [], connections: [] };
+  const mainData = synthPatch.mainPatch || { modules: [], connections: [] };
+  //if (confirm("Charger ce synthé complet ? Les patches voice et main actuels seront remplacés.")) {
+    voiceEditor.value?.loadPatch(voiceData);
+    mainEditor.value?.loadPatch(mainData);
+  //}
 }
 
 const props = defineProps({
@@ -74,6 +91,11 @@ const emit = defineEmits(["update:patch"])
 </script>
 <template>
 <div>
+    <SynthPatchManager
+      :voice-patch="voicePatch"
+      :main-patch="mainPatch"
+      @load="handleSynthPatchLoaded"
+    />
     <div class="top-panel">
         <button :class="currentPatch === 'voice' ? 'button actif' : 'button'" @click="toggleVoicePatch">Voice</button>
         <button :class="currentPatch === 'main' ? 'button actif' : 'button'" class="button" @click="toggleMainPatch">Main</button>
