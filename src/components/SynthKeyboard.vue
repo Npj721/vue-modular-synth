@@ -245,7 +245,7 @@ onUnmounted(() => {
         :style="
           key.type === 'black'
             ? {
-                left: `calc(${(key.oct * 7 + key.idx) * (100 / (NUM_OCTAVES * 7))}% + ${100 / (NUM_OCTAVES * 7) / 2}% - ${7}px)`,
+                left: `calc(${(key.oct * 7 + key.idx + 1) * (100 / (NUM_OCTAVES * 7))}% - ${7}px)`,
               }
             : {}
         "
