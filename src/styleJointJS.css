@@ -28,6 +28,22 @@
 }
 
 /* =========================
+ * COPY (drag du module sélectionné)
+ * ========================= */
+
+.module-body.is-copy-target {
+  stroke: #00c9a7;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px rgba(0, 201, 167, 0.55));
+}
+
+.module-body.is-copy-flash {
+  stroke: #ffd54d;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 8px rgba(255, 213, 77, 0.7));
+}
+
+/* =========================
  * ANIMATION
  * ========================= */
 

@@ -10,6 +10,7 @@ const emit = defineEmits([
   "module-moved",
   "connection-added",
   "connection-removed",
+  "module-param-copied",
 ]);
 
 const props = defineProps({
@@ -224,6 +225,43 @@ const portGroups = {
  * ========================= */
 const dragOffset = { x: 0, y: 0 }; // position de départ du module en cours de drag
 
+// mode "copie de paramètres" : drag sur le module sélectionné = copie au lieu de déplacer
+let copyDrag = false;
+let copyDragged = false;
+let copyTargetId = null;
+
+const moduleAtLocal = (x, y) => {
+  for (const [, m] of modulesById) {
+    if (m.id === selectedModule.value?.id) continue;
+    const p = m.shape.position();
+    const s = m.shape.size();
+    if (x >= p.x && x <= p.x + s.width && y >= p.y && y <= p.y + s.height) return m;
+  }
+  return null;
+};
+
+const setCopyTarget = (target) => {
+  if (copyTargetId === (target?.id ?? null)) return;
+  if (copyTargetId) {
+    const prev = modulesById.get(copyTargetId);
+    if (prev) prev.shape.attr("body/class", "module-body");
+  }
+  copyTargetId = target?.id ?? null;
+  if (target) target.shape.attr("body/class", "module-body is-copy-target");
+};
+
+const cancelCopyDrag = () => {
+  copyDrag = false;
+  if (copyTargetId) {
+    const t = modulesById.get(copyTargetId);
+    if (t) t.shape.attr("body/class", "module-body");
+  }
+  copyTargetId = null;
+  if (selectedModule.value) {
+    selectedModule.value.shape.attr("body/class", "module-body is-selected");
+  }
+};
+
 const wouldCollide = (shape, x, y) => {
   const size = shape.size();
   const testRect = { x, y, width: size.width, height: size.height };
@@ -403,6 +441,20 @@ const setModuleLabel = (id, label) => {
   module.label = label || "";
   const def = getModuleByType(module.type);
   module.shape.attr("label/text", module.label || (def ? def.label : ""));
+};
+
+// synchronise le paramètre d'un module (source de vérité : la donnée patch)
+const setModuleParam = (id, key, value) => {
+  const module = modulesById.get(id);
+  if (!module) return;
+  module.params[key] = value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+};
+
+// remplace tous les paramètres d'un module (utilisé après une copie)
+const setModuleParams = (id, params) => {
+  const module = modulesById.get(id);
+  if (!module) return;
+  module.params = structuredClone(params);
 };
 
 const clearGraph = () => {
@@ -631,21 +683,77 @@ onMounted(() => {
 
   // début du drag : mémoriser la position de départ
   paper.on("cell:pointerdown", (cellView) => {
-    const pos = cellView.model.position();
+    const model = cellView.model;
+    if (!modulesById.has(model.id)) return;
+
+    copyDrag = false;
+    copyDragged = false;
+    copyTargetId = null;
+
+    const pos = model.position();
     dragOffset.x = pos.x;
     dragOffset.y = pos.y;
+
+    // module sélectionné → drag = copie de paramètres, pas déplacement
+    if (selectedModule.value && selectedModule.value.id === model.id) {
+      copyDrag = true;
+    }
   });
 
   // pendant le drag : interdire les collisions (retour à la position libre)
-  paper.on("cell:pointermove", (cellView) => {
+  paper.on("cell:pointermove", (cellView, evt, x, y) => {
     const model = cellView.model;
     if (!modulesById.has(model.id)) return;
+    const mod = modulesById.get(model.id);
+
+    // mode copie : le module sélectionné ne bouge pas, on repère la cible
+    if (copyDrag && selectedModule.value?.id === mod.id) {
+      copyDragged = true;
+      const pos = model.position();
+      if (pos.x !== dragOffset.x || pos.y !== dragOffset.y) {
+        model.position(dragOffset.x, dragOffset.y);
+      }
+      const target = moduleAtLocal(x, y);
+      setCopyTarget(target && target.type === mod.type ? target : null);
+      return;
+    }
 
     const pos = model.position();
     const clamped = clampToFree(model, pos.x, pos.y);
 
     if (clamped.x !== pos.x || clamped.y !== pos.y) {
       model.position(clamped.x, clamped.y);
+    }
+  });
+
+  // drop en mode copie : transférer les paramètres vers le module cible
+  paper.on("cell:pointerup", (cellView, evt, x, y) => {
+    if (!copyDrag || !copyDragged) {
+      cancelCopyDrag();
+      return;
+    }
+    const model = cellView.model;
+    if (!modulesById.has(model.id)) return;
+    const mod = modulesById.get(model.id);
+    const target = moduleAtLocal(x, y);
+    const canCopy =
+      target &&
+      target.type === mod.type &&
+      target.id !== mod.id;
+
+    cancelCopyDrag();
+    if (selectedModule.value?.id === mod.id) {
+      model.attr("body/class", "module-body is-selected");
+    }
+
+    if (canCopy) {
+      emit("module-param-copied", { sourceId: mod.id, targetId: target.id });
+
+      target.shape.attr("body/class", "module-body is-copy-flash");
+      setTimeout(() => {
+        const m = modulesById.get(target.id);
+        if (m) m.shape.attr("body/class", "module-body");
+      }, 400);
     }
   });
 
@@ -789,7 +897,9 @@ defineExpose({
   importPatch,
   loadPatch,
   clearGraph,
-  setModuleLabel
+  setModuleLabel,
+  setModuleParam,
+  setModuleParams
 })
 
 </script>

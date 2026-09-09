@@ -117,6 +117,9 @@ const handleParamChanged = ({ key, value }) => {
   if (!module) return;
 
   module.params[key] = value;
+  // synchronise le wrapper du paper (source de vérité : la donnée patch,
+  // pas l'objet interne du module dessiné à l'écran)
+  paperRef.value?.setModuleParam(selectedModuleId.value, key, value);
 };
 
 const handleLabelChanged = (label) => {
@@ -127,6 +130,20 @@ const handleLabelChanged = (label) => {
 
   module.label = label;
   paperRef.value?.setModuleLabel(module.id, label);
+};
+
+/* Copie des paramètres d'un module vers un autre (drag du module sélectionné).
+   La source de vérité est la donnée live du patch (patch.modules), et non
+   l'objet interne du paper (qui peut être obsolète si les params ont été
+   modifiés via le panneau). */
+const handleParamCopied = ({ sourceId, targetId }) => {
+  const source = patch.modules.find((m) => m.id === sourceId);
+  const target = patch.modules.find((m) => m.id === targetId);
+  if (!source || !target) return;
+
+  const copied = JSON.parse(JSON.stringify(source.params));
+  target.params = copied;
+  paperRef.value?.setModuleParams(targetId, copied);
 };
 
 const handleModuleAdded = ({ id, type, params, position, label = "" }) => {
@@ -210,6 +227,7 @@ onMounted(async () => {
           @connection-removed="handleConnectionRemoved"
           @module-added="handleModuleAdded"
           @module-moved="handleModuleMoved"
+          @module-param-copied="handleParamCopied"
         />
       </section>
     </div>
