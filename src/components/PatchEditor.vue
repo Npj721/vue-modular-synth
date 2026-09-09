@@ -201,27 +201,22 @@ onMounted(async () => {
           @module-moved="handleModuleMoved"
         />
       </section>
-
-      <!-- Properties (colonne dédiée : ne peut pas écraser le paper) -->
-      <ModulePropertyPanel
-        v-if="selectedModule()"
-        class="editor-properties"
-        :module="selectedModule()"
-        @param-changed="handleParamChanged"
-      />
-        <!-- <SynthKeyboard
-          :patch="patch"
-        /> -->
-
-        
     </div>
+
+    <!-- Properties (colonne dédiée : collée à droite, à côté du paper) -->
+    <ModulePropertyPanel
+      v-if="selectedModule()"
+      class="editor-properties"
+      :module="selectedModule()"
+      @param-changed="handleParamChanged"
+    />
   </div>
 </template>
 
 <style scoped>
   .editor-root {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     height: calc(100vh - var(--dock-height, 0px));
     overflow: hidden;
   }
@@ -294,6 +289,7 @@ onMounted(async () => {
   .editor-properties {
     width: 600px;
     max-width: 60%;
+    flex-shrink: 0;
     border-left: 1px solid #ddd;
     background: #fafafa;
     align-self: stretch;
