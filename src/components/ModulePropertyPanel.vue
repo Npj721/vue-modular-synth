@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { useModuleCatalog } from '../composables/useModuleCatalog'
 import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
@@ -8,11 +8,12 @@ const props = defineProps({
   module: { type: Object, default: null }
 })
 
-const emit = defineEmits(['param-changed'])
+const emit = defineEmits(['param-changed', 'label-changed'])
 
 // Réactif pour l'affichage
 const params = reactive({})
 const paramDefs = reactive({})
+const label = ref("")
 
 const { getModuleByType } = useModuleCatalog()
 
@@ -25,6 +26,8 @@ watch(
     Object.keys(paramDefs).forEach(k => delete paramDefs[k])
 
     if (!mod) return
+
+    label.value = mod.label || ""
 
     const def = getModuleByType(mod.type)
     if (!def) return
@@ -51,6 +54,10 @@ const emitChange = (key, value) => {
   emit('param-changed', { key, value })
 }
 
+const emitLabel = () => {
+  emit('label-changed', label.value)
+}
+
 const updateEnveloppe= (key, value) => {
   params.stages = value
   emit('param-changed', { key, value })
@@ -60,6 +67,15 @@ const updateEnveloppe= (key, value) => {
 <template>
   <div v-if="module" class="property-panel">
     <h3>{{ module.type }} Parameters</h3>
+    <div class="module-label">
+      <input
+        v-model="label"
+        type="text"
+        placeholder="Label du module (ex: lead)"
+        @input="emitLabel"
+      />
+      <span v-if="label" class="hint">utilisé comme préfixe des paramètres exposés</span>
+    </div>
     <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' }">
       <label>{{ key }}</label>  
       <!-- Number slider -->
@@ -126,6 +142,25 @@ const updateEnveloppe= (key, value) => {
   text-transform: capitalize;
   border-bottom: 1px solid #ddd;
   padding-bottom: 8px;
+}
+
+.module-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.module-label input {
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.module-label .hint {
+  font-size: 11px;
+  color: #888;
 }
 
 .param-row {

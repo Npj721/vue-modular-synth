@@ -119,12 +119,23 @@ const handleParamChanged = ({ key, value }) => {
   module.params[key] = value;
 };
 
-const handleModuleAdded = ({ id, type, params, position }) => {
+const handleLabelChanged = (label) => {
+  if (!selectedModuleId.value) return;
+
+  const module = patch.modules.find((m) => m.id === selectedModuleId.value);
+  if (!module) return;
+
+  module.label = label;
+  paperRef.value?.setModuleLabel(module.id, label);
+};
+
+const handleModuleAdded = ({ id, type, params, position, label = "" }) => {
   patch.modules.push({
     id,
     type,
     params: params,
-    position
+    position,
+    label
   })
 }
 
@@ -204,12 +215,13 @@ onMounted(async () => {
     </div>
 
     <!-- Properties (colonne dédiée : collée à droite, à côté du paper) -->
-    <ModulePropertyPanel
-      v-if="selectedModule()"
-      class="editor-properties"
-      :module="selectedModule()"
-      @param-changed="handleParamChanged"
-    />
+<ModulePropertyPanel
+        v-if="selectedModule()"
+        class="editor-properties"
+        :module="selectedModule()"
+        @param-changed="handleParamChanged"
+        @label-changed="handleLabelChanged"
+      />
   </div>
 </template>
 

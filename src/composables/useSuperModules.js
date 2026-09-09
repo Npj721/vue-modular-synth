@@ -89,6 +89,7 @@ function uniquePortId(base, taken) {
  * Cumule les paramètres de tous les modules internes.
  * - clé simple si unique ("detune", "gain")
  * - préfixée par le label du module en cas de collision ("voice.detune")
+ * - le préfixe est le label personnalisé du module si défini (ex: "lead.gain")
  * - suffixée (_2, _3...) si toujours en collision ("gain.gain_2")
  * Les valeurs courantes du canvas deviennent les défauts du super-module.
  */
@@ -110,7 +111,9 @@ function aggregateParams(graphModules) {
     const def = getModuleByType(m.type);
     if (!def || def.category === "interface") continue;
 
-    const slug = slugify(def.label);
+    const slug = slugify(
+      (m.label && m.label.trim()) || def.label
+    );
 
     for (const [key, pdef] of Object.entries(def.params ?? {})) {
       let flat = key;

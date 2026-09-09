@@ -257,7 +257,7 @@ const clampToFree = (shape, x, y) => {
 /* =========================
  * ADD MODULE
  * ========================= */
-const addModule = (type, x = 100, y = 100, forcedId = null) => {
+const addModule = (type, x = 100, y = 100, forcedId = null, initialLabel = null) => {
   const def = getModuleByType(type);
   if (!def) return;
 
@@ -306,7 +306,7 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
     size: { width: 160, height },
     attrs: {
       body: { fill: def.color, strokeWidth: 2 },
-      label: { text: def.label, fill: "#fff" },
+      label: { text: initialLabel || def.label, fill: "#fff" },
     },
     ports: { groups: portGroups, items: ports },
   });
@@ -316,6 +316,7 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
   modulesById.set(id, {
     id,
     type,
+    label: initialLabel || "",
     params: JSON.parse(
       JSON.stringify(
         Object.fromEntries(
@@ -329,6 +330,7 @@ const addModule = (type, x = 100, y = 100, forcedId = null) => {
   emit("module-added", {
     id: shape.id,
     type,
+    label: initialLabel || "",
     params: structuredClone(modulesById.get(id).params),
     position: shape.position()
   });
@@ -395,6 +397,14 @@ const deselectModule = () => {
   }
 };
 
+const setModuleLabel = (id, label) => {
+  const module = modulesById.get(id);
+  if (!module) return;
+  module.label = label || "";
+  const def = getModuleByType(module.type);
+  module.shape.attr("label/text", module.label || (def ? def.label : ""));
+};
+
 const clearGraph = () => {
   selectedModule.value = null
   modulesById.clear()
@@ -412,6 +422,7 @@ const exportPatch = () => {
     modules: [...modulesById.values()].map(m => ({
       id: m.id,
       type: m.type,
+      label: m.label || "",
       position: m.shape.position(),
       params: JSON.parse(JSON.stringify(toRaw(m.params)))
     })),
@@ -435,7 +446,7 @@ const importPatch = (patch) => {
 
   // recréer les modules
   patch.modules.forEach(m => {
-    addModule(m.type, m.position.x, m.position.y, m.id)
+    addModule(m.type, m.position.x, m.position.y, m.id, m.label)
 
     const module = modulesById.get(m.id)
     if (module && m.params) {
@@ -474,7 +485,7 @@ const loadPatch = (patch) => {
   // recréer les modules
   patch.modules.forEach((m) => {
     // addModule retourne maintenant la vraie shape
-    const shape = addModule(m.type, m.position.x, m.position.y, m.id)
+    const shape = addModule(m.type, m.position.x, m.position.y, m.id, m.label)
     if (!shape) return
 
     const module = modulesById.get(m.id)
@@ -777,7 +788,8 @@ defineExpose({
   exportPatch,
   importPatch,
   loadPatch,
-  clearGraph
+  clearGraph,
+  setModuleLabel
 })
 
 </script>
