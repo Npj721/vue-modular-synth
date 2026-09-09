@@ -245,7 +245,7 @@ onUnmounted(() => {
         :style="
           key.type === 'black'
             ? {
-                left: `calc(${(key.oct * 7 + key.idx + 1) * (100 / (NUM_OCTAVES * 7))}% - ${7}px)`,
+                left: `calc(${(key.oct * 7 + key.idx + 1) * (100 / (NUM_OCTAVES * 7))}% - ${8}px)`,
               }
             : {}
         "
@@ -286,12 +286,12 @@ onUnmounted(() => {
 .piano-key.white {
   position: relative;
   float: left;
-  width: calc(100% / 14 - 2px);
+  width: calc(100% / 14);
   height: 100%;
-  margin: 0 1px;
   background: linear-gradient(to bottom, #f8f8f8, #fff);
   border: 1px solid #bbb;
   border-top: none;
+  border-right: 1px solid #aaa;
   border-radius: 0 0 4px 4px;
   z-index: 1;
   display: flex;
@@ -315,7 +315,7 @@ onUnmounted(() => {
 
 .piano-key.black {
   position: absolute;
-  width: 14px;
+  width: 16px;
   height: 70px;
   background: linear-gradient(to bottom, #333, #111);
   border: 1px solid #000;
