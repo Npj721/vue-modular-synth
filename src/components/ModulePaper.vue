@@ -224,6 +224,7 @@ const portGroups = {
  * COLLISION PREVENTION (drag)
  * ========================= */
 const dragOffset = { x: 0, y: 0 }; // position de départ du module en cours de drag
+const lastFreePos = { x: 0, y: 0 }; // dernière position libre (sans collision) pendant le drag
 
 // mode "copie de paramètres" : drag sur le module sélectionné = copie au lieu de déplacer
 let copyDrag = false;
@@ -281,9 +282,9 @@ const clampToFree = (shape, x, y) => {
     return { x, y };
   }
 
-  // on garde la position de départ si elle est valide
-  if (!wouldCollide(shape, dragOffset.x, dragOffset.y)) {
-    return { x: dragOffset.x, y: dragOffset.y };
+  // dernière position valable avant la collision (pas la position de départ)
+  if (!wouldCollide(shape, lastFreePos.x, lastFreePos.y)) {
+    return { x: lastFreePos.x, y: lastFreePos.y };
   }
 
   // sinon recherche une position libre autour de la position souhaitée
@@ -693,6 +694,8 @@ onMounted(() => {
     const pos = model.position();
     dragOffset.x = pos.x;
     dragOffset.y = pos.y;
+    lastFreePos.x = pos.x;
+    lastFreePos.y = pos.y;
 
     // module sélectionné → drag = copie de paramètres, pas déplacement
     if (selectedModule.value && selectedModule.value.id === model.id) {
@@ -719,10 +722,13 @@ onMounted(() => {
     }
 
     const pos = model.position();
-    const clamped = clampToFree(model, pos.x, pos.y);
-
-    if (clamped.x !== pos.x || clamped.y !== pos.y) {
+    if (wouldCollide(model, pos.x, pos.y)) {
+      const clamped = clampToFree(model, pos.x, pos.y);
       model.position(clamped.x, clamped.y);
+    } else {
+      // position restée libre → nouvelle référence valable pour la suite
+      lastFreePos.x = pos.x;
+      lastFreePos.y = pos.y;
     }
   });
 
