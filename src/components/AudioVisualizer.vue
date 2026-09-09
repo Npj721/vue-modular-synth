@@ -31,6 +31,96 @@ let running = false
 const debugState = ref("initialisation…")
 
 /* ------------------------------------------------------------------
+ * Détection de la note jouée (pitch tracking par autocorrélation
+ * sur le signal temporel de l'analyser, en sortie réelle du mix).
+ * Fonctionne bien en monophonie ; en polyphonie le fondamental
+ * dominant est affiché.
+ * ------------------------------------------------------------------ */
+
+const noteLabel = ref("—")
+const noteCents = ref(null)
+
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+const MIN_FREQ = 40 // plage utile du tracking (40 Hz → 4 kHz)
+const MAX_FREQ = 4000
+const SILENCE_MS = 250 // efface la note après ce délai de silence
+const CORRELATION_MIN = 0.8 // confiance minimale de l'autocorrélation
+const VOICED_MIN = 0.004 // énergie RMS minimale (signal quasi nul = silence)
+const SMOOTH_FRAMES = 8 // médiane glissante pour stabiliser l'affichage
+
+let pitchBuffer = []
+let pitchLastVoicedAt = 0
+let pitchSamples = null
+let pitchCorr = null
+
+/* fréquence → note la plus proche + cents d'écart */
+function freqToNote(freq) {
+  const midi = 69 + 12 * Math.log2(freq / 440)
+  const rounded = Math.round(midi)
+  const cents = Math.round((midi - rounded) * 100)
+  const idx = ((rounded % 12) + 12) % 12
+  return {
+    label: `${NOTE_NAMES[idx]}${Math.floor(rounded / 12) - 1}`,
+    cents,
+  }
+}
+
+/* autocorrélation → fréquence fondamentale, ou null si silence/infiable */
+function detectPitch() {
+  const n = timeData ? timeData.length : 0
+  if (!n || !analyser) return null
+
+  if (!pitchSamples || pitchSamples.length < n) pitchSamples = new Float32Array(n)
+  if (!pitchCorr || pitchCorr.length < n) pitchCorr = new Float32Array(n)
+
+  // signal centré (128 = zéro dans un Uint8Array) + énergie
+  const sr = analyser.context.sampleRate
+  let energy = 0
+  analyser.getByteTimeDomainData(timeData)
+  for (let i = 0; i < n; i++) {
+    const s = (timeData[i] - 128) / 128
+    pitchSamples[i] = s
+    energy += s * s
+  }
+  const rms = Math.sqrt(energy / n)
+  if (rms < VOICED_MIN) return null // silence
+
+  const minLag = Math.max(2, Math.round(sr / MAX_FREQ))
+  const maxLag = Math.min(n - 2, Math.round(sr / MIN_FREQ))
+
+  let bestLag = -1
+  let bestCorr = -1
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let sum = 0
+    const lim = n - lag
+    for (let i = 0; i < lim; i++) sum += pitchSamples[i] * pitchSamples[i + lag]
+    pitchCorr[lag] = sum
+    if (sum > bestCorr) {
+      bestCorr = sum
+      bestLag = lag
+    }
+  }
+
+  if (bestLag < 0 || bestCorr / energy < CORRELATION_MIN) return null
+
+  // interpolation parabolique autour du pic pour une précision sub-échantillon
+  let lag = bestLag
+  if (bestLag > minLag && bestLag < maxLag) {
+    const r1 = pitchCorr[bestLag - 1]
+    const r2 = pitchCorr[bestLag + 1]
+    const denom = r1 - 2 * bestCorr + r2
+    if (Math.abs(denom) > 1e-9) {
+      const delta = 0.5 * (r1 - r2) / denom
+      if (delta > -1 && delta < 1) lag = bestLag + delta
+    }
+  }
+
+  const freq = sr / lag
+  if (!isFinite(freq) || freq <= 0) return null
+  return freq
+}
+
+/* ------------------------------------------------------------------
  * Palette du spectrogramme (noir → bleu → vert → jaune → rouge)
  * ------------------------------------------------------------------ */
 function specColor(v) {
@@ -182,6 +272,31 @@ function frame() {
     if (spectrumCanvas.value) drawSpectrum(spectrumCanvas.value, SPECTRUM_HEIGHT)
     if (specCanvas.value) drawSpectrogram()
 
+    // --- détection de la note courante ---
+    let freq = null
+    try {
+      freq = detectPitch()
+    } catch {
+      /* analyseur trop récent : on attend la frame suivante */
+    }
+    if (freq !== null) {
+      pitchBuffer.push(freq)
+      if (pitchBuffer.length > SMOOTH_FRAMES) pitchBuffer.shift()
+      pitchLastVoicedAt = performance.now()
+    } else if (performance.now() - pitchLastVoicedAt > SILENCE_MS) {
+      pitchBuffer.length = 0
+    }
+
+    if (pitchBuffer.length) {
+      const sorted = pitchBuffer.slice().sort((a, b) => a - b)
+      const { label, cents } = freqToNote(sorted[Math.floor(sorted.length / 2)])
+      noteLabel.value = label
+      noteCents.value = cents
+    } else {
+      noteLabel.value = "—"
+      noteCents.value = null
+    }
+
     // mesure des niveaux pour le HUD (temps + spectre)
     let tmin = 255
     let tmax = 0
@@ -236,6 +351,13 @@ onUnmounted(() => {
   <div class="audio-visualizer">
     <div v-if="debug" class="viz-title">Visualisation de la sortie</div>
     <div v-if="debug" class="viz-debug">{{ debugState }}</div>
+    <div class="viz-note-panel">
+      <span class="viz-label">Note jouée</span>
+      <span class="viz-note-name">{{ noteLabel }}</span>
+      <span v-if="noteCents != null" class="viz-note-cents">
+        {{ noteCents > 0 ? "+" : "" }}{{ noteCents }}¢
+      </span>
+    </div>
     <div class="viz-grid">
       <div class="viz-panel">
         <div class="viz-label">Oscilloscope</div>
@@ -278,6 +400,28 @@ onUnmounted(() => {
 .viz-panel {
   flex: 1 1 280px;
   min-width: 260px;
+}
+.viz-note-panel {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+  background: #04120e;
+  border: 1px solid #1e3a30;
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+.viz-note-name {
+  font-size: 22px;
+  font-weight: bold;
+  font-family: monospace;
+  color: #00ffd0;
+  min-width: 64px;
+}
+.viz-note-cents {
+  font-family: monospace;
+  font-size: 12px;
+  color: #7ad4c0;
 }
 .viz-label {
   font-size: 11px;
