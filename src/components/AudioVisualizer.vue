@@ -14,6 +14,8 @@ const oscCanvas = ref(null)
 const spectrumCanvas = ref(null)
 const specCanvas = ref(null)
 
+const debug = false
+
 const OSC_HEIGHT = 80
 const SPECTRUM_HEIGHT = 80
 const SPEC_HEIGHT = 80
@@ -232,8 +234,8 @@ onUnmounted(() => {
 
 <template>
   <div class="audio-visualizer">
-    <div class="viz-title">Visualisation de la sortie</div>
-    <div class="viz-debug">{{ debugState }}</div>
+    <div v-if="debug" class="viz-title">Visualisation de la sortie</div>
+    <div v-if="debug" class="viz-debug">{{ debugState }}</div>
     <div class="viz-grid">
       <div class="viz-panel">
         <div class="viz-label">Oscilloscope</div>
@@ -253,10 +255,6 @@ onUnmounted(() => {
 
 <style scoped>
 .audio-visualizer {
-  margin-top: 16px;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
   background: #0c1410;
   color: #cfd8d4;
 }
