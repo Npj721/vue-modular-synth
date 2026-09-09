@@ -144,7 +144,7 @@ const catalog = reactive({
       },
 
       params: {
-        frequency: num(20, 20000, 1, 440),
+        frequency: num(0.01, 20000, 1, 4),
         detune: num(-1200, 1200, 1, 0),
         delay: num(0, 5, 0.001, 0),
         type: {
