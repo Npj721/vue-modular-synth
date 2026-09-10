@@ -482,12 +482,21 @@ export function usePatchVoice(patch) {
         const constantNode = ctx.createConstantSource()
         const value = p.value ?? 1
         constantNode.offset.setValueAtTime(value, now)
+
+        // port "in" : le flux d'entrée module l'offset (a-rate) via un gain
+        const modIn = ctx.createGain()
+        modIn.gain.setValueAtTime(1, now)
+        modIn.connect(constantNode.offset)
+
         if (!o.deferStart) safeStart(constantNode, now)
         o.started.push({ node: constantNode, delay: 0, startAt: now })
+
         return {
           node: constantNode,
+          inputNode: modIn,
+          inParam: constantNode.offset, // une enveloppe/CV branchée sur "in" programme l'offset
           params: { offset: constantNode.offset },
-          bases: { value },
+          bases: { offset: value, in: value },
         }
       }
 
@@ -625,6 +634,7 @@ export function usePatchVoice(patch) {
     // --- cible : AudioNode ou AudioParam ---
     let target = null
     let modParam = null // AudioParam à moduler (entrée audio de super-module)
+    let inParam = null // AudioParam modulé par un port "in" (ex: constant.offset)
     let modTargets = null // AudioParams internes ciblés par un port super.in
 
     if (to.isSuper) {
@@ -643,6 +653,7 @@ export function usePatchVoice(patch) {
       // certains modules (ex: waveshaper) ont un nœud d'entrée distinct
       // de leur nœud de sortie (pré-gain → node)
       target = to.inputNode ?? to.node
+      inParam = to.inParam ?? null
     } else {
       target = to.params?.[toPort] ?? null
     }
@@ -681,13 +692,13 @@ export function usePatchVoice(patch) {
         return
       }
 
-      const param = modParam ?? target
-      const paramName = modParam ? "gain" : toPort
+      const param = modParam ?? inParam ?? target
+      const paramName = modParam ? "gain" : inParam ? "in" : toPort
       let baseValue = 1
       if (from.modParams.modulation === "relative") {
         baseValue = to.bases?.[paramName] ?? 1
       }
-      scheduleOn(param, baseValue, paramName === "gain")
+      scheduleOn(param, baseValue, paramName === "gain" || paramName === "in")
       return
     }
 

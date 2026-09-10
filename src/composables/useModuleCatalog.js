@@ -640,7 +640,15 @@ const catalog = reactive({
       singleton: false,
 
       ports: {
-        inputs: [],
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "modulatable",
+            multiple: true,
+          },
+        ],
         outputs: [
           {
             id: "offset",
@@ -660,44 +668,6 @@ const catalog = reactive({
           max: 1000,
           step: 0.001,
           default: 1,
-        },
-
-        modulation: {
-          type: "enum",
-          values: ["replace", "relative"],
-          default: "relative",
-        },
-
-        stages: {
-          type: "envelope",
-          default: {
-            loop: false,
-            press: [
-              {
-                from: 0,
-                to: 1,
-                duration: 0.05,
-                curve: "linear",
-              },
-            ],
-            release: [
-              {
-                from: "current",
-                to: 0,
-                duration: 0.2,
-                curve: "linear",
-              },
-            ],
-          },
-        },
-
-        loop: {
-          type: "object",
-          default: {
-            enabled: false,
-            start: 0,
-            end: 0,
-          },
         },
       },
     },
