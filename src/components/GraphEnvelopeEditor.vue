@@ -492,6 +492,31 @@ function selectTool(tool) {
 }
 
 /* ------------------------------------------------------------------
+ * Étirer / rétrécir : applique un offset (s) à la durée de chaque stage.
+ * Les valeurs restent identiques, seuls les instants sont décalés.
+ * ------------------------------------------------------------------ */
+function offsetPhaseDuration(p, deltaSec) {
+  const pts = phasePoints(p)
+  if (pts.length < 2) return
+  const MIN = 0.0001
+  const durs = []
+  for (let i = 1; i < pts.length; i++) durs.push(pts[i].t - pts[i - 1].t)
+  let t = 0
+  pts[0].t = 0
+  for (let i = 0; i < durs.length; i++) {
+    // chaque stage ne peut pas descendre sous la durée minimale
+    t += Math.max(MIN, durs[i] + deltaSec)
+    pts[i + 1].t = t
+  }
+  commit()
+  requestAnimationFrame(draw)
+}
+
+function offsetBy(p, ms) {
+  offsetPhaseDuration(p, ms / 1000)
+}
+
+/* ------------------------------------------------------------------
  * Presets (localStorage)
  * ------------------------------------------------------------------ */
 function loadPresets() {
@@ -667,6 +692,10 @@ onBeforeUnmount(() => {
       <div class="env-head">
         <h4>Press (Note On)</h4>
         <span class="env-phase-status">{{ Math.max(0, phases.press.length - 1) }} stage(s) · {{ Math.round(phaseDuration('press') * 1000) }} ms</span>
+        <div class="env-stretch-btns">
+          <button title="Rétrécir chaque stage (100 ms)" @click="offsetBy('press', -1)">−</button>
+          <button title="Étirer chaque stage (100 ms)" @click="offsetBy('press', 1)">+</button>
+        </div>
       </div>
       <div class="env-tools">
         <span class="env-tools-label">Courbe :</span>
@@ -697,6 +726,10 @@ onBeforeUnmount(() => {
       <div class="env-head">
         <h4>Release (Note Off)</h4>
         <span class="env-phase-status">{{ Math.max(0, phases.release.length - 1) }} stage(s) · {{ Math.round(phaseDuration('release') * 1000) }} ms</span>
+        <div class="env-stretch-btns">
+          <button title="Rétrécir chaque stage (100 ms)" @click="offsetBy('release', -1)">−</button>
+          <button title="Étirer chaque stage (100 ms)" @click="offsetBy('release', 1)">+</button>
+        </div>
       </div>
       <div class="env-tools">
         <span class="env-tools-label">Courbe :</span>
@@ -729,6 +762,10 @@ onBeforeUnmount(() => {
         <div class="env-head">
           <h4>{{ cfg.label }}</h4>
           <span class="env-phase-status">{{ tableData[cfg.key].length }} stage(s)</span>
+          <div class="env-stretch-btns">
+            <button title="Rétrécir chaque stage (1 ms)" @click="offsetBy(cfg.key, -1)">−</button>
+            <button title="Étirer chaque stage (1 ms)" @click="offsetBy(cfg.key, 1)">+</button>
+          </div>
         </div>
         <table class="env-table">
           <thead>
@@ -938,6 +975,25 @@ onBeforeUnmount(() => {
 .env-phase-status {
   color: #666;
   font-size: 11px;
+}
+.env-stretch-btns {
+  display: flex;
+  gap: 4px;
+}
+.env-stretch-btns button {
+  width: 24px;
+  height: 22px;
+  line-height: 1;
+  padding: 0;
+  font-size: 14px;
+  background: #333;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.env-stretch-btns button:hover {
+  background: #444;
 }
 .env-tools {
   display: flex;
