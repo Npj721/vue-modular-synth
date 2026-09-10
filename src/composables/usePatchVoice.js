@@ -84,7 +84,7 @@ function scheduleCycle(param, stages, ctx, velocity = 1, base = 1, t0) {
       to = Math.max(EPS, to)
     }
 
-    //param.setValueAtTime(from, t)
+    param.setValueAtTime(from, t)
     t += stage.duration
 
     if (stage.curve === "exponential") {
