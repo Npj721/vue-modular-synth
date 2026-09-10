@@ -381,11 +381,15 @@ function onMouseMove(e, p) {
 
   if (draggedPoint && draggedPoint.p === p) {
     const d = screenToData(sx, sy, p)
-    draggedPoint.point.t = d.t
+    const idx = pts.indexOf(draggedPoint.point)
+    // Le dernier point est ancré à la durée totale de la phase : déplacer le
+    // point ne change que sa valeur (vertical), jamais la durée totale.
+    const isLast = idx === pts.length - 1
+    draggedPoint.point.t = isLast ? pts[pts.length - 1].t : d.t
     draggedPoint.point.v = d.v
     normalizePoints(pts)
     requestAnimationFrame(draw)
-    showTooltip(e, d.t, d.v)
+    showTooltip(e, draggedPoint.point.t, draggedPoint.point.v)
   } else {
     const idx = hitTest(sx, sy, p)
     if (idx !== null) showTooltip(e, pts[idx].t, pts[idx].v)
