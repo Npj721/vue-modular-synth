@@ -642,6 +642,24 @@ onMounted(() => {
       }
 
       /* =========================
+       * MODULATION SUR ENTRÉE DE SUPER-MODULE
+       *
+       * Une enveloppe/CV (sortie "modulator") branchée sur une entrée
+       * audio d'un super-module module le gain d'entrée (volume du signal
+       * qui entre dans le super-module). Ce n'est possible que pour les
+       * entrées audio des super-modules : les ports intègrent un gain
+       * de bordure modulable, contrairement aux autres entrées audio.
+       * ========================= */
+      if (
+        sRole === "modulator" &&
+        tRole === "audioIn" &&
+        modulesById.get(tgtView.model.id)?.type &&
+        getModuleByType(modulesById.get(tgtView.model.id).type)?.isSuper
+      ) {
+        return true;
+      }
+
+      /* =========================
        * MODULATION (RÈGLE GÉNÉRALISÉE)
        *
        * Toute sortie "modulator" (envelope, constant, gain...)

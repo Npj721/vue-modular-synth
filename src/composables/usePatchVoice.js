@@ -566,6 +566,23 @@ export function usePatchVoice(patch) {
       boundaryOut,
     })
 
+    // 3bis. ports d'entrée reliés à des AudioParams internes (ex: detune) :
+    // une enveloppe/CV branchée sur le port programme chacun d'eux
+    const modTargetsByPort = new Map()
+    for (const port of def.inputs) {
+      const tList = []
+      for (const c of def.graph.connections ?? []) {
+        if (c.from?.id !== port.moduleId) continue
+        const [, toPort = "in"] = (c.to.port ?? "in:in").split(":")
+        const tgt = inner.nodes.get(c.to?.id)
+        const param = tgt?.params?.[toPort]
+        if (param && typeof param.setValueAtTime === "function") {
+          tList.push({ param, base: tgt.bases?.[toPort] ?? 1 })
+        }
+      }
+      if (tList.length) modTargetsByPort.set(port.portId, tList)
+    }
+
     // 4. exposer les AudioParams internes modulables depuis l'extérieur
     //    (ex: supervoice.gain est directement le GainNode interne)
     const params = {}
@@ -588,6 +605,7 @@ export function usePatchVoice(patch) {
       bases,
       inputsByPort,
       outputsByPort,
+      modTargetsByPort,
       isSuper: true,
     }
   }
@@ -606,8 +624,21 @@ export function usePatchVoice(patch) {
 
     // --- cible : AudioNode ou AudioParam ---
     let target = null
+    let modParam = null // AudioParam à moduler (entrée audio de super-module)
+    let modTargets = null // AudioParams internes ciblés par un port super.in
+
     if (to.isSuper) {
-      target = to.inputsByPort.get(toPort) ?? to.params?.[toPort] ?? null
+      const inNode = to.inputsByPort.get(toPort)
+      // port d'entrée relié à des AudioParams internes (ex: detune) :
+      // une enveloppe/CV doit programmer chacun de ces paramètres
+      modTargets = to.modTargetsByPort?.get(toPort) ?? null
+      if (inNode) {
+        // le flux audio passe par le gain de bordure du port
+        target = inNode
+        modParam = inNode.gain
+      } else {
+        target = to.params?.[toPort] ?? null
+      }
     } else if (toPort === "in") {
       // certains modules (ex: waveshaper) ont un nœud d'entrée distinct
       // de leur nœud de sortie (pré-gain → node)
@@ -618,33 +649,45 @@ export function usePatchVoice(patch) {
 
     // --- enveloppe : aucun flux audio, on programme uniquement le paramètre ---
     if (from.modulator) {
-      if (!target || typeof target.setValueAtTime !== "function") return
+      const stages = from.modParams.stages
+      if (!stages?.press?.length) return
 
-      const paramName = toPort
+      const shift = audioDelay?.get(c.to.id) ?? 0
+      const looping = stages.loop === true
+
+      const scheduleOn = (param, baseValue, affectsAmplitude = false) => {
+        if (!param || typeof param.setValueAtTime !== "function") return
+        if (looping) {
+          scheduleLoopingEnvelope(param, stages.press, ctx, o.velocity, baseValue, shift)
+        } else {
+          scheduleStages(param, stages.press, ctx, o.velocity, baseValue, shift)
+        }
+        o.activeEnvs.push({
+          param,
+          base: baseValue,
+          release: stages.release,
+          affectsAmplitude,
+          modulatorType: from.modType,
+        })
+      }
+
+      // port super.in relié à des AudioParams internes (ex: detune) :
+      // l'enveloppe programme chaque paramètre à sa valeur de base
+      if (modTargets?.length) {
+        const replace = from.modParams.modulation === "replace"
+        for (const { param, base } of modTargets) {
+          scheduleOn(param, replace ? 1 : base)
+        }
+        return
+      }
+
+      const param = modParam ?? target
+      const paramName = modParam ? "gain" : toPort
       let baseValue = 1
       if (from.modParams.modulation === "relative") {
         baseValue = to.bases?.[paramName] ?? 1
       }
-
-      const stages = from.modParams.stages
-      if (!stages?.press?.length) return
-
-      // si la cible est alimentée par un oscillateur décalé, l'attaque
-      // de l'enveloppe démarre au même instant (release non décalé)
-      const shift = audioDelay?.get(c.to.id) ?? 0
-      if (stages.loop === true) {
-        scheduleLoopingEnvelope(target, stages.press, ctx, o.velocity, baseValue, shift)
-      } else {
-        scheduleStages(target, stages.press, ctx, o.velocity, baseValue, shift)
-      }
-
-      o.activeEnvs.push({
-        param: target,
-        base: baseValue,
-        release: stages.release,
-        affectsAmplitude: paramName === "gain",
-        modulatorType: from.modType,
-      })
+      scheduleOn(param, baseValue, paramName === "gain")
       return
     }
 
