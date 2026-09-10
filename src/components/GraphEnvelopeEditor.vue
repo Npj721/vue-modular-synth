@@ -662,7 +662,7 @@ onBeforeUnmount(() => {
       <div class="env-editor">
       <div class="env-head">
         <h4>Press (Note On)</h4>
-        <span class="env-phase-status">{{ Math.max(0, phases.press.length - 1) }} stage(s)</span>
+        <span class="env-phase-status">{{ Math.max(0, phases.press.length - 1) }} stage(s) · {{ Math.round(phaseDuration('press') * 1000) }} ms</span>
       </div>
       <div class="env-tools">
         <span class="env-tools-label">Courbe :</span>
@@ -692,7 +692,7 @@ onBeforeUnmount(() => {
     <div class="env-editor">
       <div class="env-head">
         <h4>Release (Note Off)</h4>
-        <span class="env-phase-status">{{ Math.max(0, phases.release.length - 1) }} stage(s)</span>
+        <span class="env-phase-status">{{ Math.max(0, phases.release.length - 1) }} stage(s) · {{ Math.round(phaseDuration('release') * 1000) }} ms</span>
       </div>
       <div class="env-tools">
         <span class="env-tools-label">Courbe :</span>
