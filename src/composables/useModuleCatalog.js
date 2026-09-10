@@ -643,9 +643,10 @@ const catalog = reactive({
         inputs: [
           {
             id: "in",
-            label: "In",
-            kind: "audio",
+            label: "Offset",
+            kind: "param",
             role: "modulatable",
+            rate: "a-rate",
             multiple: true,
           },
         ],
