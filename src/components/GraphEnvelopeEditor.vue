@@ -148,11 +148,15 @@ function normalizePoints(pts) {
  * ------------------------------------------------------------------ */
 function syncFromProps(initRange) {
   const st = props.stages || {}
-  if (initRange) {
-    yMinVisible.value = props.min
-    yMaxVisible.value = props.max
-    yMin.value = props.min
-    yMax.value = props.max
+  // la plage min/max est persistée DANS les stages (st.min / st.max) :
+  // on la restaure donc au montage à la place des défauts min=0 / max=1
+  if (initRange === true) {
+    const mn = typeof st.min === "number" ? st.min : props.min
+    const mx = typeof st.max === "number" ? st.max : props.max
+    yMinVisible.value = mn
+    yMaxVisible.value = mx
+    yMin.value = mn
+    yMax.value = mx
   }
   phases.press = normalizePoints(stagesToPoints(st.press))
   phases.release = normalizePoints(stagesToPoints(st.release))
@@ -167,7 +171,8 @@ function commit() {
   const press = pointsToStages(phases.press)
   const release = pointsToStages(phases.release)
   refreshTableData()
-  emit("update", { press, release })
+  // la plage min/max fait partie du modèle (persistée dans le patch)
+  emit("update", { press, release, min: yMinVisible.value, max: yMaxVisible.value })
 }
 
 /* ------------------------------------------------------------------
@@ -470,8 +475,9 @@ function applyMinMax() {
   if (!Number.isFinite(mn) || !Number.isFinite(mx) || mn > mx) return
   yMinVisible.value = mn
   yMaxVisible.value = mx
-  const pts = phasePoints(currentPhase.value)
-  for (const pt of pts) pt.v = clamp(pt.v, mn, mx)
+  for (const p of ["press", "release"]) {
+    for (const pt of phasePoints(p)) pt.v = clamp(pt.v, mn, mx)
+  }
   commit()
   requestAnimationFrame(draw)
 }
@@ -626,7 +632,7 @@ function drawPhase(p) {
 /* ------------------------------------------------------------------
  * Watchers / lifecycle
  * ------------------------------------------------------------------ */
-watch(() => props.stages, syncFromProps, { deep: true })
+watch(() => props.stages, () => syncFromProps(false), { deep: true })
 
 onMounted(() => {
   syncFromProps(true)
