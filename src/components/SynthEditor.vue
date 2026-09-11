@@ -6,6 +6,7 @@ import SuperModuleEditor from "./SuperModuleEditor.vue";
 import SynthPatchManager from "./SynthPatchManager.vue";
 
 const currentPatch = ref("voice")
+const patchManagerOpen = ref(false)
 
 const voiceEditor = ref(null)
 const mainEditor = ref(null)
@@ -106,6 +107,11 @@ const emit = defineEmits(["update:patch"])
       @load="handleSynthPatchLoaded"
     />
     <div class="top-panel">
+        <button
+          class="button toggle-manager"
+          :disabled="currentPatch === 'super'"
+          @click="patchManagerOpen = !patchManagerOpen"
+        >{{ patchManagerOpen ? "◀ Patch Manager" : "▶ Patch Manager" }}</button>
         <button :class="currentPatch === 'voice' ? 'button actif' : 'button'" @click="toggleVoicePatch">Voice</button>
         <button :class="currentPatch === 'main' ? 'button actif' : 'button'" class="button" @click="toggleMainPatch">Main</button>
         <button :class="currentPatch === 'super' ? 'button actif' : 'button'" class="button" @click="toggleSuperModules">Super Modules</button>
@@ -115,8 +121,8 @@ const emit = defineEmits(["update:patch"])
           @click="clearCurrentPatch"
         >Effacer</button>
     </div>
-    <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" v-show="currentPatch === 'voice'"></PatchEditor>
-    <PatchEditor ref="mainEditor" v-model:patch="mainPatch" v-show="currentPatch === 'main'"></PatchEditor>
+    <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" :manager-open="patchManagerOpen" v-show="currentPatch === 'voice'"></PatchEditor>
+    <PatchEditor ref="mainEditor" v-model:patch="mainPatch" :manager-open="patchManagerOpen" v-show="currentPatch === 'main'"></PatchEditor>
     <SuperModuleEditor v-show="currentPatch === 'super'"></SuperModuleEditor>
 </div>
 </template>
@@ -153,6 +159,11 @@ h1{
   margin-left: 24px;
 }
 
+.button.toggle-manager {
+  background: #34495e;
+  margin-left: 12px;
+}
+
 .button.clear:disabled {
   background: #aaa;
   cursor: not-allowed;
@@ -160,6 +171,9 @@ h1{
 }
 
 .top-panel{
-  background-color: #aaa;
+  background: #12332b;
+  border-top:1px solid rgba(255,255,255, .1);
+  padding-top:2px;
+  padding-bottom:2px;
 }
 </style>

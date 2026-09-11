@@ -21,6 +21,8 @@ const props = defineProps({
   },
   // masquer le patch manager (utilisé par l'éditeur de super-module)
   showPatchManager: { type: Boolean, default: true },
+  // collapser le patch manager (animation) : voice/main uniquement
+  managerOpen: { type: Boolean, default: false },
   // autoriser les nœuds d'interface Super In / Super Out
   allowInterfaceModules: { type: Boolean, default: false },
   // étirer le canvas sur la hauteur disponible
@@ -214,7 +216,7 @@ onMounted(async () => {
     <!-- Main area -->
     <div class="editor-main" :class="{ 'no-manager': !showPatchManager }">
       <!-- Patch manager (left) -->
-      <aside v-if="showPatchManager" class="editor-patch">
+      <aside v-if="showPatchManager" class="editor-patch" :class="{ collapsed: !managerOpen }">
         <PatchManager
           :paperRef="paperRef"
           :patch="patch"
@@ -288,13 +290,15 @@ onMounted(async () => {
     border-right: 1px solid #ddd;
     background: #fafafa;
     overflow-y: auto;
-    transition: width 0.2s ease;
+    transition: width 0.25s ease, opacity 0.25s ease;
   }
 
   .editor-patch.collapsed {
     width: 0;
     padding: 0;
     border: none;
+    overflow: hidden;
+    opacity: 0;
   }
 
   /* =========================
