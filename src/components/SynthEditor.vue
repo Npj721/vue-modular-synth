@@ -102,6 +102,7 @@ const emit = defineEmits(["update:patch"])
 <template>
 <div>
     <SynthPatchManager
+      :patch="patch"
       :voice-patch="voicePatch"
       :main-patch="mainPatch"
       @load="handleSynthPatchLoaded"

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from "vue"
 import Swal from "sweetalert2"
+import MidiController from "./MidiController.vue"
 import { usePatchStorage } from "../composables/usePatchStorage"
 
 /* =========================================================
@@ -17,6 +18,7 @@ import { usePatchStorage } from "../composables/usePatchStorage"
 const emit = defineEmits(["load"])
 
 const props = defineProps({
+  patch: { type: Object, required: true },
   voicePatch: { type: Object, required: true },
   mainPatch: { type: Object, required: true },
 })
@@ -207,6 +209,8 @@ const importFile = async (e) => {
     <button v-if="selected" class="spm-btn" @click="exportFile">Exporter</button>
     <button v-if="false" class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
     <button v-if="false" class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
+    <div class="spm-midi-sep"></div>
+    <MidiController :patch="props.patch" />
   </div>
 
   <div v-if="modalOpen" class="spm-modal" @click.self="modalOpen = false">
@@ -280,6 +284,66 @@ const importFile = async (e) => {
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-right: 4px;
+}
+
+.spm-midi-sep {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 2px;
+}
+.synth-patch-manager :deep(.midi-controller) {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 2px 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.synth-patch-manager :deep(.midi-hint),
+.synth-patch-manager :deep(.midi-error) {
+  display: none;
+}
+.synth-patch-manager :deep(.midi-status) {
+  color: #8fb3a8;
+  font-size: 12px;
+}
+.synth-patch-manager :deep(.midi-status.ok) {
+  color: #00ffd0;
+}
+.synth-patch-manager :deep(.midi-select) {
+  min-width: 180px;
+  padding: 3px 6px;
+  border: 1px solid #2c5a4c;
+  border-radius: 4px;
+  background: #0b211a;
+  color: #d6e7e0;
+}
+.synth-patch-manager :deep(.midi-btn) {
+  padding: 3px 10px;
+  border: 1px solid #2c5a4c;
+  border-radius: 4px;
+  background: #174035;
+  color: #cfd8d4;
+}
+.synth-patch-manager :deep(.midi-btn:disabled) {
+  opacity: 0.6;
+  cursor: default;
+}
+.synth-patch-manager :deep(.midi-btn.request) {
+  background: #0e7a60;
+  border-color: #0a5a46;
+  color: white;
+}
+.synth-patch-manager :deep(.midi-btn.request:disabled) {
+  background: #1d4d40;
+}
+.synth-patch-manager :deep(.midi-btn.connect.active) {
+  background: #a33d47;
+  border-color: #7d2c34;
+  color: white;
 }
 .spm-name,
 .spm-select {

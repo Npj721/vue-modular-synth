@@ -3,7 +3,6 @@
   import SynthEditor from './components/SynthEditor.vue'
   import SynthKeyboard from './components/SynthKeyboard.vue'
   import MultiTrackSequencer from './components/MultiTrackSequencer.vue'
-  import MidiController from './components/MidiController.vue'
   import AudioVisualizer from './components/AudioVisualizer.vue'
   const patch = reactive({})
 
@@ -31,7 +30,6 @@
   <div class="app" :style="{ '--dock-height': dockHeight + 'px' }">
     <div class="app-main" :style="{ paddingBottom: dockHeight + 'px' }">
       <SynthEditor v-model:patch="patch"/>
-      <MidiController :patch="patch.value ? patch.value : patch" />
       <MultiTrackSequencer :patch="patch.value ? patch.value : patch" />
     </div>
 
