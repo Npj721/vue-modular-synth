@@ -83,6 +83,7 @@ const savePatchAs = async () => {
     title: "Enregistrer sous",
     input: "text",
     inputPlaceholder: "Nom du synthéthiseur",
+    inputValue: selected.value ? `${selected.value} - ` : '',
     inputValidator: (v) => (v && v.trim() ? undefined : "Nom requis"),
     showCancelButton: true,
     confirmButtonText: "Enregistrer",
