@@ -571,6 +571,61 @@ const finalizeRubberSelect = () => {
   emitSelectionChange();
 };
 
+/* =========================
+ * CLONE (duplication des modules sélectionnés)
+ * ========================= */
+const CLONE_OFFSET = 30;
+
+const cloneSelectedModules = () => {
+  if (selectedModules.value.size === 0) return;
+
+  const idMap = new Map();
+
+  // dupliquer chaque module sélectionné (décale de CLONE_OFFSET)
+  for (const id of [...selectedModules.value]) {
+    const src = modulesById.get(id);
+    if (!src) continue;
+
+    const pos = src.shape.position();
+    const newId = addModule(
+      src.type,
+      pos.x + CLONE_OFFSET,
+      pos.y + CLONE_OFFSET,
+      null,
+      src.label || null
+    );
+    if (!newId) continue;
+
+    idMap.set(id, newId);
+
+    // copier les paramètres (source de vérité : la donnée patch côté PatchEditor)
+    emit("module-param-copied", { sourceId: id, targetId: newId });
+  }
+
+  // dupliquer les connexions internes à la sélection
+  for (const link of graph.getLinks()) {
+    const s = link.get("source");
+    const t = link.get("target");
+    if (!s?.id || !t?.id) continue;
+    if (!idMap.has(s.id) || !idMap.has(t.id)) continue;
+
+    const newLink = new shapes.standard.Link({
+      source: { id: idMap.get(s.id), port: s.port },
+      target: { id: idMap.get(t.id), port: t.port },
+      attrs: { line: { stroke: "#333", strokeWidth: 2 } },
+    });
+    newLink.addTo(graph);
+    emit("connection-added", {
+      from: newLink.get("source"),
+      to: newLink.get("target"),
+    });
+  }
+
+  // sélectionner les clones (le panneau ne s'ouvre que si un seul clone)
+  setSelection([...idMap.values()]);
+  emitSelectionChange();
+};
+
 const setModuleLabel = (id, label) => {
   const module = modulesById.get(id);
   if (!module) return;
@@ -710,19 +765,28 @@ const loadPatch = (patch) => {
  * ========================= */
 
 const onKeyDown = (e) => {
-  if (e.key !== "Delete") return;
-
-  // ne pas supprimer un module pendant l'édition d'un champ texte
+  // ne pas déclencher les actions du paper pendant l'édition d'un champ texte
   const t = e.target;
-  if (
+  const editingText =
     t &&
     (t.tagName === "INPUT" ||
       t.tagName === "TEXTAREA" ||
       t.tagName === "SELECT" ||
-      t.isContentEditable)
-  ) {
+      t.isContentEditable);
+
+  // duplication : Ctrl/Cmd + D
+  if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
+    if (editingText) return;
+    if (!paperEl.value || paperEl.value.offsetParent === null) return;
+    e.preventDefault();
+    cloneSelectedModules();
     return;
   }
+
+  if (e.key !== "Delete") return;
+
+  // ne pas supprimer un module pendant l'édition d'un champ texte
+  if (editingText) return;
 
   // ignorer si ce paper est masqué (onglet inactif : voice/main/super)
   // sinon la suppression toucherait aussi les sélections des autres patchs
@@ -1177,7 +1241,8 @@ defineExpose({
   clearGraph,
   setModuleLabel,
   setModuleParam,
-  setModuleParams
+  setModuleParams,
+  cloneSelectedModules,
 })
 
 </script>
@@ -1189,6 +1254,15 @@ defineExpose({
       <button @click="zoomOut">−</button>
       <span>{{ Math.round(zoom * 100) }}%</span>
       <button @click="zoomIn">+</button>
+      <span class="zoom-sep"></span>
+      <button
+        class="clone-btn"
+        :disabled="selectedModules.size === 0"
+        title="Cloner la sélection (Ctrl+D)"
+        @click="cloneSelectedModules"
+      >
+        Cloner la sélection
+      </button>
     </div>
     <div ref="paperEl" class="paper" :class="{ fill: fillHeight }"></div>
 
@@ -1256,6 +1330,24 @@ defineExpose({
   background: white;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.zoom-sep {
+  width: 1px;
+  height: 18px;
+  background: #ddd;
+  margin: 0 4px;
+}
+
+.zoom-controls .clone-btn {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.zoom-controls .clone-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .paper {
