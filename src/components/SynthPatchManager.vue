@@ -24,7 +24,6 @@ const props = defineProps({
 const STORAGE_KEY = "modular-synth-patches"
 const storage = usePatchStorage(STORAGE_KEY)
 
-const patchName = ref("")
 const selected = ref("")
 const saveCounter = ref(0)
 const modalOpen = ref(false)
@@ -54,22 +53,38 @@ onBeforeUnmount(() => {
   document.body.style.overflow = ""
 })
 
-const buildSynthPatch = () => ({
+const buildSynthPatch = (name = selected.value || "synth") => ({
   version: 1,
-  name: patchName.value || "synth",
+  name,
   voicePatch: deepClone(props.voicePatch),
   mainPatch: deepClone(props.mainPatch),
 })
 
 /* =========================
- * SAVE
+ * SAVE : écrase le synthé sélectionné
  * ========================= */
-const savePatch = async () => {
-  if (!patchName.value) {
-    Swal.fire({ title: "Nom du synthéthiseur requis", icon: "warning", confirmButtonText: "OK" })
-    return
-  }
-  if (storage.names().includes(patchName.value)) {
+const savePatch = () => {
+  if (!selected.value) return
+  storage.save(selected.value, buildSynthPatch(selected.value))
+  saveCounter.value++
+}
+
+/* =========================
+ * SAVE AS : demande un nom (sweetalert2)
+ * ========================= */
+const savePatchAs = async () => {
+  const { value: name, isConfirmed } = await Swal.fire({
+    title: "Enregistrer sous",
+    input: "text",
+    inputPlaceholder: "Nom du synthéthiseur",
+    inputValidator: (v) => (v && v.trim() ? undefined : "Nom requis"),
+    showCancelButton: true,
+    confirmButtonText: "Enregistrer",
+    cancelButtonText: "Annuler",
+  })
+  if (!isConfirmed || !name) return
+  const cleanName = name.trim()
+  if (storage.names().includes(cleanName)) {
     const res = await Swal.fire({
       title: "Remplacer le synthéthiseur existant ?",
       icon: "question",
@@ -79,7 +94,8 @@ const savePatch = async () => {
     })
     if (!res.isConfirmed) return
   }
-  storage.save(patchName.value, buildSynthPatch())
+  storage.save(cleanName, buildSynthPatch(cleanName))
+  selected.value = cleanName
   saveCounter.value++
 }
 
@@ -153,7 +169,6 @@ const importFile = async (e) => {
       })
       return
     }
-    patchName.value = data.name || ""
     emit("load", data)
   } catch (err) {
     Swal.fire({
@@ -171,8 +186,8 @@ const importFile = async (e) => {
 <template>
   <div class="synth-patch-manager">
     <span class="spm-title">synthéthiseur complet</span>
-    <input v-model="patchName" placeholder="Nom du synthéthiseur" class="spm-name" @keyup.enter="savePatch" />
-    <button class="spm-btn" @click="savePatch">Enregistrer</button>
+    <button class="spm-btn" :disabled="!selected" @click="savePatch">Enregistrer</button>
+    <button class="spm-btn" @click="savePatchAs">Enregistrer sous</button>
     <button class="spm-btn" @click="exportFile">Exporter</button>
     <label class="spm-import">
       Importer
