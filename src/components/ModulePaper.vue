@@ -67,6 +67,7 @@ const zoomOut = () =>
 
 const modulesById = new Map();
 const selectedModule = ref(null);
+const selectedModules = ref(new Set());
 const { getModuleByType, getCatalog, getModuleTypes } = useModuleCatalog();
 
 /* =========================
@@ -168,13 +169,14 @@ const checkCollision = (rect1, rect2) => {
   );
 };
 
-const findFreePosition = (width, height, preferredX, preferredY) => {
+const findFreePosition = (width, height, preferredX, preferredY, exclude = null) => {
   const step = 20;
   const maxRings = 20;
 
   const isFree = (x, y) => {
     const testRect = { x, y, width, height };
-    for (const [, mod] of modulesById) {
+    for (const [id, mod] of modulesById) {
+      if (exclude && exclude.has(id)) continue;
       const pos = mod.shape.position();
       const size = mod.shape.size();
       const otherRect = { x: pos.x, y: pos.y, width: size.width, height: size.height };
@@ -239,6 +241,11 @@ let copyDrag = false;
 let copyDragged = false;
 let copyTargetId = null;
 
+// mode "déplacement de groupe" : drag sur un module d'une sélection multiple
+let groupDrag = false;
+let groupDragLeadId = null;
+let groupDragStart = new Map();
+
 const moduleAtLocal = (x, y) => {
   for (const [, m] of modulesById) {
     if (m.id === selectedModule.value?.id) continue;
@@ -267,15 +274,21 @@ const cancelCopyDrag = () => {
   }
   copyTargetId = null;
   if (selectedModule.value) {
-    selectedModule.value.shape.attr("body/class", "module-body is-selected");
+    selectedModule.value.shape.attr(
+      "body/class",
+      selectedModules.value.has(selectedModule.value.id)
+        ? "module-body is-selected"
+        : "module-body"
+    );
   }
 };
 
-const wouldCollide = (shape, x, y) => {
+const wouldCollide = (shape, x, y, exclude = null) => {
   const size = shape.size();
   const testRect = { x, y, width: size.width, height: size.height };
 
-  for (const [, mod] of modulesById) {
+  for (const [id, mod] of modulesById) {
+    if (exclude && exclude.has(id)) continue;
     if (mod.shape === shape) continue;
     const pos = mod.shape.position();
     const otherRect = { x: pos.x, y: pos.y, width: mod.shape.size().width, height: mod.shape.size().height };
@@ -285,20 +298,30 @@ const wouldCollide = (shape, x, y) => {
 };
 
 // retourne la position la plus proche (sans collision) d'une position demandée
-const clampToFree = (shape, x, y) => {
-  if (!wouldCollide(shape, x, y)) {
+const clampToFree = (shape, x, y, exclude = null) => {
+  if (!wouldCollide(shape, x, y, exclude)) {
     return { x, y };
   }
 
   // dernière position valable avant la collision (pas la position de départ)
-  if (!wouldCollide(shape, lastFreePos.x, lastFreePos.y)) {
+  if (!wouldCollide(shape, lastFreePos.x, lastFreePos.y, exclude)) {
     return { x: lastFreePos.x, y: lastFreePos.y };
   }
 
   // sinon recherche une position libre autour de la position souhaitée
   const size = shape.size();
-  const freePos = findFreePosition(size.width, size.height, x, y);
+  const freePos = findFreePosition(size.width, size.height, x, y, exclude);
   return freePos;
+};
+
+// test d'intersection AABB (sans la marge de padding)
+const rectsOverlap = (a, b) => {
+  return !(
+    a.x + a.width <= b.x ||
+    b.x + b.width <= a.x ||
+    a.y + a.height <= b.y ||
+    b.y + b.height <= a.y
+  );
 };
 
 /* =========================
@@ -421,27 +444,131 @@ const addModule = (type, x = 100, y = 100, forcedId = null, initialLabel = null)
 /* =========================
  * SELECT MODULE
  * ========================= */
-const selectModule = (id) => {
-  if (selectedModule.value) {
-    selectedModule.value.shape.attr("body/class", "module-body");
+const applySelectionVisual = () => {
+  const ids = selectedModules.value;
+  for (const [id, mod] of modulesById) {
+    mod.shape.attr(
+      "body/class",
+      ids.has(id) ? "module-body is-selected" : "module-body"
+    );
   }
+};
 
+const setSelection = (ids) => {
+  const arr = [...ids];
+  selectedModules.value = new Set(arr);
+  const primary = arr.length ? modulesById.get(arr[0]) ?? null : null;
+  selectedModule.value = primary;
+  applySelectionVisual();
+  return primary;
+};
+
+// le panneau de paramètres ne s'ouvre que pour une sélection unique
+const emitSelectionChange = () => {
+  const size = selectedModules.value.size;
+  emit(
+    "module-selected",
+    size === 1 ? selectedModule.value : null
+  );
+};
+
+const selectModule = (id) => {
   const module = modulesById.get(id);
   if (!module) return;
+  setSelection([id]);
+  emitSelectionChange();
+};
 
-  selectedModule.value = module;
-
-  module.shape.attr("body/class", "module-body is-selected");
-
-  emit("module-selected", module);
+const toggleModuleSelection = (id) => {
+  const module = modulesById.get(id);
+  if (!module) return;
+  const arr = [...selectedModules.value];
+  const idx = arr.indexOf(id);
+  if (idx === -1) arr.push(id);
+  else arr.splice(idx, 1);
+  setSelection(arr);
+  emitSelectionChange();
 };
 
 const deselectModule = () => {
-  if (selectedModule.value) {
-    selectedModule.value.shape.attr("body/class", "module-body");
-    selectedModule.value = null;
-    emit("module-selected", null);
+  if (selectedModules.value.size === 0 && !selectedModule.value) return;
+  setSelection([]);
+  emitSelectionChange();
+};
+
+/* =========================
+ * SELECTION RECTANGLE
+ * (multi-selection façon bureau Windows)
+ * ========================= */
+const rubberRect = ref(null);
+let rubberSelecting = false;
+let rubberStartClient = { x: 0, y: 0 };
+let rubberStartLocal = { x: 0, y: 0 };
+let rubberCurrentLocal = null;
+let rubberAnchor = null;
+let suppressNextBlankClick = false;
+
+const updateRubberSelect = (evt) => {
+  const currentLocal = paper.clientToLocalPoint({
+    x: evt.clientX,
+    y: evt.clientY,
+  });
+  rubberCurrentLocal = currentLocal;
+
+  const rect = {
+    x: Math.min(rubberStartLocal.x, currentLocal.x),
+    y: Math.min(rubberStartLocal.y, currentLocal.y),
+    width: Math.abs(currentLocal.x - rubberStartLocal.x),
+    height: Math.abs(currentLocal.y - rubberStartLocal.y),
+  };
+
+  // rectangle d'affichage (coordonnées du conteneur du paper)
+  rubberRect.value = {
+    left: Math.min(rubberStartClient.x, evt.clientX) - rubberAnchor.left,
+    top: Math.min(rubberStartClient.y, evt.clientY) - rubberAnchor.top,
+    width: Math.abs(evt.clientX - rubberStartClient.x),
+    height: Math.abs(evt.clientY - rubberStartClient.y),
+  };
+
+  // surbrillance live des modules intersectés
+  for (const [id, mod] of modulesById) {
+    const p = mod.shape.position();
+    const s = mod.shape.size();
+    const on = rectsOverlap(rect, { x: p.x, y: p.y, width: s.width, height: s.height });
+    mod.shape.attr("body/class", on ? "module-body is-selected" : "module-body");
   }
+};
+
+const finalizeRubberSelect = () => {
+  if (!rubberSelecting) return;
+  rubberSelecting = false;
+
+  const currentLocal = rubberCurrentLocal ?? rubberStartLocal;
+  const didDrag =
+    Math.abs(currentLocal.x - rubberStartLocal.x) > 1 ||
+    Math.abs(currentLocal.y - rubberStartLocal.y) > 1;
+  if (didDrag) suppressNextBlankClick = true;
+
+  rubberRect.value = null;
+
+  const rect = {
+    x: Math.min(rubberStartLocal.x, currentLocal.x),
+    y: Math.min(rubberStartLocal.y, currentLocal.y),
+    width: Math.abs(currentLocal.x - rubberStartLocal.x),
+    height: Math.abs(currentLocal.y - rubberStartLocal.y),
+  };
+
+  const ids = [];
+  for (const [id, mod] of modulesById) {
+    const p = mod.shape.position();
+    const s = mod.shape.size();
+    if (rectsOverlap(rect, { x: p.x, y: p.y, width: s.width, height: s.height })) {
+      ids.push(id);
+    }
+  }
+
+  setSelection(ids);
+  emitSelectionChange();
 };
 
 const setModuleLabel = (id, label) => {
@@ -468,6 +595,7 @@ const setModuleParams = (id, params) => {
 
 const clearGraph = () => {
   selectedModule.value = null
+  selectedModules.value.clear()
   modulesById.clear()
   graph.clear()
 }
@@ -532,6 +660,7 @@ const loadPatch = (patch) => {
   // reset complet
   graph.clear()
   modulesById.clear()
+  selectedModules.value.clear()
   /*selectedModule.value = null
   emit("module-selected", null)
 */
@@ -599,12 +728,21 @@ const onKeyDown = (e) => {
   // sinon la suppression toucherait aussi les sélections des autres patchs
   if (!paperEl.value || paperEl.value.offsetParent === null) return;
 
-  if (!selectedModule.value) return;
+  if (selectedModules.value.size === 0) return;
 
-  selectedModule.value.shape.remove();
-  modulesById.delete(selectedModule.value.id);
-  emit("module-removed", selectedModule.value);
+  const toRemove = [...selectedModules.value];
+  selectedModules.value.clear();
   selectedModule.value = null;
+
+  for (const id of toRemove) {
+    const mod = modulesById.get(id);
+    if (!mod) continue;
+    mod.shape.remove();
+    modulesById.delete(id);
+    emit("module-removed", mod);
+  }
+
+  emit("module-selected", null);
 };
 
 onMounted(() => {
@@ -687,12 +825,25 @@ onMounted(() => {
   });
 
   // click sur module
-  paper.on("cell:pointerclick", (view) => {
-    if (modulesById.has(view.model.id)) selectModule(view.model.id);
+  paper.on("cell:pointerclick", (view, evt) => {
+    if (!modulesById.has(view.model.id)) return;
+    const id = view.model.id;
+    // ctrl / cmd + clic → àjouter/retirer de la sélection
+    if (evt?.ctrlKey || evt?.metaKey) {
+      toggleModuleSelection(id);
+    } else if (!selectedModules.value.has(id)) {
+      // clic sur un module non sélectionné → sélection unique
+      selectModule(id);
+    }
+    // sinon : module déjà sélectionné (membre d'un groupe) → conserver la sélection
   });
 
-  // clic sur fond vide → désélection du module courant
+  // clic sur fond vide → désélection (sauf juste après une sélection rectangle)
   paper.on("blank:pointerclick", () => {
+    if (suppressNextBlankClick) {
+      suppressNextBlankClick = false;
+      return;
+    }
     deselectModule();
   });
 
@@ -713,9 +864,15 @@ onMounted(() => {
     const model = cellView.model;
     if (!modulesById.has(model.id)) return;
 
+    suppressNextBlankClick = false;
+
     copyDrag = false;
     copyDragged = false;
     copyTargetId = null;
+
+    groupDrag = false;
+    groupDragLeadId = null;
+    groupDragStart.clear();
 
     const pos = model.position();
     dragOffset.x = pos.x;
@@ -723,8 +880,30 @@ onMounted(() => {
     lastFreePos.x = pos.x;
     lastFreePos.y = pos.y;
 
-    // module sélectionné → drag = copie de paramètres, pas déplacement
-    if (selectedModule.value && selectedModule.value.id === model.id) {
+    const modelSelected = selectedModules.value.has(model.id);
+
+    // sélection multiple → drag = déplacement de tout le groupe
+    if (modelSelected && selectedModules.value.size >= 2) {
+      groupDrag = true;
+      groupDragLeadId = model.id;
+      for (const id of selectedModules.value) {
+        const m = modulesById.get(id);
+        if (m) {
+          groupDragStart.set(id, {
+            x: m.shape.position().x,
+            y: m.shape.position().y,
+          });
+        }
+      }
+    }
+
+    // module sélectionné seul → drag = copie de paramètres, pas déplacement
+    if (
+      modelSelected &&
+      selectedModule.value &&
+      selectedModule.value.id === model.id &&
+      selectedModules.value.size === 1
+    ) {
       copyDrag = true;
     }
   });
@@ -735,6 +914,12 @@ onMounted(() => {
     if (!modulesById.has(model.id)) return;
     const mod = modulesById.get(model.id);
 
+    // sélection rectangle en cours → mise à jour de la zone
+    if (rubberSelecting) {
+      updateRubberSelect(evt);
+      return;
+    }
+
     // mode copie : le module sélectionné ne bouge pas, on repère la cible
     if (copyDrag && selectedModule.value?.id === mod.id) {
       copyDragged = true;
@@ -744,6 +929,30 @@ onMounted(() => {
       }
       const target = moduleAtLocal(x, y);
       setCopyTarget(target && target.type === mod.type ? target : null);
+      return;
+    }
+
+    // déplacement de groupe multi-sélection
+    if (groupDrag && groupDragLeadId === mod.id) {
+      const start = groupDragStart.get(mod.id);
+      if (!start) return;
+
+      const cur = model.position();
+      const exclude = selectedModules.value;
+      const clamped = clampToFree(model, cur.x, cur.y, exclude);
+      model.position(clamped.x, clamped.y);
+
+      const dx = clamped.x - start.x;
+      const dy = clamped.y - start.y;
+      for (const [id, s] of groupDragStart) {
+        if (id === groupDragLeadId) continue;
+        const other = modulesById.get(id);
+        if (!other) continue;
+        other.shape.position(s.x + dx, s.y + dy);
+      }
+
+      lastFreePos.x = clamped.x;
+      lastFreePos.y = clamped.y;
       return;
     }
 
@@ -760,6 +969,16 @@ onMounted(() => {
 
   // drop en mode copie : transférer les paramètres vers le module cible
   paper.on("cell:pointerup", (cellView, evt, x, y) => {
+    // relâchement pendant une sélection rectangle
+    if (rubberSelecting) {
+      finalizeRubberSelect();
+      return;
+    }
+
+    groupDrag = false;
+    groupDragLeadId = null;
+    groupDragStart.clear();
+
     if (!copyDrag || !copyDragged) {
       cancelCopyDrag();
       return;
@@ -790,19 +1009,40 @@ onMounted(() => {
   });
 
   paper.on("blank:pointerdown", (evt) => {
-    if (!evt.ctrlKey) return;
+    // ctrl + drag → déplacement de la vue (pan)
+    if (evt.ctrlKey) {
+      evt.preventDefault();
+      evt.stopPropagation();
 
-    evt.preventDefault();
-    evt.stopPropagation();
+      isPanning = true;
+      panStart = { x: evt.clientX, y: evt.clientY };
+      panOrigin = paper.translate();
 
-    isPanning = true;
-    panStart = { x: evt.clientX, y: evt.clientY };
-    panOrigin = paper.translate();
+      paper.el.style.cursor = "grabbing";
+      return;
+    }
 
-    paper.el.style.cursor = "grabbing";
+    // sélection rectangle (bouton gauche uniquement)
+    if (evt.button !== undefined && evt.button !== 0) return;
+
+    suppressNextBlankClick = false;
+    rubberAnchor = paperEl.value.parentElement.getBoundingClientRect();
+    rubberStartClient = { x: evt.clientX, y: evt.clientY };
+    rubberStartLocal = paper.clientToLocalPoint({
+      x: evt.clientX,
+      y: evt.clientY,
+    });
+    rubberCurrentLocal = rubberStartLocal;
+    rubberSelecting = true;
   });
 
   paper.on("blank:pointermove", (evt) => {
+    // sélection rectangle en cours
+    if (rubberSelecting) {
+      updateRubberSelect(evt);
+      return;
+    }
+
     if (!isPanning) return;
 
     evt.preventDefault();
@@ -816,6 +1056,12 @@ onMounted(() => {
   });
 
   paper.on("blank:pointerup", () => {
+    // relâchement pendant une sélection rectangle
+    if (rubberSelecting) {
+      finalizeRubberSelect();
+      return;
+    }
+
     if (!isPanning) return;
 
     isPanning = false;
@@ -947,6 +1193,17 @@ defineExpose({
     <div ref="paperEl" class="paper" :class="{ fill: fillHeight }"></div>
 
     <div
+      v-if="rubberRect"
+      class="rubber-band"
+      :style="{
+        left: rubberRect.left + 'px',
+        top: rubberRect.top + 'px',
+        width: rubberRect.width + 'px',
+        height: rubberRect.height + 'px',
+      }"
+    ></div>
+
+    <div
       v-if="contextMenu"
       ref="menuRef"
       class="context-menu"
@@ -1015,6 +1272,15 @@ defineExpose({
 .paper.fill {
   flex: 1;
   min-height: 300px;
+}
+
+/* sélection rectangle (multi-sélection façon bureau) */
+.rubber-band {
+  position: absolute;
+  z-index: 40;
+  border: 1px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.12);
+  pointer-events: none;
 }
 
 /* =========================
