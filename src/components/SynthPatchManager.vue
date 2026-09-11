@@ -114,6 +114,15 @@ const selectSynth = (name) => {
   loadSelected()
 }
 
+/* Navigation circulaire dans la liste des synthés */
+const cycleSynth = (delta) => {
+  const list = availableSynths.value
+  if (!list.length) return
+  const current = selected.value ? list.indexOf(selected.value) : -1
+  const next = (current + delta + list.length) % list.length
+  selectSynth(list[next])
+}
+
 /* =========================
  * DELETE
  * ========================= */
@@ -194,9 +203,11 @@ const importFile = async (e) => {
       <input type="file" accept=".json" hidden @change="importFile" />
     </label>
 
+    <button class="spm-btn spm-nav" :disabled="!availableSynths.length" @click="cycleSynth(-1)">◀</button>
     <button class="spm-btn spm-select" @click="openModal">
       {{ selected || "— Sélectionner synthéthiseur —" }}
     </button>
+    <button class="spm-btn spm-nav" :disabled="!availableSynths.length" @click="cycleSynth(1)">▶</button>
     <button class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
     <button class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
   </div>
@@ -321,6 +332,11 @@ const importFile = async (e) => {
   min-width: 180px;
   text-align: left;
   cursor: pointer;
+}
+.spm-nav {
+  width: 28px;
+  padding: 4px 0;
+  text-align: center;
 }
 .spm-modal {
   position: fixed;
