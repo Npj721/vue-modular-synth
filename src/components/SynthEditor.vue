@@ -5,6 +5,9 @@ import PatchEditor from "./PatchEditor.vue";
 import SuperModuleEditor from "./SuperModuleEditor.vue";
 import SynthPatchManager from "./SynthPatchManager.vue";
 
+import { useDockState } from "../composables/useDockState";
+const { showVisualizer, showKeyboard } = useDockState()
+
 const currentPatch = ref("voice")
 const patchManagerOpen = ref(false)
 
@@ -108,11 +111,6 @@ const emit = defineEmits(["update:patch"])
       @load="handleSynthPatchLoaded"
     />
     <div class="top-panel">
-        <button
-          class="button toggle-manager"
-          :disabled="currentPatch === 'super'"
-          @click="patchManagerOpen = !patchManagerOpen"
-        >{{ patchManagerOpen ? "◀ Patch Manager" : "▶ Patch Manager" }}</button>
         <button :class="currentPatch === 'voice' ? 'button actif' : 'button'" @click="toggleVoicePatch">Voice</button>
         <button :class="currentPatch === 'main' ? 'button actif' : 'button'" class="button" @click="toggleMainPatch">Main</button>
         <button :class="currentPatch === 'super' ? 'button actif' : 'button'" class="button" @click="toggleSuperModules">Super Modules</button>
@@ -121,6 +119,23 @@ const emit = defineEmits(["update:patch"])
           :disabled="currentPatch === 'super'"
           @click="clearCurrentPatch"
         >Effacer</button>
+        <button
+          class="button toggle-manager"
+          :disabled="currentPatch === 'super'"
+          @click="patchManagerOpen = !patchManagerOpen"
+        >{{ patchManagerOpen ? "◀ Patch Manager" : "▶ Patch Manager" }}</button>
+
+        <button
+          class="button toggle-manager"
+          :disabled="currentPatch === 'super'"
+          @click="showVisualizer = !showVisualizer"
+        >{{ showVisualizer ? "◀ Spectrum" : "▶ Spectrum" }}</button>
+
+        <button
+          class="button toggle-manager"
+          :disabled="currentPatch === 'super'"
+          @click="showKeyboard = !showKeyboard"
+        >{{ showKeyboard ? "◀ Keyboard" : "▶ Keyboard" }}</button>
     </div>
     <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" :manager-open="patchManagerOpen" v-show="currentPatch === 'voice'"></PatchEditor>
     <PatchEditor ref="mainEditor" v-model:patch="mainPatch" :manager-open="patchManagerOpen" v-show="currentPatch === 'main'"></PatchEditor>

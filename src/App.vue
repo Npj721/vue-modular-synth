@@ -4,6 +4,8 @@
   import SynthKeyboard from './components/SynthKeyboard.vue'
   import MultiTrackSequencer from './components/MultiTrackSequencer.vue'
   import AudioVisualizer from './components/AudioVisualizer.vue'
+  import { useDockState } from './composables/useDockState'
+  const { showVisualizer, showKeyboard } = useDockState()
   const patch = reactive({})
 
   /* Barre du bas : analyzer + piano toujours visibles, empilés l'un sous
@@ -34,8 +36,8 @@
     </div>
 
     <div class="bottom-dock" ref="dock">
-      <AudioVisualizer />
-      <SynthKeyboard :patch="patch.value ? patch.value : patch" />
+      <AudioVisualizer v-show="showVisualizer" />
+      <SynthKeyboard v-show="showKeyboard" :patch="patch.value ? patch.value : patch" />
     </div>
   </div>
 </template>
