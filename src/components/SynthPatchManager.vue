@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from "vue"
+import { ref, computed, watch, onBeforeUnmount } from "vue"
 import Swal from "sweetalert2"
 import { usePatchStorage } from "../composables/usePatchStorage"
 
@@ -46,6 +46,13 @@ const openModal = () => {
   filter.value = ""
   modalOpen.value = true
 }
+
+watch(modalOpen, (open) => {
+  document.body.style.overflow = open ? "hidden" : ""
+})
+onBeforeUnmount(() => {
+  document.body.style.overflow = ""
+})
 
 const buildSynthPatch = () => ({
   version: 1,
