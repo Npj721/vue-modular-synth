@@ -48,6 +48,10 @@ const openModal = () => {
   modalOpen.value = true
 }
 
+/* Enregistrer / Enregistrer sous ne sont possibles qu'avec au moins 1 module
+   chargé dans le paper voice. */
+const hasVoiceModules = computed(() => !!(props.voicePatch?.modules?.length))
+
 watch(modalOpen, (open) => {
   document.body.style.overflow = open ? "hidden" : ""
 })
@@ -197,8 +201,8 @@ const importFile = async (e) => {
 <template>
   <div class="synth-patch-manager">
     <span class="spm-title">synthéthiseur complet</span>
-    <button class="spm-btn" :disabled="!selected" @click="savePatch">Enregistrer</button>
-    <button class="spm-btn" @click="savePatchAs">Enregistrer sous</button>
+    <button class="spm-btn" :disabled="!hasVoiceModules || !selected" @click="savePatch">Enregistrer</button>
+    <button class="spm-btn" :disabled="!hasVoiceModules" @click="savePatchAs">Enregistrer sous</button>
     
 
     <button class="spm-btn spm-nav" :disabled="!availableSynths.length" @click="cycleSynth(-1)">◀</button>
