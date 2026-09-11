@@ -3,6 +3,8 @@ import { ref, reactive, watch, onMounted, nextTick, toRaw } from "vue";
 import ModulePaper from "./ModulePaper.vue";
 import PatchManager from "./PatchManager.vue";
 import ModulePropertyPanel from "./ModulePropertyPanel.vue";
+import { useSuperModules } from "../composables/useSuperModules";
+import Swal from "sweetalert2";
 import SynthKeyboard from "./SynthKeyboard.vue";
 
 /* --------------------
@@ -29,6 +31,8 @@ const props = defineProps({
   paperFillHeight: { type: Boolean, default: false },
   // contenu initial à dessiner au montage (édition d'un super-module)
   initialPatch: { type: Object, default: null },
+  // afficher l'option "Créer un super-module" dans le menu contextuel
+  superExportEnabled: { type: Boolean, default: true },
 })
 const patch = props.patch
 
@@ -175,6 +179,131 @@ const handleModuleMoved = ({ id, position }) => {
 }
 
 /* =========================================================
+ * CREER UN SUPER-MODULE A PARTIR DU PATCH COURANT
+ *
+ * Transforme le patch voice/main courant en super-module en
+ * remplaçant les modules "input" par "super.in" et
+ * "destination" par "super.out".
+ * ========================================================= */
+const { saveFromGraph } = useSuperModules()
+
+function transformToSuperModule(patchData) {
+  const modules = JSON.parse(JSON.stringify(patchData.modules))
+  const connections = JSON.parse(JSON.stringify(patchData.connections))
+
+  const inputModule = modules.find(m => m.type === "input")
+  const destModule = modules.find(m => m.type === "destination")
+
+  if (!inputModule && !destModule) {
+    throw new Error(
+      "Le patch ne contient pas de module Input ou Output. " +
+      "Ajoutez un module de sortie (destination) avant de créer un super-module."
+    )
+  }
+
+  // Remplacer destination → super.out
+  if (destModule) {
+    const superOutId = crypto.randomUUID()
+    modules.push({
+      id: superOutId,
+      type: "super.out",
+      label: "",
+      params: { name: "out" },
+      position: { ...destModule.position },
+    })
+    for (const c of connections) {
+      if (c.to.id === destModule.id) c.to.id = superOutId
+    }
+    modules.splice(modules.findIndex(m => m.id === destModule.id), 1)
+  }
+
+  // Remplacer input → super.in
+  if (inputModule) {
+    const superInId = crypto.randomUUID()
+    modules.push({
+      id: superInId,
+      type: "super.in",
+      label: "",
+      params: { name: "in" },
+      position: { ...inputModule.position },
+    })
+    for (const c of connections) {
+      if (c.from.id === inputModule.id) c.from.id = superInId
+    }
+    modules.splice(modules.findIndex(m => m.id === inputModule.id), 1)
+  }
+
+  // Nettoyer les connexions orphelines
+  const validIds = new Set(modules.map(m => m.id))
+  const cleaned = connections.filter(
+    c => validIds.has(c.from.id) && validIds.has(c.to.id)
+  )
+
+  return { modules, connections: cleaned }
+}
+
+const handleRequestSuperModule = async (patchData) => {
+  if (!patchData?.modules?.length) {
+    Swal.fire({
+      title: "Patch vide",
+      text: "Ajoutez des modules avant de créer un super-module.",
+      icon: "warning",
+      confirmButtonText: "OK",
+    })
+    return
+  }
+
+  const { value: formValues, isConfirmed } = await Swal.fire({
+    title: "Créer un super-module",
+    html:
+      '<input id="swal-super-name" class="swal2-input" placeholder="Nom du super-module" style="margin-bottom:8px" />' +
+      '<div style="display:flex;align-items:center;justify-content:center;gap:8px">' +
+        '<label style="font-size:14px">Couleur :</label>' +
+        '<input id="swal-super-color" type="color" value="#8E44AD" style="width:50px;height:36px;border:none;cursor:pointer" />' +
+      '</div>',
+    focusConfirm: false,
+    showCancelButton: true,
+    confirmButtonText: "Créer",
+    cancelButtonText: "Annuler",
+    preConfirm: () => {
+      const name = document.getElementById("swal-super-name").value.trim()
+      const color = document.getElementById("swal-super-color").value
+      if (!name) {
+        Swal.showValidationMessage("Nom requis")
+        return
+      }
+      return { name, color }
+    },
+  })
+
+  if (!isConfirmed || !formValues) return
+
+  try {
+    const graph = transformToSuperModule(patchData)
+    const def = saveFromGraph({
+      name: formValues.name,
+      color: formValues.color,
+      graph,
+    })
+    Swal.fire({
+      title: `"${def.label}" créé`,
+      html:
+        `Super-module enregistré avec ${def.inputs.length} entrée(s) et ${def.outputs.length} sortie(s).<br>` +
+        `Vous pouvez maintenant l'ajouter via le menu contextuel.`,
+      icon: "success",
+      confirmButtonText: "OK",
+    })
+  } catch (e) {
+    Swal.fire({
+      title: "Erreur",
+      text: e.message,
+      icon: "error",
+      confirmButtonText: "OK",
+    })
+  }
+}
+
+/* =========================================================
  * Derived selected module (pour le panel)
  * ========================================================= */
 const selectedModule = () =>
@@ -233,6 +362,7 @@ onMounted(async () => {
           class="editor-paper"
           :fill-height="paperFillHeight"
           :exclude-categories="allowInterfaceModules ? [] : ['interface']"
+          :super-export-enabled="superExportEnabled"
           @module-selected="handleModuleSelected"
           @module-removed="handleModuleRemoved"
           @connection-added="handleConnectionAdded"
@@ -240,6 +370,7 @@ onMounted(async () => {
           @module-added="handleModuleAdded"
           @module-moved="handleModuleMoved"
           @module-param-copied="handleParamCopied"
+          @request-super-module="handleRequestSuperModule"
         />
       </section>
     </div>

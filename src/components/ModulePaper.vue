@@ -11,6 +11,7 @@ const emit = defineEmits([
   "connection-added",
   "connection-removed",
   "module-param-copied",
+  "request-super-module",
 ]);
 
 const props = defineProps({
@@ -18,6 +19,8 @@ const props = defineProps({
   fillHeight: { type: Boolean, default: false },
   // catégories à masquer dans le menu contextuel (ex: ["interface"])
   excludeCategories: { type: Array, default: () => [] },
+  // afficher l'option "Créer un super-module" dans le menu contextuel
+  superExportEnabled: { type: Boolean, default: true },
 });
 
 const paperEl = ref(null);
@@ -144,6 +147,11 @@ const addFromContextMenu = (type) => {
   if (!menu) return;
   addModule(type, menu.graphX, menu.graphY);
   closeContextMenu();
+};
+
+const sendToSuper = () => {
+  closeContextMenu();
+  emit("request-super-module", exportPatch());
 };
 
 /* =========================
@@ -956,6 +964,11 @@ defineExpose({
           {{ mod.label }}
         </button>
       </div>
+      <div v-if="superExportEnabled" class="ctx-separator"></div>
+      <button v-if="superExportEnabled" class="ctx-item ctx-action" @click="sendToSuper">
+        <span class="ctx-dot" style="background:#7c4dff"></span>
+        Créer un super-module
+      </button>
     </div>
   </div>
 </template>
@@ -1057,5 +1070,16 @@ defineExpose({
   height: 10px;
   border-radius: 50%;
   flex: 0 0 auto;
+}
+
+.ctx-separator {
+  height: 1px;
+  background: #eee;
+  margin: 4px 0;
+}
+
+.ctx-action {
+  font-weight: bold;
+  color: #7c4dff;
 }
 </style>

@@ -198,6 +198,7 @@ async function deleteDef(def) {
           :allow-interface-modules="true"
           :paper-fill-height="true"
           :initial-patch="initialPatch"
+          :super-export-enabled="false"
         />
       </section>
     </div>
