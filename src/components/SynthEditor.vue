@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, watch } from "vue"
+import Swal from "sweetalert2"
 import PatchEditor from "./PatchEditor.vue";
 import SuperModuleEditor from "./SuperModuleEditor.vue";
 import SynthPatchManager from "./SynthPatchManager.vue";
@@ -31,10 +32,18 @@ const toggleSuperModules = () => {
     currentPatch.value = "super"
 }
 
-const clearCurrentPatch = () => {
+const clearCurrentPatch = async () => {
   const editor = currentPatch.value === "voice" ? voiceEditor.value : mainEditor.value
   if (!editor) return
-  if (!confirm(`Effacer entièrement le patch ${currentPatch.value} ?`)) return
+  const res = await Swal.fire({
+    title: `Effacer entièrement le patch ${currentPatch.value} ?`,
+    icon: "warning",
+    showCancelButton: true,
+    confirmButtonText: "Effacer",
+    cancelButtonText: "Annuler",
+    confirmButtonColor: "#d33",
+  })
+  if (!res.isConfirmed) return
   editor.clearPatch()
 }
 

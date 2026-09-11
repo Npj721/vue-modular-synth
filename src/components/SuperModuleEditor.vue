@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive } from "vue";
+import Swal from "sweetalert2";
 import PatchEditor from "./PatchEditor.vue";
 import { useSuperModules } from "../composables/useSuperModules";
 
@@ -77,15 +78,18 @@ function save() {
 
     const nbPorts = def.inputs.length + def.outputs.length;
     const nbParams = Object.keys(def.params).length;
-    window.alert(
-      `Super-module "${def.label}" enregistré.\n` +
-        `Interface : ${def.inputs.length} entrée(s), ${def.outputs.length} sortie(s).\n` +
-        `${nbParams} paramètre(s) exposé(s).`
-    );
+    Swal.fire({
+      title: `Super-module "${def.label}" enregistré`,
+      html:
+        `Interface : ${def.inputs.length} entrée(s), ${def.outputs.length} sortie(s).<br>` +
+        `${nbParams} paramètre(s) exposé(s).`,
+      icon: "success",
+      confirmButtonText: "OK",
+    });
 
     refreshDefs();
   } catch (e) {
-    window.alert(e.message);
+    Swal.fire({ title: "Erreur", text: e.message, icon: "error", confirmButtonText: "OK" });
   }
 }
 
@@ -105,21 +109,32 @@ function saveAs() {
 
     const nbPorts = def.inputs.length + def.outputs.length;
     const nbParams = Object.keys(def.params).length;
-    window.alert(
-      `Super-module "${def.label}" enregistré sous.\n` +
-        `Interface : ${def.inputs.length} entrée(s), ${def.outputs.length} sortie(s).\n` +
-        `${nbParams} paramètre(s) exposé(s).`
-    );
+    Swal.fire({
+      title: `Super-module "${def.label}" enregistré sous`,
+      html:
+        `Interface : ${def.inputs.length} entrée(s), ${def.outputs.length} sortie(s).<br>` +
+        `${nbParams} paramètre(s) exposé(s).`,
+      icon: "success",
+      confirmButtonText: "OK",
+    });
 
     refreshDefs();
   } catch (e) {
-    window.alert(e.message);
+    Swal.fire({ title: "Erreur", text: e.message, icon: "error", confirmButtonText: "OK" });
   }
 }
 
 /** Supprimer un super-module */
-function deleteDef(def) {
-  if (!window.confirm(`Supprimer le super-module "${def.label}" ?`)) return;
+async function deleteDef(def) {
+  const res = await Swal.fire({
+    title: `Supprimer le super-module "${def.label}" ?`,
+    icon: "warning",
+    showCancelButton: true,
+    confirmButtonText: "Supprimer",
+    cancelButtonText: "Annuler",
+    confirmButtonColor: "#d33",
+  });
+  if (!res.isConfirmed) return;
 
   remove(def.type);
   if (editingType.value === def.type) newSuper();

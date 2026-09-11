@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from "vue"
+import Swal from "sweetalert2"
 import { usePatchStorage } from "../composables/usePatchStorage"
 
 /* =========================================================
@@ -56,12 +57,21 @@ const buildSynthPatch = () => ({
 /* =========================
  * SAVE
  * ========================= */
-const savePatch = () => {
+const savePatch = async () => {
   if (!patchName.value) {
-    alert("Nom du synthéthiseur requis")
+    Swal.fire({ title: "Nom du synthéthiseur requis", icon: "warning", confirmButtonText: "OK" })
     return
   }
-  if (storage.names().includes(patchName.value) && !confirm("Remplacer le synthéthiseur existant ?")) return
+  if (storage.names().includes(patchName.value)) {
+    const res = await Swal.fire({
+      title: "Remplacer le synthéthiseur existant ?",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Remplacer",
+      cancelButtonText: "Annuler",
+    })
+    if (!res.isConfirmed) return
+  }
   storage.save(patchName.value, buildSynthPatch())
   saveCounter.value++
 }
@@ -84,16 +94,24 @@ const selectSynth = (name) => {
 /* =========================
  * DELETE
  * ========================= */
-const deleteSynth = (name) => {
+const deleteSynth = async (name) => {
   if (!name) return
-  if (!confirm(`Supprimer le synthé « ${name} » ?`)) return
+  const res = await Swal.fire({
+    title: `Supprimer le synthé « ${name} » ?`,
+    icon: "warning",
+    showCancelButton: true,
+    confirmButtonText: "Supprimer",
+    cancelButtonText: "Annuler",
+    confirmButtonColor: "#d33",
+  })
+  if (!res.isConfirmed) return
   storage.remove(name)
   if (name === selected.value) selected.value = ""
   saveCounter.value++
 }
 
-const deletePatch = () => {
-  deleteSynth(selected.value)
+const deletePatch = async () => {
+  await deleteSynth(selected.value)
 }
 
 /* =========================
@@ -120,13 +138,23 @@ const importFile = async (e) => {
     const text = await file.text()
     const data = JSON.parse(text)
     if (!data.voicePatch || !data.mainPatch) {
-      alert("Fichier invalide : un synthéthiseur complet doit contenir voicePatch et mainPatch.")
+      Swal.fire({
+        title: "Fichier invalide",
+        text: "Un synthéthiseur complet doit contenir voicePatch et mainPatch.",
+        icon: "error",
+        confirmButtonText: "OK",
+      })
       return
     }
     patchName.value = data.name || ""
     emit("load", data)
   } catch (err) {
-    alert("Lecture du fichier impossible : " + err.message)
+    Swal.fire({
+      title: "Lecture impossible",
+      text: err.message,
+      icon: "error",
+      confirmButtonText: "OK",
+    })
   }
 
   e.target.value = ""
@@ -154,7 +182,7 @@ const importFile = async (e) => {
   <div v-if="modalOpen" class="spm-modal" @click.self="modalOpen = false">
     <div class="spm-modal-box">
       <div class="spm-modal-head">
-        <span>Liste des synthéthiseur</span>
+        <span>Liste des synthéthiseurs</span>
         <button class="spm-btn" @click="modalOpen = false">✕</button>
       </div>
       <input

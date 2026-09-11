@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from "vue"
+import Swal from "sweetalert2"
 import { usePatchStorage } from "../composables/usePatchStorage"
 
 const emit = defineEmits(['patch-loaded'])
@@ -31,14 +32,23 @@ const availablePatches = computed(() => {
 /* =========================
  * SAVE
  * ========================= */
-const savePatch = () => {
+const savePatch = async () => {
   if (!patchName.value) {
-    alert("Patch name required")
+    Swal.fire({ title: "Patch name required", icon: "warning", confirmButtonText: "OK" })
     return
   }
 
   const exists = names().includes(patchName.value)
-  if (exists && !confirm("Overwrite existing patch?")) return
+  if (exists) {
+    const res = await Swal.fire({
+      title: "Overwrite existing patch?",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Overwrite",
+      cancelButtonText: "Cancel",
+    })
+    if (!res.isConfirmed) return
+  }
   save(patchName.value, props.patch)
   saveCounter.value++
 }
@@ -60,9 +70,17 @@ const loadPatchByName = (name) => {
 /* =========================
  * DELETE
  * ========================= */
-const deletePatch = () => {
+const deletePatch = async () => {
   if (!selected.value) return
-  if (!confirm("Delete patch?")) return
+  const res = await Swal.fire({
+    title: "Delete patch?",
+    icon: "warning",
+    showCancelButton: true,
+    confirmButtonText: "Delete",
+    cancelButtonText: "Cancel",
+    confirmButtonColor: "#d33",
+  })
+  if (!res.isConfirmed) return
 
   remove(selected.value)
   selected.value = null
