@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive } from "vue";
+import { ref, reactive, watch } from "vue";
 import Swal from "sweetalert2";
 import PatchEditor from "./PatchEditor.vue";
 import { useSuperModules } from "../composables/useSuperModules";
@@ -7,7 +7,7 @@ import { useSuperModules } from "../composables/useSuperModules";
 /* --------------------
  * Registry
  * -------------------- */
-const { list, get, saveFromGraph, remove } = useSuperModules();
+const { list, get, saveFromGraph, remove, version } = useSuperModules();
 
 /* --------------------
  * État éditeur
@@ -32,6 +32,10 @@ const refreshDefs = () => {
   defs.value = list().map((d) => ({ ...d }));
 };
 refreshDefs();
+
+// le registre peut changer hors de cet éditeur (ex: "Créer un super-module"
+// via le menu contextuel d'un patch voice/main) → se rafraîchit.
+watch(version, refreshDefs);
 
 /* =========================================================
  * Actions

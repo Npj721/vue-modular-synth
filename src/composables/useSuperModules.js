@@ -21,6 +21,7 @@
 //   paramMap: { <flatKey>: { moduleId, key } }  // routage vers le module interne
 // }
 
+import { ref } from "vue";
 import { useModuleCatalog } from "./useModuleCatalog";
 
 const STORAGE_KEY = "modular-super-modules";
@@ -31,6 +32,10 @@ const STORAGE_KEY = "modular-super-modules";
 
 const registry = {}; // type -> définition
 let initialized = false;
+
+// version réactive du registre : incrémentée à chaque création/suppression,
+// permet aux composants (ex: SuperModuleEditor) de rafraîchir leurs listes.
+const version = ref(0);
 
 const { registerModuleType, unregisterModuleType, getModuleByType } =
   useModuleCatalog();
@@ -234,6 +239,7 @@ export function toCatalogDef(sd) {
 function register(def) {
   registry[def.type] = def;
   registerModuleType(def.type, toCatalogDef(def));
+  version.value++;
 }
 
 /* =========================================================
@@ -317,8 +323,9 @@ export function useSuperModules() {
     const all = readStorage();
     delete all[type];
     writeStorage(all);
+    version.value++;
     return true;
   }
 
-  return { list, get, saveFromGraph, remove };
+  return { list, get, saveFromGraph, remove, version };
 }
