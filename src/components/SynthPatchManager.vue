@@ -197,24 +197,25 @@ const importFile = async (e) => {
     <span class="spm-title">synthéthiseur complet</span>
     <button class="spm-btn" :disabled="!selected" @click="savePatch">Enregistrer</button>
     <button class="spm-btn" @click="savePatchAs">Enregistrer sous</button>
-    <button class="spm-btn" @click="exportFile">Exporter</button>
-    <label class="spm-import">
-      Importer
-      <input type="file" accept=".json" hidden @change="importFile" />
-    </label>
+    
 
     <button class="spm-btn spm-nav" :disabled="!availableSynths.length" @click="cycleSynth(-1)">◀</button>
     <button class="spm-btn spm-select" @click="openModal">
       {{ selected || "— Sélectionner synthéthiseur —" }}
     </button>
     <button class="spm-btn spm-nav" :disabled="!availableSynths.length" @click="cycleSynth(1)">▶</button>
-    <button class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
-    <button class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
+    <button v-if="selected" class="spm-btn" @click="exportFile">Exporter</button>
+    <button v-if="false" class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
+    <button v-if="false" class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
   </div>
 
   <div v-if="modalOpen" class="spm-modal" @click.self="modalOpen = false">
     <div class="spm-modal-box">
       <div class="spm-modal-head">
+        <label class="spm-import">
+          Importer
+          <input type="file" accept=".json" hidden @change="importFile" />
+        </label>
         <span>Liste des synthéthiseurs</span>
         <button class="spm-btn" @click="modalOpen = false">✕</button>
       </div>
