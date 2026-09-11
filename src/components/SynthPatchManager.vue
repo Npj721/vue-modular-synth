@@ -26,6 +26,7 @@ const storage = usePatchStorage(STORAGE_KEY)
 const patchName = ref("")
 const selected = ref("")
 const saveCounter = ref(0)
+const modalOpen = ref(false)
 
 const deepClone = (v) => JSON.parse(JSON.stringify(v ?? {}))
 
@@ -33,6 +34,17 @@ const availableSynths = computed(() => {
   saveCounter.value // reactive dependency
   return storage.names().sort((a, b) => a.localeCompare(b))
 })
+
+const filter = ref("")
+const filteredSynths = computed(() => {
+  const q = filter.value.trim().toLowerCase()
+  return availableSynths.value.filter((n) => !q || n.toLowerCase().includes(q))
+})
+
+const openModal = () => {
+  filter.value = ""
+  modalOpen.value = true
+}
 
 const buildSynthPatch = () => ({
   version: 1,
@@ -46,10 +58,10 @@ const buildSynthPatch = () => ({
  * ========================= */
 const savePatch = () => {
   if (!patchName.value) {
-    alert("Nom du synthé requis")
+    alert("Nom du synthéthiseur requis")
     return
   }
-  if (storage.names().includes(patchName.value) && !confirm("Remplacer le synthé existant ?")) return
+  if (storage.names().includes(patchName.value) && !confirm("Remplacer le synthéthiseur existant ?")) return
   storage.save(patchName.value, buildSynthPatch())
   saveCounter.value++
 }
@@ -63,12 +75,18 @@ const loadSelected = () => {
   emit("load", data)
 }
 
+const selectSynth = (name) => {
+  selected.value = name
+  modalOpen.value = false
+  loadSelected()
+}
+
 /* =========================
  * DELETE
  * ========================= */
 const deletePatch = () => {
   if (!selected.value) return
-  if (!confirm("Supprimer ce synthé complet ?")) return
+  if (!confirm("Supprimer ce synthéthiseur complet ?")) return
   storage.remove(selected.value)
   selected.value = ""
   saveCounter.value++
@@ -98,7 +116,7 @@ const importFile = async (e) => {
     const text = await file.text()
     const data = JSON.parse(text)
     if (!data.voicePatch || !data.mainPatch) {
-      alert("Fichier invalide : un synthé complet doit contenir voicePatch et mainPatch.")
+      alert("Fichier invalide : un synthéthiseur complet doit contenir voicePatch et mainPatch.")
       return
     }
     patchName.value = data.name || ""
@@ -113,8 +131,8 @@ const importFile = async (e) => {
 
 <template>
   <div class="synth-patch-manager">
-    <span class="spm-title">Synthé complet</span>
-    <input v-model="patchName" placeholder="Nom du synthé" class="spm-name" @keyup.enter="savePatch" />
+    <span class="spm-title">synthéthiseur complet</span>
+    <input v-model="patchName" placeholder="Nom du synthéthiseur" class="spm-name" @keyup.enter="savePatch" />
     <button class="spm-btn" @click="savePatch">Enregistrer</button>
     <button class="spm-btn" @click="exportFile">Exporter</button>
     <label class="spm-import">
@@ -122,12 +140,49 @@ const importFile = async (e) => {
       <input type="file" accept=".json" hidden @change="importFile" />
     </label>
 
-    <select v-model="selected" class="spm-select">
-      <option value="" disabled>— Choisir un synthé —</option>
-      <option v-for="name in availableSynths" :key="name" :value="name">{{ name }}</option>
-    </select>
-    <button class="spm-btn" :disabled="!selected" @click="loadSelected">Charger</button>
+    <button class="spm-btn spm-select" @click="openModal">
+      {{ selected || "— Sélectionner synthéthiseur —" }}
+    </button>
+    <button class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
     <button class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
+  </div>
+
+  <div v-if="modalOpen" class="spm-modal" @click.self="modalOpen = false">
+    <div class="spm-modal-box">
+      <div class="spm-modal-head">
+        <span>Liste des synthéthiseur</span>
+        <button class="spm-btn" @click="modalOpen = false">✕</button>
+      </div>
+      <input
+        v-model="filter"
+        class="spm-search"
+        type="text"
+        placeholder="Filtrer"
+      />
+      <div class="spm-table-wrap">
+        <table class="spm-table">
+          <thead>
+            <tr><th>Nom</th></tr>
+          </thead>
+          <tbody>
+            <tr v-if="!availableSynths.length" class="spm-empty">
+              <td>Aucun synthéthiseur enregistré</td>
+            </tr>
+            <tr v-else-if="!filteredSynths.length" class="spm-empty">
+              <td>Aucun résultat pour « {{ filter }} »</td>
+            </tr>
+            <tr
+              v-for="name in filteredSynths"
+              :key="name"
+              :class="{ current: name === selected }"
+              @click="selectSynth(name)"
+            >
+              <td>{{ name }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -197,5 +252,94 @@ const importFile = async (e) => {
 .spm-import:hover {
   background: #1f5547;
   border-color: #00ffd0;
+}
+.spm-select {
+  min-width: 180px;
+  text-align: left;
+  cursor: pointer;
+}
+.spm-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.spm-modal-box {
+  width: auto;
+  min-width: 80vw;
+  max-width: 85vw;
+  height: fit-content;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: #0e2b22;
+  border: 1px solid #2c5a4c;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.spm-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2c5a4c;
+  color: #00ffd0;
+  font-weight: bold;
+}
+.spm-search {
+  margin: 8px 12px;
+  padding: 4px 8px;
+  border: 1px solid #2c5a4c;
+  border-radius: 4px;
+  background: #0b211a;
+  color: #d6e7e0;
+  font-size: 12px;
+}
+.spm-table-wrap {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 60%;
+  overflow-y: auto;
+}
+.spm-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.spm-table th {
+  color: #6fa08f;
+  font-size: 11px;
+  font-weight: normal;
+  text-align: left;
+  padding: 6px 12px;
+  border-bottom: 1px solid #1f4538;
+}
+.spm-table td {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: #d6e7e0;
+  border-bottom: 1px solid #1f4538;
+}
+.spm-table tr:hover td {
+  background: #174035;
+  color: #00ffd0;
+}
+.spm-table tr.current td {
+  background: #00ffd0;
+  color: #0b211a;
+  font-weight: bold;
+}
+.spm-table tr.spm-empty {
+  cursor: default;
+}
+.spm-table tr.spm-empty td {
+  color: #6fa08f;
+}
+.spm-table tr.spm-empty:hover td {
+  background: transparent;
+  color: #6fa08f;
 }
 </style>
