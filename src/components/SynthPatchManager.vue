@@ -84,12 +84,16 @@ const selectSynth = (name) => {
 /* =========================
  * DELETE
  * ========================= */
-const deletePatch = () => {
-  if (!selected.value) return
-  if (!confirm("Supprimer ce synthéthiseur complet ?")) return
-  storage.remove(selected.value)
-  selected.value = ""
+const deleteSynth = (name) => {
+  if (!name) return
+  if (!confirm(`Supprimer le synthé « ${name} » ?`)) return
+  storage.remove(name)
+  if (name === selected.value) selected.value = ""
   saveCounter.value++
+}
+
+const deletePatch = () => {
+  deleteSynth(selected.value)
 }
 
 /* =========================
@@ -160,16 +164,19 @@ const importFile = async (e) => {
         placeholder="Filtrer"
       />
       <div class="spm-table-wrap">
-        <table class="spm-table">
+<table class="spm-table">
           <thead>
-            <tr><th>Nom</th></tr>
+            <tr>
+              <th>Nom</th>
+              <th style="width: 44px"></th>
+            </tr>
           </thead>
           <tbody>
             <tr v-if="!availableSynths.length" class="spm-empty">
-              <td>Aucun synthéthiseur enregistré</td>
+              <td colspan="2">Aucun synthé enregistré</td>
             </tr>
             <tr v-else-if="!filteredSynths.length" class="spm-empty">
-              <td>Aucun résultat pour « {{ filter }} »</td>
+              <td colspan="2">Aucun résultat pour « {{ filter }} »</td>
             </tr>
             <tr
               v-for="name in filteredSynths"
@@ -177,7 +184,14 @@ const importFile = async (e) => {
               :class="{ current: name === selected }"
               @click="selectSynth(name)"
             >
-              <td>{{ name }}</td>
+              <td class="spm-name-cell">{{ name }}</td>
+              <td>
+                <button
+                  class="spm-del"
+                  title="Supprimer ce synthé"
+                  @click.stop="deleteSynth(name)"
+                >✕</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -322,6 +336,27 @@ const importFile = async (e) => {
   cursor: pointer;
   color: #d6e7e0;
   border-bottom: 1px solid #1f4538;
+}
+.spm-name-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 0;
+}
+.spm-del {
+  width: 24px;
+  height: 22px;
+  line-height: 1;
+  padding: 0;
+  font-size: 12px;
+  background: #4a1f1f;
+  color: #f0b6b6;
+  border: 1px solid #7a3a3a;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.spm-del:hover {
+  background: #662b2b;
 }
 .spm-table tr:hover td {
   background: #174035;
