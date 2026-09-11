@@ -314,7 +314,8 @@ const importFile = async (e) => {
   min-width: 80vw;
   max-width: 85vw;
   height: fit-content;
-  max-height: 80vh;
+  min-height: 80vh;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
   background: #0e2b22;
