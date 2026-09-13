@@ -47,6 +47,47 @@ const safeDisconnect = (node) => {
   try { node.disconnect() } catch {}
 }
 
+/* Construit une PeriodicWave depuis le paramètre JSON "wave" du module
+ * wavetable, au format { real: [], imag: [], disableNormalization: bool }.
+ * disableNormalization vaut true par défaut. En cas de JSON invalide ou de
+ * tableaux vides, repli sur une onde en dents de scie (somme de 1/n). */
+function buildPeriodicWave(ctx, raw) {
+  let real = null
+  let imag = null
+  let disableNormalization = true
+
+  if (raw) {
+    try {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+      if (parsed && Array.isArray(parsed.real) && parsed.real.length > 0) {
+        real = parsed.real.slice()
+      }
+      if (parsed && Array.isArray(parsed.imag) && parsed.imag.length > 0) {
+        imag = parsed.imag.slice()
+      }
+      if (parsed && parsed.disableNormalization !== undefined) {
+        disableNormalization = !!parsed.disableNormalization
+      }
+    } catch {
+      real = null
+      imag = null
+    }
+  }
+
+  if (!real || !imag) {
+    const harmonics = 16
+    real = new Array(harmonics).fill(0)
+    imag = [0]
+    for (let i = 1; i < harmonics; i++) imag.push(1 / i)
+  }
+
+  try {
+    return ctx.createPeriodicWave(real, imag, { disableNormalization })
+  } catch {
+    return null
+  }
+}
+
 /* =========================================================
  * Normalisation des graphes
  * (le patch peut être vide/incomplet au démarrage)
@@ -273,13 +314,19 @@ export function usePatchVoice(patch) {
       }
 
       case "voice":
+      case "wavetable":
       case "osc": {
         const osc = ctx.createOscillator()
-        osc.type = p.type || "sine"
-        const freq =
-          mod.type === "voice"
-            ? (o.note !== undefined ? noteToFreq(o.note) : p.frequency ?? 440)
-            : p.frequency ?? 440
+        if (mod.type === "wavetable") {
+          const wave = buildPeriodicWave(ctx, p.wave)
+          if (wave) osc.setPeriodicWave(wave)
+        } else {
+          osc.type = p.type || "sine"
+        }
+        const isNoteDriven = mod.type === "voice" || mod.type === "wavetable"
+        const freq = isNoteDriven
+          ? (o.note !== undefined ? noteToFreq(o.note) : p.frequency ?? 440)
+          : p.frequency ?? 440
         const detune = p.detune ?? 0
         const delay = p.delay ?? 0
         osc.frequency.setValueAtTime(freq, now)

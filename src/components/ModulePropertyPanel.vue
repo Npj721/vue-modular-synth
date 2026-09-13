@@ -110,6 +110,14 @@ const toggleLoop = () => {
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
 
+      <!-- JSON textarea (ex: wavetable) -->
+      <textarea v-else-if="def.type === 'json'"
+                class="json-input"
+                spellcheck="false"
+                rows="7"
+                v-model="params[key]"
+                @input="emitChange(key, params[key])"></textarea>
+
       <!-- Boolean checkbox -->
       <input v-else-if="def.type === 'boolean'"
              type="checkbox"
@@ -178,6 +186,17 @@ const toggleLoop = () => {
 .module-label .hint {
   font-size: 11px;
   color: #888;
+}
+
+.json-input {
+  width: 100%;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
 }
 
 .param-row {

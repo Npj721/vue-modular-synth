@@ -62,6 +62,9 @@ class StubNode {
   stop() {
     this.stopped = true;
   }
+  setPeriodicWave(wave) {
+    this.wave = wave;
+  }
 }
 
 class StubContext {
@@ -120,6 +123,51 @@ class StubContext {
     n.frequency = new StubParam(1000);
     n.Q = new StubParam(1);
     n.gain = new StubParam(0);
+    this.created.push(n);
+    return n;
+  }
+  createPeriodicWave(real, imag, options) {
+    const w = { real, imag, options: options || {}, __type: "periodicWave" };
+    this.created.push(w);
+    return w;
+  }
+  createAnalyser() {
+    const n = new StubNode(this, "analyser");
+    n.fftSize = 2048;
+    n.smoothingTimeConstant = 0.8;
+    this.created.push(n);
+    return n;
+  }
+  createWaveShaper() {
+    const n = new StubNode(this, "waveshaper");
+    n.curve = null;
+    n.oversample = "none";
+    this.created.push(n);
+    return n;
+  }
+  createChannelSplitter(count) {
+    const n = new StubNode(this, "splitter");
+    n.channelCount = count;
+    this.created.push(n);
+    return n;
+  }
+  createChannelMerger(count) {
+    const n = new StubNode(this, "merger");
+    n.channelCount = count;
+    this.created.push(n);
+    return n;
+  }
+  createPanner() {
+    const n = new StubNode(this, "panner");
+    for (const k of ["positionX", "positionY", "positionZ", "orientationX", "orientationY", "orientationZ"]) {
+      n[k] = new StubParam(0);
+    }
+    this.created.push(n);
+    return n;
+  }
+  createStereoPanner() {
+    const n = new StubNode(this, "stereoPanner");
+    n.pan = new StubParam(0);
     this.created.push(n);
     return n;
   }
@@ -408,6 +456,102 @@ saveFromGraph({
     "gain.out -> destination (audio chain)",
     !!gainMod && !!mainInputGain && gainMod.connections.includes(mainInputGain)
   );
+}
+
+/* =========================================================
+ * Scénario 5 : module wavetable (PeriodicWave depuis JSON)
+ * ========================================================= */
+{
+  const patch = {
+    mainPatch: { modules: [], connections: [] },
+    voicePatch: {
+      modules: [
+        {
+          id: "wt1",
+          type: "wavetable",
+          params: {
+            wave: '{"real":[0,0,0],"imag":[0,1,0.5]}',
+            detune: 0,
+            delay: 0,
+          },
+          position: {},
+        },
+        { id: "wd", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "wt1", port: "out:out" }, to: { id: "wd", port: "in:in" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+  const ctx = synth.getContext();
+
+  const oscNode = of(ctx, "osc").find((o) =>
+    approx(o.frequency.value, noteToFreq(60))
+  );
+  check("wavetable : oscillateur créé", !!oscNode);
+  check(
+    "wavetable : setPeriodicWave appliqué (real/imag du JSON)",
+    !!oscNode &&
+      !!oscNode.wave &&
+      oscNode.wave.real.length === 3 &&
+      oscNode.wave.imag[1] === 1 &&
+      oscNode.wave.imag[2] === 0.5
+  );
+  check(
+    "wavetable : disableNormalization = true par défaut",
+    !!oscNode && !!oscNode.wave && oscNode.wave.options.disableNormalization === true
+  );
+  check("wavetable : fréquence = note 60", !!oscNode);
+  check("wavetable : oscillateur démarré", !!oscNode && oscNode.started === true);
+
+  synth.noteOff(60);
+}
+
+/* =========================================================
+ * Scénario 6 : wavetable avec disableNormalization=false explicite
+ * ========================================================= */
+{
+  const patch = {
+    mainPatch: { modules: [], connections: [] },
+    voicePatch: {
+      modules: [
+        {
+          id: "wt2",
+          type: "wavetable",
+          params: {
+            wave:
+              '{"real":[0,0,0],"imag":[0,2],"disableNormalization":false}',
+            detune: 0,
+            delay: 0,
+          },
+          position: {},
+        },
+        { id: "wd2", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "wt2", port: "out:out" }, to: { id: "wd2", port: "in:in" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+  const ctx = synth.getContext();
+
+  const oscNode = of(ctx, "osc").find((o) => !!o.wave);
+  check(
+    "wavetable : disableNormalization=false lue depuis le JSON",
+    !!oscNode &&
+      !!oscNode.wave &&
+      oscNode.wave.options.disableNormalization === false
+  );
+
+  synth.noteOff(60);
 }
 
 console.log(failures === 0 ? "\nTous les tests passent." : `\n${failures} échec(s).`);

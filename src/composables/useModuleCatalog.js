@@ -58,6 +58,52 @@ const catalog = reactive({
         },
       },
     },
+    wavetable: {
+      label: "Wavetable",
+      color: "#2E8B57",
+      category: "source",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "frequency",
+            label: "Freq",
+            kind: "param",
+            role: "modulatable",
+            rate: "a-rate",
+            multiple: true,
+          },
+          {
+            id: "detune",
+            label: "Detune",
+            kind: "param",
+            role: "modulatable",
+            rate: "a-rate",
+            multiple: true,
+          },
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        detune: num(-1200, 1200, 1, 0),
+        delay: num(0, 5, 0.001, 0),
+        wave: {
+          type: "json",
+          default:
+            '{"real":[0,0,0,0,0,0,0,0],"imag":[0,1,0.5,0.333,0.25,0.2,0.167,0.143],"disableNormalization":true}',
+        },
+      },
+    },
     fx: {
       label: "FX / Sample",
       color: "#9c6a00",
