@@ -79,6 +79,48 @@ const onSampleRegionUpdate = ({ start, end }) => {
   emitChange('start', start)
   emitChange('end', end)
 }
+
+// Validation d'un paramètre JSON (ex: wavetable) à l'édition :
+// - le contenu doit être un JSON valide
+// - les clés désignées par def.jsonKeys doivent exister et être des tableaux
+// - ils doivent contenir au moins une valeur et avoir tous la même taille
+const jsonStatus = (def, value) => {
+  if (!def || def.type !== 'json') return null
+  const raw = value == null ? '' : String(value)
+  if (!raw.trim()) return { ok: false, message: 'JSON vide' }
+
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    return { ok: false, message: 'JSON invalide' }
+  }
+
+  const keys = def.jsonKeys || []
+  for (const k of keys) {
+    if (!(k in parsed)) return { ok: false, message: `clé "${k}" manquante` }
+    if (!Array.isArray(parsed[k])) {
+      return { ok: false, message: `"${k}" doit être un tableau` }
+    }
+  }
+  if (keys.length) {
+    const lens = keys.map((k) => parsed[k].length)
+    if (lens.some((l) => l === 0)) {
+      return { ok: false, message: 'tableaux vides (repli sur une onde par défaut)' }
+    }
+    if (new Set(lens).size > 1) {
+      return {
+        ok: false,
+        message: `${keys.join(' et ')} doivent avoir la même taille`,
+      }
+    }
+    return {
+      ok: true,
+      message: `JSON valide : ${keys.join(', ')} = ${lens[0]} valeurs`,
+    }
+  }
+  return { ok: true, message: 'JSON valide' }
+}
 </script>
 
 <template>
@@ -93,7 +135,7 @@ const onSampleRegionUpdate = ({ start, end }) => {
       />
       <span v-if="label" class="hint">utilisé comme préfixe des paramètres exposés</span>
     </div>
-    <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' }">
+    <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' || def.type === 'json' }">
       <label>{{ key }}</label>  
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
@@ -119,12 +161,22 @@ const onSampleRegionUpdate = ({ start, end }) => {
              @change="emitChange(key, params[key])" />
 
       <!-- JSON textarea (ex: wavetable) -->
-      <textarea v-else-if="def.type === 'json'"
-                class="json-input"
-                spellcheck="false"
-                rows="7"
-                v-model="params[key]"
-                @input="emitChange(key, params[key])"></textarea>
+      <template v-else-if="def.type === 'json'">
+        <div class="json-field">
+          <textarea
+            class="json-input"
+            spellcheck="false"
+            rows="7"
+            v-model="params[key]"
+            @input="emitChange(key, params[key])"></textarea>
+          <span
+            v-if="jsonStatus(def, params[key])"
+            class="json-status"
+            :class="jsonStatus(def, params[key]).ok ? 'ok' : 'err'">
+            {{ jsonStatus(def, params[key]).message }}
+          </span>
+        </div>
+      </template>
 
       <!-- Boolean checkbox -->
       <input v-else-if="def.type === 'boolean'"
@@ -216,6 +268,26 @@ const onSampleRegionUpdate = ({ start, end }) => {
   border: 1px solid #ccc;
   border-radius: 4px;
   box-sizing: border-box;
+}
+
+.json-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.json-status {
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.json-status.ok {
+  color: #27ae60;
+}
+
+.json-status.err {
+  color: #c0392b;
 }
 
 .param-row {

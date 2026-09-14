@@ -99,6 +99,7 @@ const catalog = reactive({
         delay: num(0, 5, 0.001, 0),
         wave: {
           type: "json",
+          jsonKeys: ["real", "imag"],
           default:
             '{"real":[0,0,0,0,0,0,0,0],"imag":[0,1,0.5,0.333,0.25,0.2,0.167,0.143],"disableNormalization":true}',
         },
