@@ -121,6 +121,43 @@ const jsonStatus = (def, value) => {
   }
   return { ok: true, message: 'JSON valide' }
 }
+
+// Un paramètre JSON "onde" expose des clés amplifiables (real + imag).
+const isWaveParam = (def) =>
+  Array.isArray(def?.jsonKeys) &&
+  def.jsonKeys.includes('real') &&
+  def.jsonKeys.includes('imag')
+
+// Amplificateur : multiplie chaque valeur de real/imag et clampe dans [-1, 1].
+// Écrit le résultat directement dans le paramètre "wave" (réécrit le JSON),
+// pour que l'amplification soit "cuite" dans la wavetable (pas de recalcul
+// à chaque note).
+const ampFactor = ref(1)
+const applyAmp = (def, key) => {
+  if (!isWaveParam(def)) return
+  const raw = params[key]
+  if (!raw) return
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return
+  }
+  if (!Array.isArray(parsed.real) || !Array.isArray(parsed.imag)) return
+
+  const f = Number(ampFactor.value)
+  if (!isFinite(f) || f <= 0) return
+
+  const clamp01 = (v) => Math.max(-1, Math.min(1, v * f))
+  const next = {
+    ...parsed,
+    real: parsed.real.map(clamp01),
+    imag: parsed.imag.map(clamp01),
+  }
+
+  ampFactor.value = 1
+  emitChange(key, JSON.stringify(next))
+}
 </script>
 
 <template>
@@ -175,6 +212,25 @@ const jsonStatus = (def, value) => {
             :class="jsonStatus(def, params[key]).ok ? 'ok' : 'err'">
             {{ jsonStatus(def, params[key]).message }}
           </span>
+          <!-- Amplificateur : multiplie def.jsonKeys et réécrit le JSON -->
+          <div
+            v-if="isWaveParam(def)"
+            class="amp-row">
+            <label>Amplifier ×</label>
+            <input
+              type="number"
+              v-model.number="ampFactor"
+              min="0.01"
+              step="0.1"
+              placeholder="1"
+            />
+            <button
+              class="amp-apply"
+              :disabled="!(ampFactor > 0)"
+              @click="applyAmp(def, key)">
+              appliquer
+            </button>
+          </div>
         </div>
       </template>
 
@@ -288,6 +344,45 @@ const jsonStatus = (def, value) => {
 
 .json-status.err {
   color: #c0392b;
+}
+
+.amp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #333;
+}
+
+.amp-row label {
+  min-width: max-content;
+}
+
+.amp-row input {
+  width: 64px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.amp-apply {
+  border: 1px solid #2E8B57;
+  background: rgba(46, 139, 87, 0.1);
+  color: #2c6e4f;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.amp-apply:hover:not(:disabled) {
+  background: rgba(46, 139, 87, 0.2);
+}
+
+.amp-apply:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .param-row {
