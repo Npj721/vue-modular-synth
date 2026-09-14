@@ -42,6 +42,10 @@ class StubParam {
   cancelAndHoldAtTime(t) {
     this.events.push(["cancelHold", t]);
   }
+  setValueCurveAtTime(curve, t, dur) {
+    this.events.push(["curve", curve, t, dur]);
+    this.value = curve[curve.length - 1];
+  }
 }
 
 class StubNode {
@@ -61,11 +65,14 @@ class StubNode {
     this.started = true;
     this.startArgs = args;
   }
-  stop() {
+  stop(t) {
     this.stopped = true;
+    this.stoppedAt = t;
   }
   setPeriodicWave(wave) {
     this.wave = wave;
+    if (!globalThis.__wavesApplied) globalThis.__wavesApplied = [];
+    globalThis.__wavesApplied.push(wave);
   }
 }
 
@@ -659,6 +666,145 @@ saveFromGraph({
   );
   check("fx : loop désactivé par défaut", !!src && src.loop === false);
   synth.noteOff(60);
+}
+
+/* =========================================================
+ * Scénario 9 : module wavetableS — morphing en boucle
+ * (endMode "loop" par défaut : retour à la frame 0 en fin de liste)
+ * ========================================================= */
+{
+  const wave3 =
+    '[{"real":[0,0,0,0],"imag":[0,1,0.5,0.333]},{"real":[0,0,0,0],"imag":[0,1,0,0.333]},{"real":[0,0,0,0],"imag":[0,1,0,0]}]';
+
+  // identifie une frame par ses coeffs : 0 (dent de scie), 1 ou 2 (sine)
+  const frameId = (w) => (w.imag[2] === 0.5 ? 0 : w.imag[3] === 0.333 ? 1 : 2);
+  const hasPair = (arr, a, b) =>
+    arr.some((v, i) => arr[i] === a && arr[i + 1] === b);
+
+  const buildSynth = async (extraParams) => {
+    const patch = {
+      mainPatch: { modules: [], connections: [] },
+      voicePatch: {
+        modules: [
+          {
+            id: "ws1",
+            type: "wavetableS",
+            params: {
+              wave: wave3,
+              morph: 10, // 10 ms par crossfade
+              detune: 0,
+              delay: 0,
+              ...extraParams,
+            },
+            position: {},
+          },
+          { id: "wsd", type: "destination", params: {}, position: {} },
+        ],
+        connections: [
+          {
+            from: { id: "ws1", port: "out:out" },
+            to: { id: "wsd", port: "in:in" },
+          },
+        ],
+      },
+    };
+    const synth = usePatchVoice(patch);
+    await synth.init();
+    await synth.noteOn(60);
+    return synth;
+  };
+
+  // --- 9a : endMode "loop" (défaut) ---
+  globalThis.__wavesApplied = [];
+  let synth = await buildSynth({});
+  let ctx = synth.getContext();
+
+  const oscs = of(ctx, "osc").filter(
+    (o) => approx(o.frequency.value, noteToFreq(60))
+  );
+  check("wavetableS : 2 oscillateurs créés", oscs.length === 2);
+  check("wavetableS : osc 1 démarré", !!oscs[0]?.started);
+  check("wavetableS : osc 2 démarré", !!oscs[1]?.started);
+
+  check(
+    "wavetableS : osc 1 -> frame 0, osc 2 -> frame 1",
+    !!oscs[0]?.wave &&
+      frameId(oscs[0].wave) === 0 &&
+      !!oscs[1]?.wave &&
+      frameId(oscs[1].wave) === 1
+  );
+
+  const gains = of(ctx, "gain");
+  check(
+    "wavetableS : au moins 3 gains (2 crossfade + master)",
+    gains.length >= 3
+  );
+  check(
+    "wavetableS : masterGain créé",
+    !!gains.find((g) => approx(g.gain.value, 1))
+  );
+
+  // laisser le scan boucler pendant ~220 ms
+  await new Promise((r) => setTimeout(r, 220));
+
+  const curveCount = gains.filter((g) =>
+    g.gain.events.some(([k]) => k === "curve")
+  ).length;
+  const curveEvents = gains.reduce(
+    (n, g) => n + g.gain.events.filter(([k]) => k === "curve").length,
+    0
+  );
+  check("wavetableS : crossfade equal-power (courbe schedule)", curveCount >= 1);
+  check(
+    "wavetableS : balayage EN BOUCLE (bien plus de 4 courbes d'un scan unique)",
+    curveEvents > 8
+  );
+
+  // séquence des setPeriodicWave après le setup : seqAt(2..) = 2,0,1,2,0,1…
+  const seq = globalThis.__wavesApplied.slice(2).map(frameId);
+  check(
+    "wavetableS : loop → retour à 0 en fin de liste (…,2,0,…)",
+    hasPair(seq, 2, 0)
+  );
+  check(
+    "wavetableS : loop → jamais de va-et-vient (…,2,1,…)",
+    !hasPair(seq, 2, 1)
+  );
+
+  synth.noteOff(60);
+  check("wavetableS : osc 1 stoppé (loop)", !!oscs[0]?.stopped);
+  check("wavetableS : osc 2 stoppé (loop)", !!oscs[1]?.stopped);
+
+  // --- 9b : endMode "pingpong" (va-et-vient) ---
+  globalThis.__wavesApplied = [];
+  synth = await buildSynth({ endMode: "pingpong" });
+  ctx = synth.getContext();
+  const pongOscs = of(ctx, "osc").filter(
+    (o) => approx(o.frequency.value, noteToFreq(60))
+  );
+  const pongGains = of(ctx, "gain");
+
+  await new Promise((r) => setTimeout(r, 220));
+
+  const pongEvents = pongGains.reduce(
+    (n, g) => n + g.gain.events.filter(([k]) => k === "curve").length,
+    0
+  );
+  check(
+    "wavetableS : pingpong → balayage également continu",
+    pongEvents > 8
+  );
+
+  // séquence seqAt(2..) = 2,1,0,1,2,1,… : rebond sans retour direct 2→0
+  const pseq = globalThis.__wavesApplied.slice(2).map(frameId);
+  check("wavetableS : pingpong → rebond (…,2,1,…)", hasPair(pseq, 2, 1));
+  check(
+    "wavetableS : pingpong → jamais de retour direct 2→0",
+    !hasPair(pseq, 2, 0)
+  );
+
+  synth.noteOff(60);
+  check("wavetableS : osc stoppé (pingpong)", !!pongOscs[0]?.stopped);
 }
 
 console.log(failures === 0 ? "\nTous les tests passent." : `\n${failures} échec(s).`);

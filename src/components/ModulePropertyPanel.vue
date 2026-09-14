@@ -96,6 +96,54 @@ const jsonStatus = (def, value) => {
     return { ok: false, message: 'JSON invalide' }
   }
 
+  // wavetableS : tableau de frames [ { real, imag }, ... ] homogènes
+  if (def.jsonFrames) {
+    if (!Array.isArray(parsed)) {
+      return { ok: false, message: 'doit être un tableau de frames' }
+    }
+    if (parsed.length === 0) {
+      return {
+        ok: false,
+        message: 'tableau vide (repli sur une onde par défaut)',
+      }
+    }
+    let coeffs = -1
+    for (let i = 0; i < parsed.length; i++) {
+      const f = parsed[i]
+      if (!f || typeof f !== 'object') {
+        return { ok: false, message: `frame ${i} : objet attendu` }
+      }
+      for (const k of ['real', 'imag']) {
+        if (!Array.isArray(f[k])) {
+          return {
+            ok: false,
+            message: `frame ${i} : "${k}" doit être un tableau`,
+          }
+        }
+        if (f[k].length === 0) {
+          return { ok: false, message: `frame ${i} : "${k}" vide` }
+        }
+      }
+      if (f.real.length !== f.imag.length) {
+        return {
+          ok: false,
+          message: `frame ${i} : real/imag de tailles différentes`,
+        }
+      }
+      if (coeffs === -1) coeffs = f.real.length
+      else if (f.real.length !== coeffs) {
+        return {
+          ok: false,
+          message: `frame ${i} : ${f.real.length} coeffs au lieu de ${coeffs}`,
+        }
+      }
+    }
+    return {
+      ok: true,
+      message: `JSON valide : ${parsed.length} frame(s) × ${coeffs} coeffs`,
+    }
+  }
+
   const keys = def.jsonKeys || []
   for (const k of keys) {
     if (!(k in parsed)) return { ok: false, message: `clé "${k}" manquante` }

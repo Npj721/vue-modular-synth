@@ -92,6 +92,131 @@ function buildPeriodicWave(ctx, raw) {
   }
 }
 
+/* Courbes de crossfade "equal-power" (gain total constant, pas de creux en
+ * plein milieu du morph) : sin rampe 0→1, cos rampe 1→0. Précalculées une
+ * seule fois et réutilisées par tous les modules wavetableS. */
+const MORPH_CURVE_UP = (() => {
+  const c = new Float32Array(64)
+  for (let i = 0; i < c.length; i++) c[i] = Math.sin((Math.PI / 2) * (i / (c.length - 1)))
+  return c
+})()
+
+const MORPH_CURVE_DOWN = (() => {
+  const c = new Float32Array(64)
+  for (let i = 0; i < c.length; i++) c[i] = Math.cos((Math.PI / 2) * (i / (c.length - 1)))
+  return c
+})()
+
+/* Décompose le paramètre JSON "wave" d'un module wavetableS, au format
+ * [ { real, imag }, ... ] — une frame par wavetable, jusqu'à 255 frames
+ * (borné à 256). Chaque frame devient une PeriodicWave ; frame invalide
+ * ignorée. Aucune frame exploitable → repli sur l'onde par défaut. */
+function parseWavetableFrames(ctx, raw) {
+  let frames = null
+  if (raw) {
+    try {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
+      if (Array.isArray(parsed)) frames = parsed.slice(0, 256)
+    } catch {}
+  }
+  const waves = []
+  for (const f of frames ?? []) {
+    const w = buildPeriodicWave(ctx, f)
+    if (w) waves.push(w)
+  }
+  if (waves.length === 0) {
+    const fallback = buildPeriodicWave(ctx, null)
+    if (fallback) waves.push(fallback)
+  }
+  return waves
+}
+
+/* Balayage du morphing du module wavetableS — mode 1, "retrigger à chaque
+ * note" : à chaque noteOn le balayage repart de la frame 0 et, tant que la
+ * note est tenue, la table est parcourue EN BOUCLE à la cadence du crossfade
+ * (durée "morph").
+ *
+ * Fin de liste (paramètre "endMode") :
+ *  - "loop"     : retour à la frame 0 (…, N-2, N-1, 0, 1, …) ;
+ *  - "pingpong" : va-et-vient (…, N-1, N-2, …, 0, 1, …).
+ *
+ * Mécanique (double tampon, 2 oscillateurs) :
+ *  - l'osc audible est fondu vers 0 sur une courbe cos, l'osc silencieux
+ *    monte vers 1 sur une courbe sin (crossfade equal-power) ;
+ *  - pendant qu'il est au silence, l'osc devenu muet est rechargé avec la
+ *    frame suivante via setPeriodicWave, pour être prêt pour le crossfade
+ *    suivant (setPeriodicWave sur un osc audible provoquerait une
+ *    discontinuité de phase → clic) ;
+ *  - les courbes sont posées dans la timeline Web Audio (échantillon
+ *    précis) ; seuls les changements de PeriodicWave passent par un timer.
+ *
+ * Retourne { cancel, stopAt } :
+ *  - cancel() annule le timer restant (appelé au noteOff) ;
+ *  - stopAt() = instant absolu d'extinction des oscillateurs : la fin du
+ *    crossfade EN COURS si le noteOff tombe en plein morph ("termine le
+ *    morph puis coupe"), sinon maintenant.
+ */
+function startMorphScan(ctx, waves, oscs, gains, startAt, morph, endMode) {
+  const N = waves.length
+  if (N <= 1) return null
+
+  // frame jouée à la position "pos" de la séquence infinie de balayage
+  const seqAt =
+    endMode === "pingpong" && N > 2
+      ? (pos) => {
+          const period = 2 * (N - 1)
+          const r = pos % period
+          return r <= N - 1 ? r : period - r
+        }
+      : (pos) => pos % N
+
+  let cur = 0 // index de l'oscillateur audible
+  let prevEnd = -Infinity
+  let cancelled = false
+  let pendingPreload = null
+  let timer = null
+
+  const fire = (pos, t) => {
+    if (cancelled) return
+    const tt = Math.max(t, ctx.currentTime)
+
+    // l'osc devenu muet au crossfade précédent est rechargé avec la frame
+    // qui sera cible du prochain crossfade, avant que son gain ne remonte.
+    if (pendingPreload) {
+      try { pendingPreload.osc.setPeriodicWave(pendingPreload.wave) } catch {}
+      pendingPreload = null
+    }
+
+    const other = 1 - cur
+    gains[other].gain.setValueCurveAtTime(MORPH_CURVE_UP, tt, morph)
+    gains[cur].gain.setValueCurveAtTime(MORPH_CURVE_DOWN, tt, morph)
+
+    const faded = cur
+    cur = other
+    prevEnd = tt + morph
+
+    const nextPos = pos + 1
+    pendingPreload = { osc: oscs[faded], wave: waves[seqAt(nextPos)] }
+    timer = setTimeout(() => fire(nextPos, tt + morph), morph * 1000)
+  }
+
+  timer = setTimeout(
+    () => fire(1, Math.max(ctx.currentTime, startAt)),
+    Math.max(0, (startAt - ctx.currentTime) * 1000) + 1
+  )
+
+  return {
+    cancel() {
+      if (cancelled) return
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    },
+    stopAt() {
+      return Math.max(ctx.currentTime, prevEnd) + 0.05
+    },
+  }
+}
+
 /* =========================================================
  * Normalisation des graphes
  * (le patch peut être vide/incomplet au démarrage)
@@ -342,6 +467,69 @@ export function usePatchVoice(patch) {
           node: osc,
           delay,
           params: { frequency: osc.frequency, detune: osc.detune },
+          bases: { frequency: freq, detune },
+        }
+      }
+
+      case "wavetableS": {
+        // "WavetableS" : table de wavetables (jusqu'à 255 frames) parcourue
+        // par morphing à chaque note. Deux oscillateurs en double tampon et
+        // deux gains de crossfade equal-power (voir startMorphScan).
+        const waves = parseWavetableFrames(ctx, p.wave)
+        const oscs = [ctx.createOscillator(), ctx.createOscillator()]
+        const gains = [ctx.createGain(), ctx.createGain()]
+        const master = ctx.createGain()
+        master.gain.setValueAtTime(1, now)
+
+        const freq =
+          o.note !== undefined ? noteToFreq(o.note) : p.frequency ?? 440
+        const detune = p.detune ?? 0
+        const delay = p.delay ?? 0
+        // borné à 10 ms : les setValueCurveAtTime trop courts sont rejetés
+        const morph = Math.max(0.01, (p.morph ?? 200) / 1000)
+
+        oscs[0].setPeriodicWave(waves[0])
+        oscs[1].setPeriodicWave(waves[Math.min(1, waves.length - 1)])
+        for (const osc of oscs) {
+          osc.frequency.setValueAtTime(freq, now)
+          osc.detune.setValueAtTime(detune, now)
+        }
+        gains[0].gain.setValueAtTime(1, now)
+        gains[1].gain.setValueAtTime(0, now)
+
+        const startAt = now + delay
+        if (!o.deferStart) {
+          safeStart(oscs[0], startAt)
+          safeStart(oscs[1], startAt)
+        }
+        oscs.forEach((osc) => o.started.push({ node: osc, delay, startAt }))
+
+        oscs[0].connect(gains[0])
+        oscs[1].connect(gains[1])
+        gains[0].connect(master)
+        gains[1].connect(master)
+
+        // balayage mode 1 : boucle tant que la note est tenue,
+        // noteOff après le crossfade en cours
+        const scan = startMorphScan(
+          ctx,
+          waves,
+          oscs,
+          gains,
+          startAt,
+          morph,
+          p.endMode
+        )
+        if (scan) {
+          o.stopOverride.set(oscs[0], scan.stopAt)
+          o.stopOverride.set(oscs[1], scan.stopAt)
+          o.voiceStopHooks.push(scan.cancel)
+        }
+
+        return {
+          node: master,
+          delay,
+          params: { frequency: oscs[0].frequency, detune: oscs[0].detune },
           bases: { frequency: freq, detune },
         }
       }
@@ -645,6 +833,8 @@ export function usePatchVoice(patch) {
       activeEnvs: o.activeEnvs,
       boundaryIn,
       boundaryOut,
+      stopOverride: o.stopOverride,
+      voiceStopHooks: o.voiceStopHooks,
     })
 
     // 3bis. ports d'entrée reliés à des AudioParams internes (ex: detune) :
@@ -847,6 +1037,8 @@ export function usePatchVoice(patch) {
       activeEnvs: opts.activeEnvs ?? [],
       boundaryIn: opts.boundaryIn ?? null,
       boundaryOut: opts.boundaryOut ?? null,
+      stopOverride: opts.stopOverride ?? new Map(),
+      voiceStopHooks: opts.voiceStopHooks ?? [],
     }
 
     const nodes = new Map()
@@ -990,6 +1182,8 @@ export function usePatchVoice(patch) {
 
     const started = []
     const activeEnvs = []
+    const stopOverride = new Map()
+    const voiceStopHooks = []
 
     const { nodes } = buildGraph(ctx, normalizeGraph(getPatch()?.voicePatch), {
       note,
@@ -997,6 +1191,8 @@ export function usePatchVoice(patch) {
       destinationNode,
       started,
       activeEnvs,
+      stopOverride,
+      voiceStopHooks,
     })
 
     return {
@@ -1006,6 +1202,12 @@ export function usePatchVoice(patch) {
         const now = ctx.currentTime
         let maxRelease = 0
         let hasAmpEnv = false
+
+        for (const hook of voiceStopHooks) {
+          try {
+            hook()
+          } catch {}
+        }
 
         for (const env of activeEnvs) {
           env.param.cancelScheduledValues(now)
@@ -1017,8 +1219,13 @@ export function usePatchVoice(patch) {
         const tail = hasAmpEnv ? maxRelease + 0.05 : 0.05
 
         for (const s of started) {
+          // un module peut imposer l'instant d'extinction (ex: wavetableS :
+          // terminer le crossfade en cours avant de couper)
+          const stopFn = stopOverride.get(s.node)
+          const stopAt = stopFn
+            ? Math.max(now, stopFn())
+            : Math.max(now + tail, s.startAt ?? now)
           // ne jamais stopper un osc décalé AVANT son démarrage prévu
-          const stopAt = Math.max(now + tail, s.startAt ?? now)
           safeStop(s.node, stopAt)
         }
       },
