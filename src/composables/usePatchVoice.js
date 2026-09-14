@@ -35,8 +35,12 @@ function buildTanhCurve(length = 8192) {
   return curve
 }
 
-const safeStart = (node, t) => {
-  try { node.start(t) } catch {}
+const safeStart = (node, t, offset, duration) => {
+  try {
+    if (offset === undefined) node.start(t)
+    else if (duration === undefined || duration <= 0) node.start(t, offset)
+    else node.start(t, offset, duration)
+  } catch {}
 }
 
 const safeStop = (node, t) => {
@@ -359,15 +363,36 @@ export function usePatchVoice(patch) {
         src.detune.setValueAtTime(detune, now)
 
         const delay = p.delay ?? 0
+
+        // plage de lecture (ms -> secondes) : end > 0 fixe la fin, end = 0 = fin du fichier
+        let offset = Math.max(0, (p.start ?? 0) / 1000)
+        let endSec = (p.end ?? 0) / 1000
+
+        if (buffer) {
+          const dur = buffer.duration
+          offset = Math.min(offset, dur)
+          endSec = endSec > 0 ? Math.min(Math.max(endSec, offset), dur) : dur
+        }
+
         if (p.loop && buffer) {
           src.loop = true
-          src.loopStart = 0
-          src.loopEnd = buffer.duration
+          src.loopStart = offset
+          src.loopEnd = endSec
         }
+
+        const playDuration = endSec > offset ? endSec - offset : 0
+
+        // En boucle, on NE passe PAS de "duration" à start() : dans Web Audio,
+        // un start(when, offset, duration) stoppe le node après "duration"
+        // secondes de SORTIE, même si loop est actif → le son couperait après
+        // une durée totale du fichier. Sans duration, la boucle tourne jusqu'au
+        // stop() de la voix (noteOff).
+        const startArgs = p.loop && buffer ? [offset] : [offset, playDuration]
+
         if (buffer) {
           const startAt = now + delay
-          if (!o.deferStart) safeStart(src, startAt)
-          o.started.push({ node: src, delay, startAt })
+          if (!o.deferStart) safeStart(src, startAt, ...startArgs)
+          o.started.push({ node: src, delay, startAt, args: startArgs })
         }
 
         return {
@@ -873,7 +898,9 @@ export function usePatchVoice(patch) {
     if (!audioCtx.value) return
     const now = audioCtx.value.currentTime
     for (const s of mainStarted) {
-      safeStart(s.node, now + (s.delay ?? 0))
+      // args : offset/duration optionnels des bufferSources (fx) ;
+      // vides pour les oscillateurs/constant → start(t) seul.
+      safeStart(s.node, now + (s.delay ?? 0), ...(s.args ?? []))
     }
     mainRunning = true
   }

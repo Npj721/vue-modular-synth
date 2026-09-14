@@ -13,6 +13,7 @@ globalThis.localStorage = {
 
 import { usePatchVoice } from "../src/composables/usePatchVoice.js";
 import { useSuperModules } from "../src/composables/useSuperModules.js";
+import { setAudioBuffer } from "../src/composables/useAudioBufferCache.js";
 
 /* =========================================================
  * Stub Web Audio API
@@ -56,8 +57,9 @@ class StubNode {
   disconnect() {
     this.connections = [];
   }
-  start() {
+  start(...args) {
     this.started = true;
+    this.startArgs = args;
   }
   stop() {
     this.stopped = true;
@@ -89,6 +91,17 @@ class StubContext {
     n.frequency = new StubParam(440);
     n.detune = new StubParam(0);
     n.type = "sine";
+    this.created.push(n);
+    return n;
+  }
+  createBufferSource() {
+    const n = new StubNode(this, "bufferSource");
+    n.buffer = null;
+    n.playbackRate = new StubParam(1);
+    n.detune = new StubParam(0);
+    n.loop = false;
+    n.loopStart = 0;
+    n.loopEnd = 0;
     this.created.push(n);
     return n;
   }
@@ -551,6 +564,100 @@ saveFromGraph({
       oscNode.wave.options.disableNormalization === false
   );
 
+  synth.noteOff(60);
+}
+
+/* =========================================================
+ * Scénario 7 : module fx — plage de lecture start/end (ms)
+ * ========================================================= */
+{
+  const fakeBuffer = {
+    duration: 4,
+    sampleRate: 44100,
+    numberOfChannels: 1,
+    getChannelData: () => new Float32Array(44100 * 4),
+  };
+  setAudioBuffer("sample.wav", fakeBuffer);
+
+  const patch = {
+    mainPatch: { modules: [], connections: [] },
+    voicePatch: {
+      modules: [
+        {
+          id: "fx1",
+          type: "fx",
+          params: {
+            buffer: "sample.wav",
+            start: 500,
+            end: 2500,
+            delay: 0,
+            detune: 0,
+            loop: true,
+          },
+          position: {},
+        },
+        { id: "fxd", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "fx1", port: "out:out" }, to: { id: "fxd", port: "in:in" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+  const ctx = synth.getContext();
+
+  const src = of(ctx, "bufferSource")[0];
+  check("fx : bufferSource créé", !!src);
+  check(
+    "fx : loop → start(quand, offset=0.5s) SANS durée (boucle jusqu'au noteOff)",
+    !!src && src.startArgs[1] === 0.5 && src.startArgs[2] === undefined
+  );
+  check("fx : loopStart = 0.5 s", !!src && src.loopStart === 0.5);
+  check("fx : loopEnd = 2.5 s", !!src && src.loopEnd === 2.5);
+  check(
+    "fx : playbackRate transposé à la note 60",
+    !!src && approx(src.playbackRate.value, noteToFreq(60) / 440)
+  );
+  synth.noteOff(60);
+}
+
+/* =========================================================
+ * Scénario 8 : fx sans start/end → lecture complète du fichier
+ * ========================================================= */
+{
+  const patch = {
+    mainPatch: { modules: [], connections: [] },
+    voicePatch: {
+      modules: [
+        {
+          id: "fx2",
+          type: "fx",
+          params: { buffer: "sample.wav", loop: false },
+          position: {},
+        },
+        { id: "fxd2", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "fx2", port: "out:out" }, to: { id: "fxd2", port: "in:in" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+  const ctx = synth.getContext();
+
+  const sources = of(ctx, "bufferSource");
+  const src = sources[sources.length - 1];
+  check(
+    "fx : par défaut lecture depuis 0 jusqu'à la fin",
+    !!src && src.startArgs[1] === 0 && src.startArgs[2] === 4.0
+  );
+  check("fx : loop désactivé par défaut", !!src && src.loop === false);
   synth.noteOff(60);
 }
 

@@ -3,6 +3,7 @@ import { reactive, ref, watch } from 'vue'
 import { useModuleCatalog } from '../composables/useModuleCatalog'
 import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
+import SampleWaveformEditor from './SampleWaveformEditor.vue'
 
 const props = defineProps({
   module: { type: Object, default: null }
@@ -71,6 +72,13 @@ const toggleLoop = () => {
   params.stages = { ...(params.stages || {}), loop: value }
   emit('param-changed', { key: 'stages', value: params.stages })
 }
+
+// Plages de lecture du module FX : les positions choisies sur l'onde sont
+// reportées sur les paramètres numériques "start"/"end" (ms).
+const onSampleRegionUpdate = ({ start, end }) => {
+  emitChange('start', start)
+  emitChange('end', end)
+}
 </script>
 
 <template>
@@ -95,7 +103,7 @@ const toggleLoop = () => {
              :step="def.step"
              v-model.number="params[key]"
              @input="emitChange(key, params[key])" />
-      <span v-if="def.type === 'number'">{{ params[key] }}</span>
+      <span v-if="def.type === 'number'">{{ params[key] }}<template v-if="def.unit"> {{ def.unit }}</template></span>
 
       <!-- Enum dropdown -->
       <select v-else-if="def.type === 'enum'"
@@ -148,6 +156,17 @@ const toggleLoop = () => {
         @update="val => emitChange(key, val)"
       />
 
+    </div>
+
+    <!-- Éditeur de plage de lecture pour les samples (module FX) -->
+    <div v-if="module.type === 'fx'" class="sample-region-editor">
+      <h4>Plage de lecture</h4>
+      <SampleWaveformEditor
+        :buffer-key="params.buffer || null"
+        :start="Number(params.start) || 0"
+        :end="Number(params.end) || 0"
+        @update="onSampleRegionUpdate"
+      />
     </div>
   </div>
 </template>
@@ -224,6 +243,18 @@ const toggleLoop = () => {
   margin-bottom: 8px;
   user-select: none;
   cursor: pointer;
+}
+
+.sample-region-editor {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed #ddd;
+}
+
+.sample-region-editor h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #555;
 }
 
 </style>

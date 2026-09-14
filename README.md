@@ -90,7 +90,7 @@ L'interface est organisée en **3 onglets** + une barre du bas :
 |---|---|---|---|---|
 | **Voice** | Oscillateur piloté par note MIDI | `frequency` (param), `detune` (param) | `out` (audio) | `detune` −1200…+1200 ct (défaut 0), `delay` 0…5 s (défaut 0), `type` sine/triangle/square/sawtooth |
 | **Wavetable** | Oscillateur piloté par note MIDI avec onde définie par une `PeriodicWave` | `frequency` (param), `detune` (param) | `out` (audio) | `detune` −1200…+1200 ct, `delay` 0…5 s, `wave` (JSON `{ real, imag, disableNormalization }`, défaut `disableNormalization: true`) |
-| **FX / Sample** | Lecteur de fichier audio, transposé par la note (playbackRate = freq/440) | `frequency` (param), `detune` (param) | `out` (audio) | `buffer` (fichier audio), `detune` −1200…+1200 ct, `delay` 0…5 s, `loop` booléen |
+| **FX / Sample** | Lecteur de fichier audio, transposé par la note (playbackRate = freq/440) | `frequency` (param), `detune` (param) | `out` (audio) | `buffer` (fichier audio), `detune` −1200…+1200 ct, `delay` 0…5 s, `loop` booléen, `start`/`end` en ms (plage de lecture réglable depuis la forme d'onde affichée dans le panneau) |
 | **Oscillator** | Oscillateur libre (LFO, audio rate…) — pas déclenché par note | `frequency` (param), `detune` (param) | `out` (audio) | `frequency` 0.01…20 000 Hz (défaut 4 Hz), `detune`, `delay`, `type` |
 
 ### Utilitaire

@@ -151,6 +151,14 @@ const catalog = reactive({
           type: "boolean",
           default: false,
         },
+        start: {
+          ...num(0, 600000, 1, 0),
+          unit: "ms",
+        },
+        end: {
+          ...num(0, 600000, 1, 0),
+          unit: "ms",
+        },
       },
     },
     osc: {
