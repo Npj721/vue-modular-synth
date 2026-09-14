@@ -27,6 +27,11 @@ const endMs = computed(() =>
 )
 const hasBuffer = computed(() => !!buffer.value)
 const selectionMs = computed(() => Math.max(0, endMs.value - startMs.value))
+// une plage a été choisie dès que start ou end est explicitement renseigné
+const hasRegion = computed(() => (props.start > 0) || (props.end > 0))
+const playedMs = computed(() =>
+  hasRegion.value ? selectionMs.value : durationMs.value
+)
 
 /* ---------------------------------------------------------
  * Pics min/max du signal (résolution fixe), mis en cache par buffer
@@ -261,6 +266,7 @@ onMounted(() => {
 onBeforeUnmount(() => ro && ro.disconnect())
 
 const fmtMs = (ms) => `${Math.round(ms)} ms`
+const fmtSec = (ms) => `${(ms / 1000).toFixed(2)} s`
 </script>
 
 <template>
@@ -276,9 +282,15 @@ const fmtMs = (ms) => `${Math.round(ms)} ms`
     ></canvas>
 
     <div class="waveform-info" v-if="hasBuffer">
+      <span class="waveform-duration">
+        Durée du son
+        <b>{{ fmtMs(playedMs) }}</b>
+        <i>({{ fmtSec(playedMs) }})</i>
+        <em v-if="hasRegion">de {{ fmtMs(startMs) }} à {{ fmtMs(endMs) }}</em>
+        <em v-else>fichier entier</em>
+      </span>
       <span class="waveform-pos">début {{ fmtMs(startMs) }}</span>
       <span class="waveform-pos">fin {{ fmtMs(endMs) }}</span>
-      <span class="waveform-pos">durée jouée {{ fmtMs(selectionMs) }}</span>
       <button class="waveform-reset" title="Lecture complète du fichier" @click="setFull">↺ complet</button>
     </div>
   </div>
@@ -312,6 +324,34 @@ const fmtMs = (ms) => `${Math.round(ms)} ms`
 
 .waveform-pos {
   font-family: monospace;
+}
+
+.waveform-duration {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  background: rgba(46, 139, 87, 0.12);
+  border: 1px solid rgba(46, 139, 87, 0.4);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #cde3d8;
+}
+
+.waveform-duration b {
+  font-family: monospace;
+  font-size: 14px;
+  color: #4ade80;
+}
+
+.waveform-duration i {
+  font-style: normal;
+  color: #6b9a7f;
+}
+
+.waveform-duration em {
+  font-style: normal;
+  color: #e2e8f0;
 }
 
 .waveform-reset {
