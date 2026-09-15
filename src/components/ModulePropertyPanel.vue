@@ -42,6 +42,50 @@ const jsonStatusView = (key) => {
   }
 }
 
+// Édition JSON en MODALE : le gros JSON (wavetableS : jusqu'à des centaines
+// de milliers de lignes) ne doit jamais être rendu en dur dans le panneau —
+// un textarea de ~500 000 lignes rend l'interface inutilisable même fermé.
+// Le panneau n'affiche qu'un bouton + un résumé ; le textarea n'existe que
+// lorsque la modale est ouverte. Tant qu'elle est fermée, le panneau reste
+// fluide ; dans la modale, la validation du brouillon est débouncée.
+const jsonModalKey = ref(null)
+const jsonDraft = ref("")
+const jsonDraftStatus = ref({ pending: false, ok: false, message: "" })
+let jsonDraftTimer = 0
+
+const openJsonModal = (key) => {
+  jsonModalKey.value = key
+  jsonDraft.value = params[key] ?? ""
+  refreshJsonDraft()
+}
+const refreshJsonDraft = () => {
+  clearTimeout(jsonDraftTimer)
+  if (jsonModalKey.value == null) return
+  jsonDraftStatus.value = { pending: true, ok: false, message: "validation…" }
+  jsonDraftTimer = setTimeout(() => {
+    jsonDraftStatus.value = jsonStatus(
+      paramDefs[jsonModalKey.value],
+      jsonDraft.value
+    )
+  }, 40)
+}
+const onJsonDraftInput = (e) => {
+  jsonDraft.value = e.target.value
+  refreshJsonDraft()
+}
+const applyJsonModal = () => {
+  const key = jsonModalKey.value
+  if (key == null) return
+  emitChange(key, jsonDraft.value)
+  closeJsonModal()
+}
+const closeJsonModal = () => {
+  clearTimeout(jsonDraftTimer)
+  jsonModalKey.value = null
+  jsonDraft.value = ""
+  jsonDraftStatus.value = { pending: false, ok: false, message: "" }
+}
+
 const { getModuleByType } = useModuleCatalog()
 
 // Quand module sélectionné change
@@ -54,6 +98,7 @@ watch(
     Object.keys(jsonResults).forEach(k => delete jsonResults[k])
     Object.keys(jsonValidating).forEach(k => delete jsonValidating[k])
     Object.keys(jsonTimers).forEach(k => clearTimeout(jsonTimers[k]))
+    closeJsonModal()
 
     if (!mod) return
 
@@ -279,15 +324,13 @@ const applyAmp = (def, key) => {
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
 
-      <!-- JSON textarea (ex: wavetable) -->
+      <!-- JSON (ex: wavetable) : bouton + résumé ici, le textarea géant n'est
+           rendu QUE dans la modale (jamais en dur dans le panneau) -->
       <template v-else-if="def.type === 'json'">
         <div class="json-field">
-          <textarea
-            class="json-input"
-            spellcheck="false"
-            rows="7"
-            v-model="params[key]"
-            @input="emitChange(key, params[key])"></textarea>
+          <button class="json-button" @click="openJsonModal(key)">
+            Charger / éditer le JSON…
+          </button>
           <span
             v-if="jsonStatusView(key).pending || jsonStatusView(key).message"
             class="json-status"
@@ -358,6 +401,51 @@ const applyAmp = (def, key) => {
         @update="onSampleRegionUpdate"
       />
     </div>
+
+    <!-- Modale d'édition du JSON des wavetables : seul endroit où le gros
+         textarea est rendu (donc uniquement quand on en a besoin). Le
+         Teleport envoie le contenu sur <body>, la position DOM n'a aucune
+         incidence. ⚠️ rester à l'INTÉRIEUR de la div racine : un second root
+         casserait l'héritage des attrs (class="editor-properties"). -->
+    <Teleport to="body">
+      <div
+        v-if="jsonModalKey != null"
+        class="json-modal-backdrop"
+        @click.self="closeJsonModal">
+        <div class="json-modal">
+          <div class="json-modal-head">
+            <strong>{{ jsonModalKey }}</strong>
+            <button
+              class="json-modal-close"
+              title="Fermer (Esc)"
+              @click="closeJsonModal">✕</button>
+          </div>
+          <div
+            class="json-modal-status"
+            :class="jsonDraftStatus.pending ? 'pending' : jsonDraftStatus.ok ? 'ok' : 'err'">
+            {{ jsonDraftStatus.message }}
+          </div>
+          <textarea
+            class="json-modal-textarea"
+            spellcheck="false"
+            :value="jsonDraft"
+            @input="onJsonDraftInput"
+            @keydown.esc="closeJsonModal"></textarea>
+          <div class="json-modal-actions">
+            <span class="json-modal-count">
+              {{ jsonDraft.length.toLocaleString('fr-FR') }} caractères
+            </span>
+            <button @click="closeJsonModal">Annuler</button>
+            <button
+              class="json-modal-apply"
+              :disabled="jsonDraftStatus.pending || !jsonDraftStatus.ok"
+              @click="applyJsonModal">
+              Charger
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -397,15 +485,122 @@ const applyAmp = (def, key) => {
   color: #888;
 }
 
-.json-input {
+.json-button {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.json-button:hover {
+  background: #f0f0f0;
+}
+
+.json-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.json-modal {
+  width: min(92vw, 900px);
+  height: min(88vh, 720px);
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.json-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.json-modal-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #666;
+}
+
+.json-modal-status {
+  font-size: 11px;
+  font-family: monospace;
+  min-height: 15px;
+}
+
+.json-modal-status.pending {
+  color: #7f8c8d;
+  font-style: italic;
+}
+
+.json-modal-status.ok {
+  color: #27ae60;
+}
+
+.json-modal-status.err {
+  color: #c0392b;
+}
+
+.json-modal-textarea {
+  flex: 1;
   width: 100%;
   font-family: monospace;
   font-size: 12px;
   line-height: 1.4;
-  padding: 6px 8px;
   border: 1px solid #ccc;
   border-radius: 4px;
+  padding: 8px;
   box-sizing: border-box;
+  resize: none;
+}
+
+.json-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.json-modal-count {
+  margin-right: auto;
+  font-size: 11px;
+  color: #888;
+  font-family: monospace;
+}
+
+.json-modal-actions button {
+  padding: 6px 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.json-modal-actions .json-modal-apply {
+  background: #2c7a4b;
+  border-color: #2c7a4b;
+  color: #fff;
+}
+
+.json-modal-actions .json-modal-apply:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .json-field {
