@@ -226,6 +226,58 @@ const EASINGS = {
 const getEasing = (name) => EASINGS[name] ?? EASINGS.linear
 
 /* =========================================================
+ * Suivi du balayage wavetableS à destination du panneau
+ * ---------------------------------------------------------
+ * Le panneau dessine la table en pseudo-3D et SUR-ligne la frame en train
+ * d'être jouée. startMorphScan notifie ici chaque changement (moteur) ; le
+ * composant s'abonne par module (subscribeWavetableFrame) et reçoit
+ * { frame, active, stamp }. Aucun couplage avec le graphique audio : c'est
+ * purement informatif (un module peut avoir plusieurs voix en parallèle →
+ * c'est la dernière transition notifiée qui fait foi).
+ * ========================================================= */
+
+const wavetableScanState = new Map() // moduleId -> { frame, active, stamp }
+const wavetableScanHooks = new Map() // moduleId -> Set<fn>
+
+function notifyWavetableFrame(moduleId, frame, active) {
+  if (moduleId == null) return
+  const prev = wavetableScanState.get(moduleId)
+  if (prev && prev.frame === frame && prev.active === active) return
+  const stamp = (prev?.stamp ?? 0) + 1
+  wavetableScanState.set(moduleId, { frame, active, stamp })
+  const hooks = wavetableScanHooks.get(moduleId)
+  if (hooks) {
+    for (const fn of hooks) {
+      try {
+        fn({ frame, active, stamp })
+      } catch {}
+    }
+  }
+}
+
+export function subscribeWavetableFrame(moduleId, fn) {
+  if (moduleId == null || typeof fn !== "function") return () => {}
+  if (!wavetableScanHooks.has(moduleId)) {
+    wavetableScanHooks.set(moduleId, new Set())
+  }
+  wavetableScanHooks.get(moduleId).add(fn)
+  const st = wavetableScanState.get(moduleId)
+  if (st) {
+    try {
+      fn({ frame: st.frame, active: st.active, stamp: st.stamp })
+    } catch {}
+  }
+  return () => {
+    const s = wavetableScanHooks.get(moduleId)
+    if (s) s.delete(fn)
+  }
+}
+
+export function getWavetableFrameState(moduleId) {
+  return wavetableScanState.get(moduleId) ?? null
+}
+
+/* =========================================================
  * wavetableS — cache + construction paresseuse des frames
  * ---------------------------------------------------------
  * Une table de 256 frames × ~1000 harmoniques fait plusieurs centaines de
@@ -253,7 +305,7 @@ const toF32 = (arr) => {
 /* Retourne le bundle { frames, waves } d'un paramètre wave de wavetableS.
  * frames = tableau de { real: Float32Array, imag: Float32Array } (parse une
  * seule fois, mis en cache) ; waves = PeriodicWave construites paresseusement. */
-function getWavetableBundle(ctx, raw) {
+export function getWavetableBundle(ctx, raw) {
   if (typeof raw === "string") {
     const hit = WT_CACHE.get(raw)
     if (hit) return hit
@@ -362,7 +414,8 @@ function startMorphScan(
   startAt,
   morph,
   endMode,
-  progression
+  progression,
+  onFrame
 ) {
   const N = bundle.frames.length
   if (N <= 1) return null
@@ -413,6 +466,7 @@ function startMorphScan(
   let cancelled = false
   let pendingPreload = null
   let timer = null
+  let lastFrame = 0 // dernière frame notifiée au panneau (surlignage 3D)
   let pass = 0
   let passState = buildPass(0)
   // le 1er passage démarre à la première vraie transition (la frame 0 est
@@ -455,6 +509,10 @@ function startMorphScan(
       idx += 1
     }
 
+    // informer le panneau de la frame qui vient de devenir audible
+    lastFrame = ev.target
+    try { onFrame?.(ev.target, true) } catch {}
+
     // la frame suivante est construite maintenant et posée sur oscs[faded]
     // (devenu muet) par le prochain fire. getWavetableFrameWave garantit une
     // onde non-nulle pour tout index valide → le crossfade suivant aura
@@ -476,6 +534,9 @@ function startMorphScan(
     )
   } catch {}
 
+  // le scan est actif : frame 0 audible au tout début du balayage
+  try { onFrame?.(0, true) } catch {}
+
   timer = setTimeout(
     () => tick(),
     Math.max(0, (passState.list[idx].at - ctx.currentTime) * 1000) + 1
@@ -486,6 +547,7 @@ function startMorphScan(
       if (cancelled) return
       cancelled = true
       if (timer) clearTimeout(timer)
+      try { onFrame?.(lastFrame, false) } catch {}
     },
     stopAt() {
       return Math.max(ctx.currentTime, prevEnd) + 0.05
@@ -800,7 +862,10 @@ export function usePatchVoice(patch) {
           startAt,
           morph,
           p.endMode,
-          p.progression
+          p.progression,
+          mod.id != null
+            ? (frame, active) => notifyWavetableFrame(mod.id, frame, active)
+            : undefined
         )
         if (scan) {
           o.stopOverride.set(oscs[0], scan.stopAt)

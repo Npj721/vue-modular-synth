@@ -1,6 +1,11 @@
 <script setup>
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useModuleCatalog } from '../composables/useModuleCatalog'
+import {
+  getWavetableBundle,
+  subscribeWavetableFrame,
+  getWavetableFrameState,
+} from '../composables/usePatchVoice'
 import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
 import SampleWaveformEditor from './SampleWaveformEditor.vue'
@@ -285,6 +290,317 @@ const applyAmp = (def, key) => {
   ampFactor.value = 1
   emitChange(key, JSON.stringify(next))
 }
+
+/* =========================================================
+ * Visualiseur pseudo-3D de la table du module wavetableS
+ * ---------------------------------------------------------
+ * Reconstruit chaque frame par somme d'harmoniques (real·cos + imag·sin,
+ * bornée à DRAW_HARMONICS pour éviter le repliement visuel et limiter le
+ * coût), normalise au pic, puis empile les ondes en perspective vers un
+ * POINT DE FUITE : frame 0 au premier plan, les suivantes qui fuient vers
+ * le haut (échelle, amplitude et luminosité décroissantes). La frame EN
+ * COURS DE LECTURE (notifiée par startMorphScan → subscribeWavetableFrame)
+ * est tracée en clair avec sa ligne de temps. Le dessin est rAF-coalescé :
+ * jamais plus d'un redraw par image, zéro travail quand rien ne bouge.
+ * ========================================================= */
+const MAX_VISIBLE_ROWS = 512
+const DRAW_SAMPLES = 256
+const DRAW_HARMONICS = 128
+
+const viewer = ref(null)
+const currentFrame = ref(0)
+const scanActive = ref(false)
+const rowFrameCount = ref(0)
+const wavetableRows = reactive([])
+let viewerUnsub = null
+let viewerRaf = 0
+let viewerResizeObs = null
+
+// Reconstruit M échantillons d'une frame depuis ses coefficients.
+function frameSamples(real, imag) {
+  const K = Math.max(
+    0,
+    Math.min(Math.min(real?.length ?? 0, imag?.length ?? 0) - 1, DRAW_HARMONICS)
+  )
+  const out = new Float32Array(DRAW_SAMPLES)
+  let peak = 0
+  for (let i = 0; i < DRAW_SAMPLES; i++) {
+    const phi = (2 * Math.PI * i) / DRAW_SAMPLES
+    let v = 0
+    for (let k = 1; k <= K; k++) {
+      v += (real[k] || 0) * Math.cos(k * phi) + (imag[k] || 0) * Math.sin(k * phi)
+    }
+    if (Math.abs(v) > peak) peak = Math.abs(v)
+    out[i] = v
+  }
+  if (peak > 1e-9) for (let i = 0; i < DRAW_SAMPLES; i++) out[i] /= peak
+  return out
+}
+
+const scheduleViewerDraw = () => {
+  if (viewerRaf || !viewer.value) return
+  viewerRaf = requestAnimationFrame(() => {
+    viewerRaf = 0
+    drawWavetableViewer()
+  })
+}
+
+// Échantillons déjà synthétisés par index de frame : le cache évite de
+// re-synthétiser une frame à chaque changement. TOUTES les frames de la
+// table sont dessinées (jusqu'à MAX_VISIBLE_ROWS ; au-delà, un pas de
+// sous-échantillonnage conserve la silhouette globale) et la frame EN COURS
+// DE LECTURE est toujours garantie présente dans la liste.
+// La table de repli correspond à l'onde par défaut du moteur (dents de scie 1/n).
+const FALLBACK_WAVE = (() => {
+  const real = new Array(10).fill(0)
+  const imag = [0, 1, 0.5, 0.333, 0.25, 0.2, 0.167, 0.143, 0.125, 0.111]
+  return { index: 0, samples: frameSamples(real, imag) }
+})()
+
+let rowFramesCache = []
+let rowSamplesCache = new Map()
+let lastWaveSource = null
+
+function frameSamplesAt(index) {
+  const f = rowFramesCache[index]
+  if (!f) return null
+  let samples = rowSamplesCache.get(index)
+  if (!samples) {
+    samples = frameSamples(f.real, f.imag)
+    rowSamplesCache.set(index, samples)
+  }
+  return samples
+}
+
+function rebuildWavetableRows() {
+  wavetableRows.splice(0, wavetableRows.length)
+  const mod = props.module
+  if (!mod || mod.type !== "wavetableS") return
+
+  const frames = getWavetableBundle(null, params.wave)?.frames ?? []
+  if (params.wave !== lastWaveSource) {
+    lastWaveSource = params.wave
+    rowFramesCache = frames
+    rowSamplesCache = new Map()
+  }
+
+  if (!frames.length) {
+    rowFrameCount.value = 1
+    wavetableRows.push(FALLBACK_WAVE)
+    scheduleViewerDraw()
+    return
+  }
+
+  const N = frames.length
+  rowFrameCount.value = N
+  const step = N > MAX_VISIBLE_ROWS ? Math.ceil(N / MAX_VISIBLE_ROWS) : 1
+  const idxs = new Set()
+  if (step > 1) {
+    for (let i = 0; i < N; i += step) idxs.add(i)
+    // la frame actuellement jouée est toujours dessinée
+    idxs.add(Math.max(0, Math.min(N - 1, Math.round(currentFrame.value))))
+  } else {
+    for (let i = 0; i < N; i++) idxs.add(i)
+  }
+
+  for (const i of [...idxs].sort((a, b) => a - b)) {
+    const samples = frameSamplesAt(i)
+    if (samples) wavetableRows.push({ index: i, samples })
+  }
+  scheduleViewerDraw()
+}
+
+const onViewerFrame = ({ frame, active }) => {
+  currentFrame.value = frame
+  scanActive.value = active
+  ensureActiveRow()
+  scheduleViewerDraw()
+}
+
+// Tables très grandes (> MAX_VISIBLE_ROWS) : si la frame jouée manque dans
+// l'échantillonnage, on l'ajoute à la volée (échantillons déjà en cache).
+function ensureActiveRow() {
+  const N = rowFramesCache.length
+  const cur = Math.round(currentFrame.value)
+  if (cur < 0 || cur >= N) return
+  if (wavetableRows.some((r) => r.index === cur)) return
+  const samples = frameSamplesAt(cur)
+  if (!samples) return
+  wavetableRows.push({ index: cur, samples })
+  wavetableRows.sort((a, b) => a.index - b.index)
+}
+
+function bindWavetableViewer() {
+  if (viewerUnsub) {
+    viewerUnsub()
+    viewerUnsub = null
+  }
+  const mod = props.module
+  if (!mod || mod.type !== "wavetableS" || mod.id == null) {
+    currentFrame.value = 0
+    scanActive.value = false
+    return
+  }
+  const st = getWavetableFrameState(mod.id)
+  currentFrame.value = st ? st.frame : 0
+  scanActive.value = st ? st.active : false
+  viewerUnsub = subscribeWavetableFrame(mod.id, onViewerFrame)
+  scheduleViewerDraw()
+}
+
+function drawWavetableViewer() {
+  const canvas = viewer.value
+  if (!canvas) return
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return
+
+  const dpr = window.devicePixelRatio || 1
+  const w = canvas.clientWidth || 0
+  const h = canvas.clientHeight || 0
+  if (!w || !h) return
+  const bw = Math.round(w * dpr)
+  const bh = Math.round(h * dpr)
+  if (canvas.width !== bw) canvas.width = bw
+  if (canvas.height !== bh) canvas.height = bh
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+  ctx.fillStyle = "#0a1016"
+  ctx.fillRect(0, 0, w, h)
+
+  const rows = wavetableRows
+  if (rows.length) {
+    // point de fuite en haut-centre ; frame 0 au premier plan (bas, pleine
+    // échelle), les suivantes fuient vers le lointain (échelle × amplitude ×
+    // luminosité décroissants en 1/(1+k·z), z = profondeur = index/(N-1)).
+    const VPX = w / 2
+    const VPY = Math.max(20, h * 0.12)
+    const yFront = h * 0.86
+    const halfWFront = w * 0.46
+    const AMP = 0.3
+    const PERSP = 2.6
+
+    const N = Math.max(1, rowFramesCache.length || rows.length)
+    const cur = scanActive.value ? Math.round(currentFrame.value) : -1
+    const activeRow = cur >= 0 ? rows.find((r) => r.index === cur) : null
+
+    // géométrie d'une frame depuis son INDEX dans la table (le point de fuite
+    // est au-dessus : y · s avec s = 1/(1+PERSP·depth))
+    const scaled = (rowIndex) => {
+      const depth = N > 1 ? rowIndex / (N - 1) : 0
+      const s = 1 / (1 + PERSP * depth)
+      return {
+        depth,
+        s,
+        y: VPY + (yFront - VPY) * s,
+        x0: VPX - halfWFront * s,
+        x1: VPX + halfWFront * s,
+      }
+    }
+
+    const drawRow = (row, isActive, geo) => {
+      // les frames lointaines sont dessinées avec moins de points (détail
+      // invisible) : on garde un temps de dessin raisonnable à haute vitesse
+      const src = row.samples
+      const n = Math.max(24, Math.round(src.length * (0.3 + 0.7 * geo.s)))
+      const amp = (yFront - VPY) * AMP * geo.s
+      ctx.beginPath()
+      for (let i = 0; i < n; i++) {
+        const k = Math.floor((i / (n - 1)) * (src.length - 1))
+        const x = geo.x0 + (i / (n - 1)) * (geo.x1 - geo.x0)
+        const yv = geo.y - src[k] * amp
+        if (i === 0) ctx.moveTo(x, yv)
+        else ctx.lineTo(x, yv)
+      }
+      ctx.strokeStyle = isActive
+        ? "rgb(255, 199, 88)"
+        : `rgba(96, 184, 162, ${0.16 + 0.34 * (1 - geo.depth)})`
+      ctx.lineWidth = isActive ? 2 : 1
+      if (isActive) {
+        ctx.shadowColor = "rgba(255, 199, 88, 0.85)"
+        ctx.shadowBlur = 8
+      }
+      ctx.stroke()
+      if (isActive) {
+        ctx.shadowBlur = 0
+        // ligne de temps (playhead) sous la frame en cours
+        ctx.beginPath()
+        ctx.moveTo(geo.x0, geo.y)
+        ctx.lineTo(geo.x1, geo.y)
+        ctx.strokeStyle = "rgba(255, 199, 88, 0.4)"
+        ctx.lineWidth = 1
+        ctx.stroke()
+      }
+    }
+
+    // 1) toutes les frames, dans l'ordre avant → arrière (front → lointain)
+    for (const row of rows) {
+      if (row === activeRow) continue
+      drawRow(row, false, scaled(row.index))
+    }
+
+    // 2) la frame EN COURS DE LECTURE revient PAR-DESSUS, à sa propre
+    //    profondeur (donc devant ou derrière selon son index) : elle reste
+    //    bien visible même proche du point de fuite
+    if (activeRow) drawRow(activeRow, true, scaled(activeRow.index))
+  }
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.75)"
+  ctx.font = "11px system-ui, sans-serif"
+  ctx.textAlign = "left"
+  ctx.fillText(
+    `frame ${currentFrame.value}${scanActive.value ? " — lecture" : " — arrêt"}`,
+    8,
+    16
+  )
+}
+
+const startViewer = () => {
+  stopViewer()
+  const canvas = viewer.value
+  if (!canvas) return
+  viewerResizeObs = new ResizeObserver(() => scheduleViewerDraw())
+  viewerResizeObs.observe(canvas)
+  scheduleViewerDraw()
+}
+
+const stopViewer = () => {
+  if (viewerUnsub) {
+    viewerUnsub()
+    viewerUnsub = null
+  }
+  if (viewerResizeObs) {
+    viewerResizeObs.disconnect()
+    viewerResizeObs = null
+  }
+  if (viewerRaf) {
+    cancelAnimationFrame(viewerRaf)
+    viewerRaf = 0
+  }
+}
+
+// (Ré)initialisation du visualiseur quand le module sélectionné change
+// (le nextTick attend que son <canvas> soit monté).
+watch(
+  () => props.module,
+  () => {
+    nextTick(() => {
+      bindWavetableViewer()
+      rebuildWavetableRows()
+      startViewer()
+    })
+  },
+  { immediate: true }
+)
+
+// Redessin quand la table elle-même change (édition JSON du module).
+watch(
+  () => (props.module?.type === "wavetableS" ? params.wave : null),
+  () => {
+    if (props.module?.type === "wavetableS") rebuildWavetableRows()
+  }
+)
+
+onBeforeUnmount(stopViewer)
 </script>
 
 <template>
@@ -299,6 +615,25 @@ const applyAmp = (def, key) => {
       />
       <span v-if="label" class="hint">utilisé comme préfixe des paramètres exposés</span>
     </div>
+
+    <!-- Visualiseur pseudo-3D de la table (module wavetableS uniquement) :
+         les frames fuient vers un point de fuite, la frame en cours de
+         lecture est surlignée en clair avec sa ligne de temps. -->
+    <div v-if="module.type === 'wavetableS'" class="wavetable-3d-viewer">
+      <h4>Table d'ondes</h4>
+      <canvas ref="viewer" class="wavetable-3d-canvas"></canvas>
+      <div class="wavetable-3d-meta">
+        <span class="wavetable-3d-frame" :class="{ off: !scanActive }">
+          frame <strong>{{ currentFrame }}</strong>
+          <template v-if="rowFrameCount > 1"> / {{ rowFrameCount - 1 }}</template>
+          <em>{{ scanActive ? "lecture" : "arrêt" }}</em>
+        </span>
+        <span class="wavetable-3d-count">
+          {{ wavetableRows.length }} ligne(s)
+        </span>
+      </div>
+    </div>
+
     <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' || def.type === 'json' }">
       <label>{{ key }}</label>  
       <!-- Number slider -->
@@ -704,6 +1039,53 @@ const applyAmp = (def, key) => {
   margin: 0 0 8px;
   font-size: 12px;
   color: #555;
+}
+
+.wavetable-3d-viewer {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed #ddd;
+}
+
+.wavetable-3d-viewer h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #555;
+}
+
+.wavetable-3d-canvas {
+  display: block;
+  width: 100%;
+  height: 230px;
+  border-radius: 6px;
+  background: #0a1016;
+}
+
+.wavetable-3d-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  color: #777;
+  margin-top: 4px;
+}
+
+.wavetable-3d-frame strong {
+  color: #3f8f7b;
+  font-variant-numeric: tabular-nums;
+}
+
+.wavetable-3d-frame em {
+  font-style: normal;
+  color: #b8860b;
+}
+
+.wavetable-3d-frame.off em {
+  color: #999;
+}
+
+.wavetable-3d-count {
+  font-family: monospace;
 }
 
 </style>

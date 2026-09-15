@@ -11,7 +11,7 @@ globalThis.localStorage = {
   removeItem: (k) => __store.delete(k),
 };
 
-import { usePatchVoice } from "../src/composables/usePatchVoice.js";
+import { usePatchVoice, getWavetableFrameState, getWavetableBundle } from "../src/composables/usePatchVoice.js";
 import { useSuperModules } from "../src/composables/useSuperModules.js";
 import { setAudioBuffer } from "../src/composables/useAudioBufferCache.js";
 
@@ -1049,6 +1049,36 @@ saveFromGraph({
       bseq.length > 4
     );
     synthG.noteOff(60);
+  }
+
+  // --- 9h : le panneau est notifié des frames jouées (surlignage 3D) ---
+  // startMorphScan expose l'état de balayage par module (frame + actif) :
+  // le visualiseur du panneau doit recevoir (1) une frame active qui
+  // progresse pendant la note, puis (2) l'arrêt après le noteOff.
+  {
+    globalThis.__wavesApplied = [];
+    const synthH = await buildSynth({ morph: 20 });
+    const hctx = synthH.getContext();
+    await synthH.noteOn(60);
+    await new Promise((r) => setTimeout(r, 80));
+    const st = getWavetableFrameState("ws1");
+    check(
+      "wavetableS : scan notifié au panneau (actif + frame présente)",
+      !!st && st.active === true && typeof st.frame === "number"
+    );
+    await new Promise((r) => setTimeout(r, 120));
+    const st2 = getWavetableFrameState("ws1");
+    check(
+      "wavetableS : la frame notifiée progresse (morph de 20 ms)",
+      !!st && !!st2 && st2.stamp > st.stamp
+    );
+    synthH.noteOff(60);
+    await new Promise((r) => setTimeout(r, 30));
+    const st3 = getWavetableFrameState("ws1");
+    check(
+      "wavetableS : scan marqué arrêté après le noteOff (surlignage off)",
+      !!st3 && st3.active === false
+    );
   }
 }
 
