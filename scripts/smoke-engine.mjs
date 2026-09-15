@@ -43,6 +43,10 @@ class StubParam {
     this.events.push(["cancelHold", t]);
   }
   setValueCurveAtTime(curve, t, dur) {
+    if (globalThis.__stubCurveThrow) {
+      globalThis.__stubCurveThrow = false; // un coup, puis retour à la normale
+      throw new Error("stub setValueCurveAtTime failure");
+    }
     this.events.push(["curve", curve, t, dur]);
     this.value = curve[curve.length - 1];
   }
@@ -147,6 +151,9 @@ class StubContext {
     return n;
   }
   createPeriodicWave(real, imag, options) {
+    if (globalThis.__stubPWThrow && (real?.length > 256 || imag?.length > 256)) {
+      throw new Error("stub createPeriodicWave failure");
+    }
     const w = { real, imag, options: options || {}, __type: "periodicWave" };
     this.created.push(w);
     return w;
@@ -856,6 +863,87 @@ saveFromGraph({
       wavesLater > 2 && wavesLater < 256
     );
     synthBig.noteOff(60);
+  }
+
+  // --- 9d : auto-réparation — une exception d'automatisation (setValueCurve
+  // AtTime qui lève) ne doit JAMAIS geler définitivement le scan : le son
+  // doit continuer d'évoluer après l'incident.
+  {
+    const patchD = {
+      mainPatch: { modules: [], connections: [] },
+      voicePatch: {
+        modules: [
+          {
+            id: "wsd9",
+            type: "wavetableS",
+            params: { wave: wave3, morph: 10, detune: 0, delay: 0 },
+            position: {},
+          },
+          { id: "wsdd", type: "destination", params: {}, position: {} },
+        ],
+        connections: [
+          {
+            from: { id: "wsd9", port: "out:out" },
+            to: { id: "wsdd", port: "in:in" },
+          },
+        ],
+      },
+    };
+    globalThis.__wavesApplied = [];
+    const synthD = usePatchVoice(patchD);
+    await synthD.init();
+    await synthD.noteOn(60);
+    await new Promise((r) => setTimeout(r, 60)); // scan bien lancé
+    const beforeErr = globalThis.__wavesApplied.length;
+    globalThis.__stubCurveThrow = true; // la prochaine automatisation échoue (une seule fois)
+    await new Promise((r) => setTimeout(r, 120)); // plusieurs crossfades plus tard
+    check(
+      "wavetableS : une exception d'automatisation ne gèle pas le scan (auto-réparation)",
+      globalThis.__wavesApplied.length > beforeErr
+    );
+    synthD.noteOff(60);
+  }
+
+  // --- 9e : repli — une frame inconstructible (createPeriodicWave qui lève)
+  // ne doit jamais produire d'onde null (sinon l'osc garde son ancienne onde
+  // → croisements de 2 ondes figées → son qui n'évolue plus).
+  {
+    const coeff512 = Array.from({ length: 512 }, () => "0.1").join(",");
+    const hugeFrame = `{"real":[${coeff512}],"imag":[${coeff512}]}`;
+    const waveHuge = `[${hugeFrame},${hugeFrame}]`;
+    const patchE = {
+      mainPatch: { modules: [], connections: [] },
+      voicePatch: {
+        modules: [
+          {
+            id: "wse9",
+            type: "wavetableS",
+            params: { wave: waveHuge, morph: 10, detune: 0, delay: 0 },
+            position: {},
+          },
+          { id: "wsed", type: "destination", params: {}, position: {} },
+        ],
+        connections: [
+          {
+            from: { id: "wse9", port: "out:out" },
+            to: { id: "wsed", port: "in:in" },
+          },
+        ],
+      },
+    };
+    globalThis.__stubPWThrow = true;
+    const synthE = usePatchVoice(patchE);
+    await synthE.init();
+    await synthE.noteOn(60);
+    const eOscs = of(synthE.getContext(), "osc").filter((o) =>
+      approx(o.frequency.value, noteToFreq(60))
+    );
+    check(
+      "wavetableS : frames inconstructibles → repli sur l'onde par défaut (jamais null)",
+      !!eOscs[0]?.wave && !!eOscs[1]?.wave
+    );
+    synthE.noteOff(60);
+    delete globalThis.__stubPWThrow;
   }
 }
 

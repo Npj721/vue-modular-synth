@@ -61,7 +61,13 @@ const isNumericArray = (v) =>
  * real/imag peuvent être des tableaux classiques ou des Float32Array
  * (wavetableS compacte les frames pour économiser la mémoire).
  * disableNormalization vaut true par défaut. En cas de JSON invalide ou de
- * tableaux vides, repli sur une onde en dents de scie (somme de 1/n). */
+ * tableaux vides, repli sur une onde en dents de scie (somme de 1/n).
+ * Les tableaux sont bornés à MAX_HARMONICS par canal : createPeriodicWave
+ * lève NotSupportedError au-delà d'une taille max (~8192 au total selon les
+ * implémentations) → sans clamp, une frame trop longue échouait et gelait
+ * le morphing. */
+const MAX_HARMONICS = 4096
+
 function buildPeriodicWave(ctx, raw) {
   let real = null
   let imag = null
@@ -71,10 +77,10 @@ function buildPeriodicWave(ctx, raw) {
     try {
       const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
       if (parsed && isNumericArray(parsed.real) && parsed.real.length > 0) {
-        real = parsed.real.slice()
+        real = parsed.real.slice(0, MAX_HARMONICS)
       }
       if (parsed && isNumericArray(parsed.imag) && parsed.imag.length > 0) {
-        imag = parsed.imag.slice()
+        imag = parsed.imag.slice(0, MAX_HARMONICS)
       }
       if (parsed && parsed.disableNormalization !== undefined) {
         disableNormalization = !!parsed.disableNormalization
@@ -175,8 +181,11 @@ function getWavetableBundle(ctx, raw) {
 }
 
 /* Construit (et mémorise dans le bundle) la PeriodicWave de la frame index.
- * Frame invalide/manquante : index 0 → repli sur l'onde par défaut ;
- * autres index → null. */
+ * Jure de ne JAMAIS retourner null pour un index valide : si la frame est
+ * inconstructible (createPeriodicWave trop grand, valeurs invalides…), on
+ * retombe sur l'onde par défaut afin que le crossfade suivant ait TOUJOURS
+ * un contenu audible — sinon l'osc resterait sur son ancienne onde et le
+ * morphing gèlerait (son qui n'évolue plus). */
 function getWavetableFrameWave(ctx, bundle, index) {
   if (index >= 0 && index < bundle.waves.length && bundle.waves[index]) {
     return bundle.waves[index]
@@ -186,7 +195,7 @@ function getWavetableFrameWave(ctx, bundle, index) {
   if (index < frames.length) {
     wave = buildPeriodicWave(ctx, frames[index])
   }
-  if (!wave && index === 0) {
+  if (!wave) {
     wave = buildPeriodicWave(ctx, null)
   }
   if (wave && index >= 0) bundle.waves[index] = wave
@@ -224,6 +233,9 @@ function startMorphScan(ctx, bundle, oscs, gains, startAt, morph, endMode) {
   const N = bundle.frames.length
   if (N <= 1) return null
 
+  // morph invalide (NaN, ≤ 0) ne doit jamais tuer le scan → valeur sûre
+  const safeMorph = Number.isFinite(morph) && morph > 0 ? morph : 0.2
+
   // frame jouée à la position "pos" de la séquence infinie de balayage
   const seqAt =
     endMode === "pingpong" && N > 2
@@ -244,27 +256,39 @@ function startMorphScan(ctx, bundle, oscs, gains, startAt, morph, endMode) {
     if (cancelled) return
     const tt = Math.max(t, ctx.currentTime)
 
-    // l'osc devenu muet au crossfade précédent est rechargé avec la frame
-    // qui sera cible du prochain crossfade, avant que son gain ne remonte.
-    if (pendingPreload) {
-      try { pendingPreload.osc.setPeriodicWave(pendingPreload.wave) } catch {}
-      pendingPreload = null
+    // Auto-réparation : tout le corps est dans le try, la re-planification
+    // (setTimeout) est à l'EXTÉRIEUR → aucune exception (automatisation,
+    // rechargement, construction de frame) ne peut définitivement geler le
+    // scan : le son continuera toujours d'évoluer.
+    try {
+      // l'osc devenu muet au crossfade précédent est rechargé avec la frame
+      // qui sera cible du prochain crossfade, avant que son gain ne remonte.
+      if (pendingPreload) {
+        try {
+          pendingPreload.osc.setPeriodicWave(pendingPreload.wave)
+        } catch {}
+        pendingPreload = null
+      }
+
+      const other = 1 - cur
+      gains[other].gain.setValueCurveAtTime(MORPH_CURVE_UP, tt, safeMorph)
+      gains[cur].gain.setValueCurveAtTime(MORPH_CURVE_DOWN, tt, safeMorph)
+
+      const faded = cur
+      cur = other
+      prevEnd = tt + safeMorph
+
+      // la frame suivante est construite maintenant et posée sur oscs[faded]
+      // (devenu muet) par le prochain fire, safeMorph secondes plus tard.
+      // getWavetableFrameWave garantit une onde non-nulle pour tout index
+      // valide → le crossfade suivant aura toujours un contenu audible.
+      const nextWave = getWavetableFrameWave(ctx, bundle, seqAt(pos + 1))
+      pendingPreload = { osc: oscs[faded], wave: nextWave }
+    } catch {
+      // non bloquant : on réessaie au fire suivant
     }
 
-    const other = 1 - cur
-    gains[other].gain.setValueCurveAtTime(MORPH_CURVE_UP, tt, morph)
-    gains[cur].gain.setValueCurveAtTime(MORPH_CURVE_DOWN, tt, morph)
-
-    const faded = cur
-    cur = other
-    prevEnd = tt + morph
-
-    const nextPos = pos + 1
-    // la frame suivante est construite maintenant et posée sur oscs[faded]
-    // (devenu muet) par le prochain fire, morph secondes plus tard.
-    const nextWave = getWavetableFrameWave(ctx, bundle, seqAt(nextPos))
-    pendingPreload = nextWave ? { osc: oscs[faded], wave: nextWave } : null
-    timer = setTimeout(() => fire(nextPos, tt + morph), morph * 1000)
+    timer = setTimeout(() => fire(pos + 1, tt + safeMorph), safeMorph * 1000)
   }
 
   timer = setTimeout(
