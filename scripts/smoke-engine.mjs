@@ -770,7 +770,9 @@ saveFromGraph({
     curveEvents > 8
   );
 
-  // séquence des setPeriodicWave après le setup : seqAt(2..) = 2,0,1,2,0,1…
+  // séquence des setPeriodicWave APRES le setup : avec la progression par
+  // défaut (linear), le balayage pose ~1 crossfade par "morph" :
+  // 0(ledée),1,2 puis 0,1,2,… (la transition 2→0 est la soudure de boucle).
   const seq = globalThis.__wavesApplied.slice(2).map(frameId);
   check(
     "wavetableS : loop → retour à 0 en fin de liste (…,2,0,…)",
@@ -944,6 +946,109 @@ saveFromGraph({
     );
     synthE.noteOff(60);
     delete globalThis.__stubPWThrow;
+  }
+
+  // --- 9f : progression "quad-out" (easing MONOTONE) → les changements de
+  // frame sont RAREFIÉS au début puis rapprochés vers la fin du passage
+  // (durées de crossfade non uniformes), sans jamais revenir en arrière et
+  // sans perdre la soudure de boucle (…,2,0,…).
+  {
+    globalThis.__wavesApplied = [];
+    const synthF = await buildSynth({ progression: "quad-out" });
+    const fctx = synthF.getContext();
+    await new Promise((r) => setTimeout(r, 220));
+    const fseq = globalThis.__wavesApplied.slice(2).map(frameId);
+    const fdurs = of(fctx, "gain")
+      .flatMap((g) =>
+        g.gain.events
+          .filter(([k]) => k === "curve")
+          .map(([k, c, t, dur]) => dur)
+      )
+      .filter((d) => d >= 0);
+    check(
+      "wavetableS : quad-out → durées de crossfade non uniformes (échantillonnage d'easing)",
+      fdurs.length > 4 && Math.max(...fdurs) - Math.min(...fdurs) > 0.004
+    );
+    check(
+      "wavetableS : quad-out → aucun retour en arrière hors soudure de boucle",
+      !fseq.some((v, i) => fseq[i] > fseq[i + 1] && fseq[i + 1] !== 0)
+    );
+    check("wavetableS : quad-out → la boucle reboucle (…,2,0,…)", hasPair(fseq, 2, 0));
+    synthF.noteOff(60);
+  }
+
+  // --- 9g : progression "bounce-out" (easing NON monotone) → l'index
+  // DÉPASSE puis REDESCEND (rebonds) avant de finir sur 1. On vérifie
+  // la non-monotonicité de la fonction d'easing (déterministe, pas de
+  // timing), puis que le scan ne gèle pas quand on lui fournit un easing
+  // non monotone (le balayage avance bien et produit des transitions).
+  {
+    // 1) Vérification directe de la non-monotonicité de bounce-out :
+    //    entre deux points de la descente (u=0.4 → u=0.5), la valeur diminue.
+    const bounceOut = (x) => {
+      const n1 = 7.5625, d1 = 2.75;
+      if (x < 1 / d1) return n1 * x * x;
+      if (x < 2 / d1) return n1 * (x - 1.5 / d1) ** 2 + 0.75;
+      if (x < 2.5 / d1) return n1 * (x - 2.25 / d1) ** 2 + 0.9375;
+      return n1 * (x - 2.625 / d1) ** 2 + 0.984375;
+    };
+    check(
+      "wavetableS : bounce-out E(0.5) < E(0.4) (descente = non monotone)",
+      bounceOut(0.5) < bounceOut(0.4)
+    );
+    check(
+      "wavetableS : bounce-out E(1) = 1 (borne finale)",
+      Math.abs(bounceOut(1) - 1) < 1e-6
+    );
+
+    // 2) Vérification fonctionnelle : le scan tourne sans geler
+    //    avec un easing non monotone, et produit des transitions.
+    const n = 12;
+    const waveB =
+      "[" +
+      Array.from(
+        { length: n },
+        (_, k) =>
+          `{"real":[0,0,0],"imag":[0,1,${(0.5 + 0.05 * k).toFixed(3)},0]}`
+      ).join(",") +
+      "]";
+    globalThis.__wavesApplied = [];
+    const patchB = {
+      mainPatch: { modules: [], connections: [] },
+      voicePatch: {
+        modules: [
+          {
+            id: "wsb9",
+            type: "wavetableS",
+            params: {
+              wave: waveB,
+              morph: 10,
+              detune: 0,
+              delay: 0,
+              progression: "bounce-out",
+            },
+            position: {},
+          },
+          { id: "wsbd", type: "destination", params: {}, position: {} },
+        ],
+        connections: [
+          {
+            from: { id: "wsb9", port: "out:out" },
+            to: { id: "wsbd", port: "in:in" },
+          },
+        ],
+      },
+    };
+    const synthG = usePatchVoice(patchB);
+    await synthG.init();
+    await synthG.noteOn(60);
+    await new Promise((r) => setTimeout(r, 500));
+    const bseq = globalThis.__wavesApplied.slice(2);
+    check(
+      "wavetableS : bounce-out → le scan avance (transitions produites)",
+      bseq.length > 4
+    );
+    synthG.noteOff(60);
   }
 }
 

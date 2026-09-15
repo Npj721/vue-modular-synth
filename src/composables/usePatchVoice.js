@@ -121,6 +121,111 @@ const MORPH_CURVE_DOWN = (() => {
 })()
 
 /* =========================================================
+ * Easing du balayage wavetableS (paramètre "progression").
+ * ---------------------------------------------------------
+ * 31 répartitions temporelles des frames dans un passage de table,
+ * declarées d'après easings.net. Chaque famille décline In / Out / InOut :
+ *  - Sine, Quad, Cubic, Quart, Quint, Expo, Circ : MONOTONES (le balayage
+ *    avance sans revenir en arrière) ;
+ *  - Back, Elastic, Bounce : NON monotones (l'index dépasse puis revient —
+ *    recul, ressort, rebonds), certaines sortant de [0,1].
+ * Toujours E(0) = 0' et E(1) = 1' (sauf dépassements volontaires).
+ * L'accesseur getEasing() replie sur linear si le nom est inconnu.
+ * ========================================================= */
+
+const _BOUNCE_OUT = (() => {
+  const n1 = 7.5625
+  const d1 = 2.75
+  return (x) => {
+    if (x < 1 / d1) return n1 * x * x
+    if (x < 2 / d1) return n1 * (x - 1.5 / d1) * (x - 1.5 / d1) + 0.75
+    if (x < 2.5 / d1) return n1 * (x - 2.25 / d1) * (x - 2.25 / d1) + 0.9375
+    return n1 * (x - 2.625 / d1) * (x - 2.625 / d1) + 0.984375
+  }
+})()
+
+const EASINGS = {
+  linear: (x) => x,
+  "sine-in": (x) => 1 - Math.cos((x * Math.PI) / 2),
+  "sine-out": (x) => Math.sin((x * Math.PI) / 2),
+  "sine-inout": (x) => -(Math.cos(Math.PI * x) - 1) / 2,
+  "quad-in": (x) => x * x,
+  "quad-out": (x) => 1 - (1 - x) * (1 - x),
+  "quad-inout": (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2),
+  "cubic-in": (x) => x ** 3,
+  "cubic-out": (x) => 1 - (1 - x) ** 3,
+  "cubic-inout": (x) => (x < 0.5 ? 4 * x ** 3 : 1 - Math.pow(-2 * x + 2, 3) / 2),
+  "quart-in": (x) => x ** 4,
+  "quart-out": (x) => 1 - (1 - x) ** 4,
+  "quart-inout": (x) => (x < 0.5 ? 8 * x ** 4 : 1 - Math.pow(-2 * x + 2, 4) / 2),
+  "quint-in": (x) => x ** 5,
+  "quint-out": (x) => 1 - (1 - x) ** 5,
+  "quint-inout": (x) => (x < 0.5 ? 16 * x ** 5 : 1 - Math.pow(-2 * x + 2, 5) / 2),
+  "expo-in": (x) => (x === 0 ? 0 : Math.pow(2, 10 * x - 10)),
+  "expo-out": (x) => (x === 1 ? 1 : 1 - Math.pow(2, -10 * x)),
+  "expo-inout": (x) =>
+    x === 0
+      ? 0
+      : x === 1
+        ? 1
+        : x < 0.5
+          ? Math.pow(2, 20 * x - 10) / 2
+          : (2 - Math.pow(2, -20 * x + 10)) / 2,
+  "circ-in": (x) => 1 - Math.sqrt(1 - x * x),
+  "circ-out": (x) => Math.sqrt(1 - (x - 1) * (x - 1)),
+  "circ-inout": (x) =>
+    x < 0.5
+      ? (1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2
+      : (Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2,
+  "back-in": (() => {
+    const c1 = 1.70158
+    const c3 = c1 + 1
+    return (x) => c3 * x ** 3 - c1 * x ** 2
+  })(),
+  "back-out": (() => {
+    const c1 = 1.70158
+    const c3 = c1 + 1
+    return (x) => 1 + c3 * (x - 1) ** 3 + c1 * (x - 1) ** 2
+  })(),
+  "back-inout": (() => {
+    const c1 = 1.70158
+    const c2 = c1 * 1.525
+    return (x) =>
+      x < 0.5
+        ? (Math.pow(2 * x, 2) * ((c2 + 1) * 2 * x - c2)) / 2
+        : (Math.pow(2 * x - 2, 2) * ((c2 + 1) * (2 * x - 2) + c2) + 2) / 2
+  })(),
+  "elastic-in": (() => {
+    const c4 = (2 * Math.PI) / 3
+    return (x) =>
+      x === 0 || x === 1
+        ? x
+        : -Math.pow(2, 10 * x - 10) * Math.sin((x * 10 - 10.75) * c4)
+  })(),
+  "elastic-out": (() => {
+    const c4 = (2 * Math.PI) / 3
+    return (x) =>
+      x === 0 || x === 1
+        ? x
+        : Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * c4) + 1
+  })(),
+  "elastic-inout": (() => {
+    const c5 = (2 * Math.PI) / 4.5
+    return (x) =>
+      x === 0 || x === 1
+        ? x
+        : x < 0.5
+          ? -(Math.pow(2, 20 * x - 10) * Math.sin((20 * x - 11.125) * c5)) / 2
+          : (Math.pow(2, -20 * x + 10) * Math.sin((20 * x - 11.125) * c5)) / 2 + 1
+  })(),
+  "bounce-out": _BOUNCE_OUT,
+  "bounce-in": (x) => 1 - _BOUNCE_OUT(1 - x),
+  "bounce-inout": (x) =>
+    x < 0.5 ? (1 - _BOUNCE_OUT(1 - 2 * x)) / 2 : (1 + _BOUNCE_OUT(2 * x - 1)) / 2,
+}
+const getEasing = (name) => EASINGS[name] ?? EASINGS.linear
+
+/* =========================================================
  * wavetableS — cache + construction paresseuse des frames
  * ---------------------------------------------------------
  * Une table de 256 frames × ~1000 harmoniques fait plusieurs centaines de
@@ -204,12 +309,27 @@ function getWavetableFrameWave(ctx, bundle, index) {
 
 /* Balayage du morphing du module wavetableS — mode 1, "retrigger à chaque
  * note" : à chaque noteOn le balayage repart de la frame 0 et, tant que la
- * note est tenue, la table est parcourue EN BOUCLE à la cadence du crossfade
- * (durée "morph").
+ * note est tenue, la table est parcourue à la cadence d'un crossfade par
+ * changement de frame.
  *
- * Fin de liste (paramètre "endMode") :
- *  - "loop"     : retour à la frame 0 (…, N-2, N-1, 0, 1, …) ;
- *  - "pingpong" : va-et-vient (…, N-1, N-2, …, 0, 1, …).
+ * Durée cible : "morph" = durée MOYENNE d'une frame → un passage complet de
+ * la table dure T = nombre_de_frames_du_passage × morph.
+ *
+ * Progression (paramètre "progression") : la RÉPARTITION TEMPORELLE des
+ * frames dans un passage est l'échantillonnage d'une fonction d'éasing E sur
+ * [0,1] (E(0) = 0 → frame de départ, E(1) = 1 → fin). On pose des transitions
+ * aux instants où round(E(u)·(L-1)) change — L = longueur du passage :
+ *  - "loop"     : L = N (0→N-1 puis retour à 0 entre les passages) ;
+ *  - "pingpong" : L = 2·(N-1), va-et-vient par réflexion de l'index (l'éasing
+ *    s'applique sur l'aller-retour entier).
+ * La durée de chaque crossfade = écart jusqu'à la transition suivante
+ * (bornée bas à 4 ms) : l'easing se fait donc autant sentir dans la vitesse
+ * de balayage que dans le phrasé des morphs.
+ *
+ * Fins de table : les familles monotones (sine…circ) parcourent la table
+ * sans revenir en arrière ; les familles non monotones (back/elastic/bounce)
+ * font DÉPASSER puis REVENIR l'index (recul, ressort, rebonds) — le double
+ * tampon tolère n'importe quelle séquence de frames, même non croissante.
  *
  * Mécanique (double tampon, 2 oscillateurs) :
  *  - l'osc audible est fondu vers 0 sur une courbe cos, l'osc silencieux
@@ -223,43 +343,89 @@ function getWavetableFrameWave(ctx, bundle, index) {
  *  - la PeriodicWave de chaque prochaine frame n'est construite que lorsqu'on
  *    en a besoin (une par crossfade), via getWavetableFrameWave.
  *
+ * Auto-réparation : tout le corps du fire est dans un try, la
+ * re-planification (setTimeout) est à l'EXTÉRIEUR → aucune exception
+ * (automatisation, rechargement, construction de frame) ne peut
+ * définitivement geler le scan : le son continuera toujours d'évoluer.
+ *
  * Retourne { cancel, stopAt } :
  *  - cancel() annule le timer restant (appelé au noteOff) ;
  *  - stopAt() = instant absolu d'extinction des oscillateurs : la fin du
  *    crossfade EN COURS si le noteOff tombe en plein morph ("termine le
  *    morph puis coupe"), sinon maintenant.
  */
-function startMorphScan(ctx, bundle, oscs, gains, startAt, morph, endMode) {
+function startMorphScan(
+  ctx,
+  bundle,
+  oscs,
+  gains,
+  startAt,
+  morph,
+  endMode,
+  progression
+) {
   const N = bundle.frames.length
   if (N <= 1) return null
 
   // morph invalide (NaN, ≤ 0) ne doit jamais tuer le scan → valeur sûre
   const safeMorph = Number.isFinite(morph) && morph > 0 ? morph : 0.2
+  const E = getEasing(progression)
+  const isPingpong = endMode === "pingpong" && N > 2
 
-  // frame jouée à la position "pos" de la séquence infinie de balayage
-  const seqAt =
-    endMode === "pingpong" && N > 2
-      ? (pos) => {
-          const period = 2 * (N - 1)
-          const r = pos % period
-          return r <= N - 1 ? r : period - r
-        }
-      : (pos) => pos % N
+  // longueur d'un passage + durée totale + résolution d'échantillonnage
+  const L = isPingpong ? 2 * (N - 1) : N
+  const T = L * safeMorph
+  const SPAN = Math.max(64, L * 2)
+  const minDur = 0.004 // durée minimale d'un crossfade
+
+  const targetAt = (m) => (isPingpong && m > N - 1 ? L - m : m)
+
+  // Transitions d'un passage : instants (dans "base") où round(E(u)·(L-1))
+  // change ; E(1) vaut toujours 1 → le passage se termine sur l'index de fin
+  // (N-1 en loop, 0 en pingpong retourné) : la jonction entre passages est
+  // donc un crossfade continu vers le premier index du passage suivant.
+  function buildPass(p) {
+    const base = startAt + p * T
+    const list = []
+    let prev = null
+    let firstReal = -1
+    for (let s = 0; s <= SPAN; s++) {
+      let m = Math.round(E(s / SPAN) * (L - 1))
+      if (!Number.isFinite(m)) m = 0
+      const mClamped = Math.max(0, Math.min(L - 1, m))
+      if (mClamped !== prev) {
+        const target = targetAt(mClamped)
+        if (firstReal < 0 && target !== 0) firstReal = list.length
+        list.push({ target, at: base + (s / SPAN) * T })
+        prev = mClamped
+      }
+    }
+    if (firstReal < 0) firstReal = 0
+    for (let i = 0; i < list.length; i++) {
+      const nextAt = i + 1 < list.length ? list[i + 1].at : base + T
+      list[i].dur = Math.max(minDur, nextAt - list[i].at)
+    }
+    return { list, start: firstReal }
+  }
 
   let cur = 0 // index de l'oscillateur audible
   let prevEnd = -Infinity
   let cancelled = false
   let pendingPreload = null
   let timer = null
+  let pass = 0
+  let passState = buildPass(0)
+  // le 1er passage démarre à la première vraie transition (la frame 0 est
+  // déjà audible) ; les passages suivants incluent la transition de retour
+  // vers 0 (soudure de boucle / bout du pingpong).
+  let idx = passState.start
 
-  const fire = (pos, t) => {
+  const tick = () => {
     if (cancelled) return
-    const tt = Math.max(t, ctx.currentTime)
+    const ev = passState.list[idx]
+    const tt = Math.max(ev.at, ctx.currentTime)
 
-    // Auto-réparation : tout le corps est dans le try, la re-planification
-    // (setTimeout) est à l'EXTÉRIEUR → aucune exception (automatisation,
-    // rechargement, construction de frame) ne peut définitivement geler le
-    // scan : le son continuera toujours d'évoluer.
+    let faded = cur
     try {
       // l'osc devenu muet au crossfade précédent est rechargé avec la frame
       // qui sera cible du prochain crossfade, avant que son gain ne remonte.
@@ -271,29 +437,48 @@ function startMorphScan(ctx, bundle, oscs, gains, startAt, morph, endMode) {
       }
 
       const other = 1 - cur
-      gains[other].gain.setValueCurveAtTime(MORPH_CURVE_UP, tt, safeMorph)
-      gains[cur].gain.setValueCurveAtTime(MORPH_CURVE_DOWN, tt, safeMorph)
+      gains[other].gain.setValueCurveAtTime(MORPH_CURVE_UP, tt, ev.dur)
+      gains[cur].gain.setValueCurveAtTime(MORPH_CURVE_DOWN, tt, ev.dur)
 
-      const faded = cur
       cur = other
-      prevEnd = tt + safeMorph
-
-      // la frame suivante est construite maintenant et posée sur oscs[faded]
-      // (devenu muet) par le prochain fire, safeMorph secondes plus tard.
-      // getWavetableFrameWave garantit une onde non-nulle pour tout index
-      // valide → le crossfade suivant aura toujours un contenu audible.
-      const nextWave = getWavetableFrameWave(ctx, bundle, seqAt(pos + 1))
-      pendingPreload = { osc: oscs[faded], wave: nextWave }
+      prevEnd = tt + ev.dur
     } catch {
-      // non bloquant : on réessaie au fire suivant
+      // non bloquant : on avance quand même (auto-réparation)
     }
 
-    timer = setTimeout(() => fire(pos + 1, tt + safeMorph), safeMorph * 1000)
+    // on avance vers la transition suivante, ou vers le passage suivant
+    if (idx + 1 >= passState.list.length) {
+      pass += 1
+      passState = buildPass(pass)
+      idx = 0
+    } else {
+      idx += 1
+    }
+
+    // la frame suivante est construite maintenant et posée sur oscs[faded]
+    // (devenu muet) par le prochain fire. getWavetableFrameWave garantit une
+    // onde non-nulle pour tout index valide → le crossfade suivant aura
+    // toujours un contenu audible.
+    const nextWave = getWavetableFrameWave(ctx, bundle, passState.list[idx].target)
+    if (nextWave) pendingPreload = { osc: oscs[faded], wave: nextWave }
+
+    timer = setTimeout(
+      () => tick(),
+      Math.max(0, (passState.list[idx].at - ctx.currentTime) * 1000) + 1
+    )
   }
 
+  // l'osc 2 (silencieux) est pré-chargé avec la cible de la première vraie
+  // transition (frame de garde du 1er crossfade).
+  try {
+    oscs[1].setPeriodicWave(
+      getWavetableFrameWave(ctx, bundle, passState.list[passState.start].target)
+    )
+  } catch {}
+
   timer = setTimeout(
-    () => fire(1, Math.max(ctx.currentTime, startAt)),
-    Math.max(0, (startAt - ctx.currentTime) * 1000) + 1
+    () => tick(),
+    Math.max(0, (passState.list[idx].at - ctx.currentTime) * 1000) + 1
   )
 
   return {
@@ -614,7 +799,8 @@ export function usePatchVoice(patch) {
           gains,
           startAt,
           morph,
-          p.endMode
+          p.endMode,
+          p.progression
         )
         if (scan) {
           o.stopOverride.set(oscs[0], scan.stopAt)
