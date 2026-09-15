@@ -16,6 +16,32 @@ const params = reactive({})
 const paramDefs = reactive({})
 const label = ref("")
 
+// Validation JSON différée : re-parser un gros JSON (wavetable / wavetableS)
+// à chaque frappe bloquerait la saisie → résultat calculé ~350 ms après le
+// dernier input, "validation…" affiché dans l'intervalle.
+const jsonResults = reactive({})
+const jsonValidating = reactive({})
+const jsonTimers = {}
+const scheduleJsonValidation = (key) => {
+  clearTimeout(jsonTimers[key])
+  jsonTimers[key] = undefined
+  jsonValidating[key] = true
+  jsonTimers[key] = setTimeout(() => {
+    jsonResults[key] = jsonStatus(paramDefs[key], params[key])
+    jsonValidating[key] = false
+  }, 350)
+}
+const jsonStatusView = (key) => {
+  if (jsonValidating[key]) {
+    return { pending: true, ok: false, message: "validation…" }
+  }
+  return {
+    pending: false,
+    ok: !!jsonResults[key]?.ok,
+    message: jsonResults[key]?.message ?? "",
+  }
+}
+
 const { getModuleByType } = useModuleCatalog()
 
 // Quand module sélectionné change
@@ -25,6 +51,9 @@ watch(
     // reset complet
     Object.keys(params).forEach(k => delete params[k])
     Object.keys(paramDefs).forEach(k => delete paramDefs[k])
+    Object.keys(jsonResults).forEach(k => delete jsonResults[k])
+    Object.keys(jsonValidating).forEach(k => delete jsonValidating[k])
+    Object.keys(jsonTimers).forEach(k => clearTimeout(jsonTimers[k]))
 
     if (!mod) return
 
@@ -44,6 +73,10 @@ watch(
 
       // copie locale pour l’UI
       params[key] = mod.params[key]
+
+      if (defParam.type === "json") {
+        scheduleJsonValidation(key)
+      }
     })
   },
   { immediate: true }
@@ -52,6 +85,7 @@ watch(
 // Émettre les changements
 const emitChange = (key, value) => {
   params[key] = value
+  if (paramDefs[key]?.type === "json") scheduleJsonValidation(key)
   emit('param-changed', { key, value })
 }
 
@@ -255,10 +289,10 @@ const applyAmp = (def, key) => {
             v-model="params[key]"
             @input="emitChange(key, params[key])"></textarea>
           <span
-            v-if="jsonStatus(def, params[key])"
+            v-if="jsonStatusView(key).pending || jsonStatusView(key).message"
             class="json-status"
-            :class="jsonStatus(def, params[key]).ok ? 'ok' : 'err'">
-            {{ jsonStatus(def, params[key]).message }}
+            :class="jsonStatusView(key).pending ? 'pending' : jsonStatusView(key).ok ? 'ok' : 'err'">
+            {{ jsonStatusView(key).message }}
           </span>
           <!-- Amplificateur : multiplie def.jsonKeys et réécrit le JSON -->
           <div
@@ -392,6 +426,11 @@ const applyAmp = (def, key) => {
 
 .json-status.err {
   color: #c0392b;
+}
+
+.json-status.pending {
+  color: #7f8c8d;
+  font-style: italic;
 }
 
 .amp-row {

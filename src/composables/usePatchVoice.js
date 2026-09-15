@@ -51,8 +51,15 @@ const safeDisconnect = (node) => {
   try { node.disconnect() } catch {}
 }
 
-/* Construit une PeriodicWave depuis le paramètre JSON "wave" du module
- * wavetable, au format { real: [], imag: [], disableNormalization: bool }.
+const isNumericArray = (v) =>
+  Array.isArray(v) ||
+  (ArrayBuffer.isView(v) && !(v instanceof DataView))
+
+/* Construit une PeriodicWave depuis le paramètre JSON "wave" d'un module
+ * wavetable (format { real, imag, disableNormalization }) ou depuis une
+ * frame de wavetableS (même forme, extraite du tableau de frames).
+ * real/imag peuvent être des tableaux classiques ou des Float32Array
+ * (wavetableS compacte les frames pour économiser la mémoire).
  * disableNormalization vaut true par défaut. En cas de JSON invalide ou de
  * tableaux vides, repli sur une onde en dents de scie (somme de 1/n). */
 function buildPeriodicWave(ctx, raw) {
@@ -63,10 +70,10 @@ function buildPeriodicWave(ctx, raw) {
   if (raw) {
     try {
       const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
-      if (parsed && Array.isArray(parsed.real) && parsed.real.length > 0) {
+      if (parsed && isNumericArray(parsed.real) && parsed.real.length > 0) {
         real = parsed.real.slice()
       }
-      if (parsed && Array.isArray(parsed.imag) && parsed.imag.length > 0) {
+      if (parsed && isNumericArray(parsed.imag) && parsed.imag.length > 0) {
         imag = parsed.imag.slice()
       }
       if (parsed && parsed.disableNormalization !== undefined) {
@@ -107,28 +114,83 @@ const MORPH_CURVE_DOWN = (() => {
   return c
 })()
 
-/* Décompose le paramètre JSON "wave" d'un module wavetableS, au format
- * [ { real, imag }, ... ] — une frame par wavetable, jusqu'à 255 frames
- * (borné à 256). Chaque frame devient une PeriodicWave ; frame invalide
- * ignorée. Aucune frame exploitable → repli sur l'onde par défaut. */
-function parseWavetableFrames(ctx, raw) {
-  let frames = null
+/* =========================================================
+ * wavetableS — cache + construction paresseuse des frames
+ * ---------------------------------------------------------
+ * Une table de 256 frames × ~1000 harmoniques fait plusieurs centaines de
+ * milliers de coefficients : la re-parser et reconstruire 256 PeriodicWave
+ * à CHAQUE note bloquerait le thread audio. Deux garde-fous :
+ *  - le JSON est parse UNE fois et mis en cache (borné en octets, LRU) ;
+ *  - les PeriodicWave sont construites à la volée : frame 0/1 au départ,
+ *    puis une par crossfade (un timer est toujours en avance d'un "morph")
+ *    — le coût est étalé et partagé entre toutes les voix.
+ * Les frames sont compactées en Float32Array (2× moins de mémoire qu'un
+ * tableau de nombres JS).
+ * ========================================================= */
+
+const WT_CACHE = new Map() // wave (string) -> bundle
+let WT_CACHE_BYTES = 0
+const WT_CACHE_MAX_BYTES = 8 * 1024 * 1024
+
+const toF32 = (arr) => {
+  if (!isNumericArray(arr)) return new Float32Array(0)
+  const f = new Float32Array(arr.length)
+  for (let i = 0; i < arr.length; i++) f[i] = arr[i]
+  return f
+}
+
+/* Retourne le bundle { frames, waves } d'un paramètre wave de wavetableS.
+ * frames = tableau de { real: Float32Array, imag: Float32Array } (parse une
+ * seule fois, mis en cache) ; waves = PeriodicWave construites paresseusement. */
+function getWavetableBundle(ctx, raw) {
+  if (typeof raw === "string") {
+    const hit = WT_CACHE.get(raw)
+    if (hit) return hit
+  }
+
+  let frames = []
   if (raw) {
     try {
       const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
-      if (Array.isArray(parsed)) frames = parsed.slice(0, 256)
+      if (Array.isArray(parsed)) {
+        frames = parsed
+          .slice(0, 256)
+          .filter((f) => f && typeof f === "object")
+          .map((f) => ({ real: toF32(f.real), imag: toF32(f.imag) }))
+      }
     } catch {}
   }
-  const waves = []
-  for (const f of frames ?? []) {
-    const w = buildPeriodicWave(ctx, f)
-    if (w) waves.push(w)
+
+  const bundle = { frames, waves: [] }
+  if (typeof raw === "string") {
+    WT_CACHE.set(raw, bundle)
+    WT_CACHE_BYTES += raw.length
+    while (WT_CACHE_BYTES > WT_CACHE_MAX_BYTES && WT_CACHE.size > 1) {
+      const oldest = WT_CACHE.keys().next().value
+      WT_CACHE_BYTES -= oldest.length
+      WT_CACHE.delete(oldest)
+    }
   }
-  if (waves.length === 0) {
-    const fallback = buildPeriodicWave(ctx, null)
-    if (fallback) waves.push(fallback)
+  return bundle
+}
+
+/* Construit (et mémorise dans le bundle) la PeriodicWave de la frame index.
+ * Frame invalide/manquante : index 0 → repli sur l'onde par défaut ;
+ * autres index → null. */
+function getWavetableFrameWave(ctx, bundle, index) {
+  if (index >= 0 && index < bundle.waves.length && bundle.waves[index]) {
+    return bundle.waves[index]
   }
-  return waves
+  const frames = bundle.frames ?? []
+  let wave = null
+  if (index < frames.length) {
+    wave = buildPeriodicWave(ctx, frames[index])
+  }
+  if (!wave && index === 0) {
+    wave = buildPeriodicWave(ctx, null)
+  }
+  if (wave && index >= 0) bundle.waves[index] = wave
+  return wave
 }
 
 /* Balayage du morphing du module wavetableS — mode 1, "retrigger à chaque
@@ -149,6 +211,8 @@ function parseWavetableFrames(ctx, raw) {
  *    discontinuité de phase → clic) ;
  *  - les courbes sont posées dans la timeline Web Audio (échantillon
  *    précis) ; seuls les changements de PeriodicWave passent par un timer.
+ *  - la PeriodicWave de chaque prochaine frame n'est construite que lorsqu'on
+ *    en a besoin (une par crossfade), via getWavetableFrameWave.
  *
  * Retourne { cancel, stopAt } :
  *  - cancel() annule le timer restant (appelé au noteOff) ;
@@ -156,8 +220,8 @@ function parseWavetableFrames(ctx, raw) {
  *    crossfade EN COURS si le noteOff tombe en plein morph ("termine le
  *    morph puis coupe"), sinon maintenant.
  */
-function startMorphScan(ctx, waves, oscs, gains, startAt, morph, endMode) {
-  const N = waves.length
+function startMorphScan(ctx, bundle, oscs, gains, startAt, morph, endMode) {
+  const N = bundle.frames.length
   if (N <= 1) return null
 
   // frame jouée à la position "pos" de la séquence infinie de balayage
@@ -196,7 +260,10 @@ function startMorphScan(ctx, waves, oscs, gains, startAt, morph, endMode) {
     prevEnd = tt + morph
 
     const nextPos = pos + 1
-    pendingPreload = { osc: oscs[faded], wave: waves[seqAt(nextPos)] }
+    // la frame suivante est construite maintenant et posée sur oscs[faded]
+    // (devenu muet) par le prochain fire, morph secondes plus tard.
+    const nextWave = getWavetableFrameWave(ctx, bundle, seqAt(nextPos))
+    pendingPreload = nextWave ? { osc: oscs[faded], wave: nextWave } : null
     timer = setTimeout(() => fire(nextPos, tt + morph), morph * 1000)
   }
 
@@ -475,7 +542,10 @@ export function usePatchVoice(patch) {
         // "WavetableS" : table de wavetables (jusqu'à 255 frames) parcourue
         // par morphing à chaque note. Deux oscillateurs en double tampon et
         // deux gains de crossfade equal-power (voir startMorphScan).
-        const waves = parseWavetableFrames(ctx, p.wave)
+        // Les frames sont parse/construites en cache paresseux (wt bundle) :
+        // une note ne construit que les 2 premières frames.
+        const bundle = getWavetableBundle(ctx, p.wave)
+        const N = bundle.frames.length
         const oscs = [ctx.createOscillator(), ctx.createOscillator()]
         const gains = [ctx.createGain(), ctx.createGain()]
         const master = ctx.createGain()
@@ -488,8 +558,10 @@ export function usePatchVoice(patch) {
         // borné à 10 ms : les setValueCurveAtTime trop courts sont rejetés
         const morph = Math.max(0.01, (p.morph ?? 200) / 1000)
 
-        oscs[0].setPeriodicWave(waves[0])
-        oscs[1].setPeriodicWave(waves[Math.min(1, waves.length - 1)])
+        oscs[0].setPeriodicWave(getWavetableFrameWave(ctx, bundle, 0))
+        oscs[1].setPeriodicWave(
+          getWavetableFrameWave(ctx, bundle, Math.max(0, Math.min(1, N - 1)))
+        )
         for (const osc of oscs) {
           osc.frequency.setValueAtTime(freq, now)
           osc.detune.setValueAtTime(detune, now)
@@ -513,7 +585,7 @@ export function usePatchVoice(patch) {
         // noteOff après le crossfade en cours
         const scan = startMorphScan(
           ctx,
-          waves,
+          bundle,
           oscs,
           gains,
           startAt,

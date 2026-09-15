@@ -676,8 +676,11 @@ saveFromGraph({
   const wave3 =
     '[{"real":[0,0,0,0],"imag":[0,1,0.5,0.333]},{"real":[0,0,0,0],"imag":[0,1,0,0.333]},{"real":[0,0,0,0],"imag":[0,1,0,0]}]';
 
-  // identifie une frame par ses coeffs : 0 (dent de scie), 1 ou 2 (sine)
-  const frameId = (w) => (w.imag[2] === 0.5 ? 0 : w.imag[3] === 0.333 ? 1 : 2);
+  // identifie une frame par ses coeffs : 0 (dent de scie), 1 ou 2 (sine).
+  // Les coeffs arrivent en Float32Array (compaction moteur) → comparaison
+  // approximative, la précision float32 ne garantit pas 0.333 === 0.333.
+  const frameId = (w) =>
+    approx(w.imag[2], 0.5) ? 0 : approx(w.imag[3], 0.333) ? 1 : 2;
   const hasPair = (arr, a, b) =>
     arr.some((v, i) => arr[i] === a && arr[i + 1] === b);
 
@@ -805,6 +808,55 @@ saveFromGraph({
 
   synth.noteOff(60);
   check("wavetableS : osc stoppé (pingpong)", !!pongOscs[0]?.stopped);
+
+  // --- 9c : construction paresseuse + cache (perf) ---
+  // Une table de 256 frames ne doit JAMAIS être entièrement convertie en
+  // PeriodicWave au noteOn : seules les frames 0/1 sont construites, les
+  // autres arrivent au fil du balayage (une par crossfade).
+  {
+    const big =
+      "[" +
+      Array.from({ length: 256 }, () => '{"real":[0],"imag":[0,1,0,1]}').join(
+        ","
+      ) +
+      "]";
+    globalThis.__wavesApplied = [];
+    const patchBig = {
+      mainPatch: { modules: [], connections: [] },
+      voicePatch: {
+        modules: [
+          {
+            id: "wsbig",
+            type: "wavetableS",
+            params: { wave: big, morph: 10 },
+            position: {},
+          },
+          { id: "wsbd", type: "destination", params: {}, position: {} },
+        ],
+        connections: [
+          {
+            from: { id: "wsbig", port: "out:out" },
+            to: { id: "wsbd", port: "in:in" },
+          },
+        ],
+      },
+    };
+    const synthBig = usePatchVoice(patchBig);
+    await synthBig.init();
+    await synthBig.noteOn(60);
+    const wavesAtStart = of(synthBig.getContext(), "periodicWave").length;
+    check(
+      "wavetableS : 256 frames → seules frame 0/1 construites au noteOn (paresseux)",
+      wavesAtStart === 2
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    const wavesLater = of(synthBig.getContext(), "periodicWave").length;
+    check(
+      "wavetableS : frames suivantes construites au fil du balayage",
+      wavesLater > 2 && wavesLater < 256
+    );
+    synthBig.noteOff(60);
+  }
 }
 
 console.log(failures === 0 ? "\nTous les tests passent." : `\n${failures} échec(s).`);
