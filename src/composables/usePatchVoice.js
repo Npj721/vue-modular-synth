@@ -1566,12 +1566,17 @@ export function usePatchVoice(patch) {
         const tail = hasAmpEnv ? maxRelease + 0.05 : 0.05
 
         for (const s of started) {
-          // un module peut imposer l'instant d'extinction (ex: wavetableS :
-          // terminer le crossfade en cours avant de couper)
+          // un module peut imposer un instant d'extinction minimal (ex:
+          // wavetableS : terminer le crossfade en cours avant de couper).
+          // MAIS une enveloppe d'amplitude prime : pendant la release la
+          // source doit rester vivante pour être fondue par l'enveloppe —
+          // sans cela le noteOff coupe les oscillateurs net et le son
+          // s'arrête brutalement malgré une queue d'enveloppe de 1 s.
           const stopFn = stopOverride.get(s.node)
+          const releaseDeadline = now + tail
           const stopAt = stopFn
-            ? Math.max(now, stopFn())
-            : Math.max(now + tail, s.startAt ?? now)
+            ? Math.max(now, stopFn(), releaseDeadline)
+            : Math.max(releaseDeadline, s.startAt ?? now)
           // ne jamais stopper un osc décalé AVANT son démarrage prévu
           safeStop(s.node, stopAt)
         }

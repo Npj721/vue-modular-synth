@@ -1082,5 +1082,86 @@ saveFromGraph({
   }
 }
 
+/* =========================================================
+ * Scénario 10 : wavetableS + enveloppe d'amplitude → la release
+ * doit s'entendre. Au noteOff les oscillateurs ne doivent PAS être
+ * coupés à la fin du crossfade en cours (stopOverride), mais rester
+ * vivants pendant toute la queue d'enveloppe : c'est l'enveloppe qui
+ * fond la source (le gain modulé) vers 0.
+ * Patch = celui de l'utilisateur : wavetableS -> gain (enveloppe) -> dest
+ * ========================================================= */
+{
+  const waveAmp =
+    '[{"real":[0,0,0,0],"imag":[0,1,0.5,0.333]},{"real":[0,0,0,0],"imag":[0,1,0,0]}]';
+  // release de 1 s (durée du rampe "current -> 0")
+  const releaseSec = 1;
+  const patch = {
+    mainPatch: { modules: [], connections: [] },
+    voicePatch: {
+      modules: [
+        {
+          id: "ws10",
+          type: "wavetableS",
+          params: { wave: waveAmp, morph: 50, detune: 0, delay: 0 },
+          position: {},
+        },
+        { id: "g10", type: "gain", params: { gain: 0.5 }, position: {} },
+        {
+          id: "e10",
+          type: "envelope",
+          params: {
+            modulation: "relative",
+            stages: {
+              press: [{ from: 0, to: 1, duration: 0.05, curve: "exponential" }],
+              release: [{ from: "current", to: 0, duration: releaseSec, curve: "exponential" }],
+              min: 0,
+              max: 1,
+              loop: false,
+            },
+          },
+          position: {},
+        },
+        { id: "d10", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "g10", port: "out:out" }, to: { id: "d10", port: "in:in" } },
+        { from: { id: "e10", port: "out:out" }, to: { id: "g10", port: "in:gain" } },
+        { from: { id: "ws10", port: "out:out" }, to: { id: "g10", port: "in:in" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+  await new Promise((r) => setTimeout(r, 80)); // le scan a posé quelques crossfades
+  const ctx = synth.getContext();
+  const oscs = of(ctx, "osc").filter((o) =>
+    approx(o.frequency.value, noteToFreq(60))
+  );
+
+  // enveloppe : release programmée sur le gain du module (expRamp -> EPS)
+  const gain10 = of(ctx, "gain").find(
+    (g) => approx(g.gain.value, 0.5) && g.gain.events.some(([k]) => k === "expRamp")
+  );
+  const gainEventsBefore = gain10 ? gain10.gain.events.length : 0;
+  synth.noteOff(60);
+  const relRamp = gain10?.gain.events
+    .slice(gainEventsBefore)
+    .find(([k, v]) => k === "expRamp" && approx(v, 0.0001 /* EPS */));
+  check(
+    "wavetableS : enveloppe release programmée sur le gain (amp env)",
+    !!relRamp
+  );
+
+  check(
+    "wavetableS : oscillateurs pas stoppés avant la release (noteOff sans coupe)",
+    oscs.length === 2 &&
+      oscs.every(
+        (o) => !o.stopped || (o.stoppedAt != null && o.stoppedAt >= releaseSec)
+      )
+  );
+}
+
 console.log(failures === 0 ? "\nTous les tests passent." : `\n${failures} échec(s).`);
 process.exit(failures === 0 ? 0 : 1);
