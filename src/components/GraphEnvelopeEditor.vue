@@ -56,6 +56,7 @@ const phases = reactive({ press: [], release: [] })
 let draggedPoint = null
 let toolMode = null
 let toolStart = null
+let ghostData = null
 
 const currentPhase = ref("press")
 const viewMode = ref("graph")
@@ -364,17 +365,8 @@ function onMouseMove(e, p) {
 
   if (toolMode && toolStart) {
     const cur = screenToData(sx, sy, p)
+    ghostData = { phase: p, points: genCurve(toolStart, cur, toolMode) }
     requestAnimationFrame(draw)
-    const ghost = genCurve(toolStart, cur, toolMode)
-    const ctx = canvasOf(p).getContext("2d")
-    ctx.strokeStyle = "rgba(255,255,255,.55)"
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    for (let i = 0; i < ghost.length; i++) {
-      const s = dataToScreen(ghost[i].t, ghost[i].v, p)
-      i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y)
-    }
-    ctx.stroke()
     showTooltip(e, cur.t, cur.v)
     return
   }
@@ -403,6 +395,7 @@ function onMouseUp(e, p) {
     applyCurveTo(p, screenToData(sx, sy, p))
     toolStart = null
     toolMode = null
+    ghostData = null
     commit()
     requestAnimationFrame(draw)
     hideTooltip()
@@ -489,6 +482,7 @@ function applyMinMax() {
 function selectTool(tool) {
   toolMode = toolMode === tool ? null : tool
   toolStart = null
+  ghostData = null
 }
 
 /* ------------------------------------------------------------------
@@ -654,6 +648,24 @@ function drawPhase(p) {
     } else {
       ctx.fillStyle = isDrag ? "#ff0" : color
       ctx.beginPath(); ctx.arc(s.x, s.y, 5, 0, M.PI * 2); ctx.fill()
+    }
+  }
+
+  if (ghostData && ghostData.phase === p && ghostData.points.length) {
+    ctx.strokeStyle = "rgba(255,255,255,.55)"
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    for (let i = 0; i < ghostData.points.length; i++) {
+      const s = dataToScreen(ghostData.points[i].t, ghostData.points[i].v, p)
+      i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y)
+    }
+    ctx.stroke()
+    ctx.strokeStyle = "rgba(255,255,255,.9)"
+    ctx.lineWidth = 1
+    ctx.fillStyle = "rgba(255,255,255,.35)"
+    for (const pt of ghostData.points) {
+      const s = dataToScreen(pt.t, pt.v, p)
+      ctx.beginPath(); ctx.arc(s.x, s.y, 4.5, 0, M.PI * 2); ctx.fill(); ctx.stroke()
     }
   }
 }
