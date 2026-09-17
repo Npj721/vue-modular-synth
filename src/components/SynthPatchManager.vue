@@ -7,6 +7,10 @@ import {
   collectSuperModules,
   installSuperModulesFromFile,
 } from "../composables/superModuleTransfer.js"
+import {
+  buildAudioPayload,
+  installAudioFilesFromFile,
+} from "../composables/audioTransfer.js"
 
 /* =========================================================
  * Synthé complet (patch complet) : enregistre le VOICE + MAIN
@@ -17,7 +21,8 @@ import {
  * Format sauvegardé :
  *   { version, name, voicePatch: {modules, connections},
  *     mainPatch: {modules, connections},
- *     superModule?: [définitions de super-modules utilisés] }
+ *     superModule?: [définitions de super-modules utilisés],
+ *     FX?: { nomFichier -> base64 des fichiers audio utilisés } }
  * ========================================================= */
 
 const emit = defineEmits(["load"])
@@ -161,7 +166,7 @@ const deletePatch = async () => {
 /* =========================
  * EXPORT FILE
  * ========================= */
-const exportFile = () => {
+const exportFile = async () => {
   const data = buildSynthPatch()
 
   // Emporter les super-modules utilisés (récursivement) pour permettre
@@ -173,6 +178,11 @@ const exportFile = () => {
     ].map((d) => [d.type, d])
   )
   if (byType.size) data.superModule = [...byType.values()]
+
+  // Emporter les fichiers audio (samples / IR) utilisés par les modules FX,
+  // y compris ceux utilisés à l'intérieur des super-modules.
+  const audio = await buildAudioPayload([data.voicePatch, data.mainPatch])
+  if (Object.keys(audio).length) data.FX = audio
 
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
   const a = document.createElement("a")
@@ -203,9 +213,12 @@ const importFile = async (e) => {
     }
 
     // Crée d'abord les super-modules du fichier (avec confirmation en cas
-    // de collision de nom), puis seulement le synthé qui les référence.
-    const proceed = await installSuperModulesFromFile(data.superModule)
-    if (!proceed) return
+    // de collision de nom), puis les fichiers audio, et seulement ensuite
+    // le synthé qui les référence.
+    const proceedSuper = await installSuperModulesFromFile(data.superModule)
+    if (!proceedSuper) return
+    const proceedAudio = await installAudioFilesFromFile(data.FX)
+    if (!proceedAudio) return
 
     emit("load", data)
   } catch (err) {

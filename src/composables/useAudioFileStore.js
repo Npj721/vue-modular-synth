@@ -10,7 +10,12 @@ const STORE = "files"
 
 let dbPromise = null
 
+// Repli mémoire pour les environnements sans IndexedDB (tests Node).
+const hasIDB = typeof indexedDB !== "undefined"
+const memory = new Map()
+
 function openDb() {
+  if (!hasIDB) return null
   if (dbPromise) return dbPromise
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1)
@@ -27,6 +32,10 @@ function openDb() {
 
 export async function saveAudioFileBytes(key, bytes) {
   if (!key) return
+  if (!hasIDB) {
+    memory.set(key, bytes)
+    return
+  }
   const db = await openDb()
   await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
@@ -39,6 +48,7 @@ export async function saveAudioFileBytes(key, bytes) {
 
 export async function getAudioFileBytes(key) {
   if (!key) return null
+  if (!hasIDB) return memory.get(key) ?? null
   const db = await openDb()
   return await new Promise((resolve) => {
     const tx = db.transaction(STORE, "readonly")
@@ -50,6 +60,10 @@ export async function getAudioFileBytes(key) {
 
 export async function removeAudioFile(key) {
   if (!key) return
+  if (!hasIDB) {
+    memory.delete(key)
+    return
+  }
   const db = await openDb()
   await new Promise((resolve) => {
     const tx = db.transaction(STORE, "readwrite")
@@ -61,6 +75,7 @@ export async function removeAudioFile(key) {
 
 /** Liste des fichiers persistés (clés). */
 export async function listAudioFiles() {
+  if (!hasIDB) return [...memory.keys()]
   const db = await openDb()
   return await new Promise((resolve) => {
     const tx = db.transaction(STORE, "readonly")

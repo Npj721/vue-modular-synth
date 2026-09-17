@@ -6,6 +6,10 @@ import {
   collectSuperModules,
   installSuperModulesFromFile,
 } from "../composables/superModuleTransfer.js"
+import {
+  buildAudioPayload,
+  installAudioFilesFromFile,
+} from "../composables/audioTransfer.js"
 
 const emit = defineEmits(['patch-loaded'])
 
@@ -94,7 +98,7 @@ const deletePatch = async () => {
 /* =========================
  * EXPORT FILE
  * ========================= */
-const exportFile = () => {
+const exportFile = async () => {
   const patch = props.paperRef.exportPatch()
   patch.name = patchName.value || "patch"
 
@@ -102,6 +106,11 @@ const exportFile = () => {
   // l'importation sur un poste qui ne les connaît pas encore.
   const defs = collectSuperModules(patch)
   if (defs.length) patch.superModule = defs
+
+  // Emporter les fichiers audio (samples / IR) utilisés par les modules FX,
+  // y compris ceux utilisés à l'intérieur des super-modules.
+  const audio = await buildAudioPayload([patch])
+  if (Object.keys(audio).length) patch.FX = audio
 
   const blob = new Blob(
     [JSON.stringify(patch, null, 2)],
@@ -127,9 +136,12 @@ const importFile = async (e) => {
     const patch = JSON.parse(text)
 
     // Crée d'abord les super-modules du fichier (avec confirmation en cas
-    // de collision de nom), puis seulement le patch qui les référence.
-    const proceed = await installSuperModulesFromFile(patch.superModule)
-    if (!proceed) return
+    // de collision de nom), puis les fichiers audio, et seulement ensuite
+    // le patch qui les référence.
+    const proceedSuper = await installSuperModulesFromFile(patch.superModule)
+    if (!proceedSuper) return
+    const proceedAudio = await installAudioFilesFromFile(patch.FX)
+    if (!proceedAudio) return
 
     patchName.value = patch.name || ""
     props.paperRef.importPatch(patch)
