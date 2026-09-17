@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, watch, onMounted, onBeforeUnmount } from "vue"
+import { kvPut, kvDelete, kvKeys, kvEntries } from "../composables/useIndexedDb"
 
 /* =========================================================
  * Composant : éditeur d'enveloppe graphique (canvas)
@@ -58,10 +59,14 @@ let toolMode = null
 let toolStart = null
 let ghostData = null
 
+/* clés localStorage déjà migrées vers IndexedDB (une seule fois par session) */
+const migratedPresetKeys = new Set()
+
 const currentPhase = ref("press")
 const viewMode = ref("graph")
 const presetName = ref("Default")
 const presetList = ref([])
+const presetCache = reactive({})
 
 const pressCanvas = ref(null)
 const releaseCanvas = ref(null)
@@ -511,34 +516,54 @@ function offsetBy(p, ms) {
 }
 
 /* ------------------------------------------------------------------
- * Presets (localStorage)
+ * Presets (IndexedDB, migration localStorage)
  * ------------------------------------------------------------------ */
-function loadPresets() {
+const presetsNs = () => "envelope:" + props.presetsKey
+
+async function migrateLegacyPresets() {
+  if (migratedPresetKeys.has(props.presetsKey)) return
+  migratedPresetKeys.add(props.presetsKey)
   try {
-    return JSON.parse(localStorage.getItem(props.presetsKey) || "{}")
-  } catch { return {} }
+    const raw = localStorage.getItem(props.presetsKey)
+    if (!raw) return
+    const legacy = JSON.parse(raw)
+    for (const [name, value] of Object.entries(legacy)) {
+      await kvPut(presetsNs(), name, value)
+    }
+    localStorage.removeItem(props.presetsKey)
+  } catch (err) {
+    console.error("envelope presets/migration :", err)
+  }
 }
-function refreshPresetList() {
-  presetList.value = Object.keys(loadPresets())
+
+async function refreshPresetList() {
+  await migrateLegacyPresets()
+  const entries = await kvEntries(presetsNs())
+  for (const k of Object.keys(presetCache)) delete presetCache[k]
+  const names = []
+  for (const { key, value } of entries) {
+    presetCache[key] = value
+    names.push(key)
+  }
+  presetList.value = names
 }
 function savePreset() {
   const name = (presetName.value || "").trim()
   if (!name) return
-  const all = loadPresets()
-  all[name] = {
+  presetCache[name] = {
     press: pointsToStages(phases.press),
     release: pointsToStages(phases.release),
     min: yMinVisible.value,
     max: yMaxVisible.value,
   }
-  localStorage.setItem(props.presetsKey, JSON.stringify(all))
+  kvPut(presetsNs(), name, presetCache[name])
   refreshPresetList()
 }
 function loadPreset() {
   const sel = document.getElementById(props.presetsKey + "-list")
   const name = sel && sel.value
   if (!name) return
-  const data = loadPresets()[name]
+  const data = presetCache[name]
   if (!data) return
   yMinVisible.value = data.min ?? props.min
   yMaxVisible.value = data.max ?? props.max
@@ -554,9 +579,8 @@ function deletePreset() {
   const sel = document.getElementById(props.presetsKey + "-list")
   const name = sel && sel.value
   if (!name) return
-  const all = loadPresets()
-  delete all[name]
-  localStorage.setItem(props.presetsKey, JSON.stringify(all))
+  delete presetCache[name]
+  kvDelete(presetsNs(), name)
   refreshPresetList()
 }
 

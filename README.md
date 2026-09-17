@@ -314,7 +314,7 @@ Tous les paramètres des modules internes sont agrégés :
 
 ### Persistance
 
-Les définitions de super-modules sont enregistrées dans `localStorage` sous la clé `modular-super-modules`.
+Les définitions de super-modules sont enregistrées dans IndexedDB (base `modular-synth-store`, namespace `super-modules`).
 
 ---
 
@@ -349,7 +349,7 @@ L'éditeur graphique (`GraphEnvelopeEditor`) permet de dessiner visuellement les
 - **Courbes** : outils `line`, `scurve`, `arc`, `exp`, `log` — tracés interpolés par glisser.
 - **Étirement** : boutons +/− pour ajuster la durée des stages (±100 ms en vue graphique, ±1 ms en vue tableau).
 - **Plage min/max** éditable (persistée dans les données du stage).
-- **Presets** : sauvegardés par type de module dans `localStorage` (clé `env:<type>`).
+- **Presets** : sauvegardés par type de module dans IndexedDB (namespace `envelope:<type>`).
 - **Loop** : case à cocher séparée pour activer la boucle continue.
 - **Vue tableau** : édition numérique précise des stages (from, to, duration, courbe).
 
@@ -371,19 +371,24 @@ Utilisé par les modules **FX / Sample** et **Convolver**.
 
 ## Persistance et stockage
 
-| Stockage | Clé | Contenu |
+| Stockage | Clé / Namespace | Contenu |
 |---|---|---|
-| `localStorage` | `modular-synth-patches` | Synths complets (voicePatch + mainPatch) |
-| `localStorage` | `modular-patches` | Patches individuels (un seul graph) |
-| `localStorage` | `modular-super-modules` | Définitions de super-modules |
-| `localStorage` | `env:<type>` | Presets d'enveloppe par type de module |
+| `IndexedDB` | `modular-synth-store` → `patches:modular-synth-patches` | Synths complets (voicePatch + mainPatch) |
+| `IndexedDB` | `modular-synth-store` → `patches:modular-patches` | Patches individuels (un seul graph) |
+| `IndexedDB` | `modular-synth-store` → `super-modules` | Définitions de super-modules |
+| `IndexedDB` | `modular-synth-store` → `envelope:<clé>` | Presets d'enveloppe par type de module |
 | `IndexedDB` | `modular-synth-audio` | Fichiers audio bruts (clés par nom) |
+| Repli mémoire | — | Environnements sans IndexedDB (tests Node) |
+
+> Les anciennes données `localStorage` (`modular-synth-patches`, `modular-patches`,
+> `modular-super-modules`, `env:<type>`) sont migrées automatiquement vers
+> IndexedDB au premier chargement puis supprimées de `localStorage`.
 
 ### Export / Import
 
 - **Patch simple** : Export `.json` / Import `.json` (validation de structure).
 - **Synth complet** : Export `.synth.json` / Import `.synth.json` (les deux voicePatch et mainPatch doivent être présents).
-- **Super-modules** : Enregistrés automatiquement dans le localStorage, exportables via le menu d'édition.
+- **Super-modules** : Enregistrés automatiquement dans IndexedDB, exportables via le menu d'édition.
 
 ---
 

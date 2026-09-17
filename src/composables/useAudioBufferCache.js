@@ -3,7 +3,7 @@
 // Le param "audioFile" des modules (ex: convolver, fx) ne stocke qu'une clé
 // (le nom du fichier) ; le vrai AudioBuffer déchiffré est conservé ici.
 
-import { getAudioFileBytes } from "./useAudioFileStore"
+import { getAudioFileBytes } from "./useAudioFileStore.js"
 
 const buffers = new Map()
 

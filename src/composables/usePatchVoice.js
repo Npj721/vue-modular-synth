@@ -1,7 +1,7 @@
 // composables/usePatchVoice.js
 import { ref } from "vue"
-import { useSuperModules } from "./useSuperModules"
-import { getAudioBuffer } from "./useAudioBufferCache"
+import { useSuperModules } from "./useSuperModules.js"
+import { getAudioBuffer } from "./useAudioBufferCache.js"
 
 /* =========================================================
  * Utils
@@ -742,6 +742,9 @@ export function usePatchVoice(patch) {
   }
 
   async function init() {
+    // les super-modules persistent dans IndexedDB : on attend leur chargement
+    // avant de construire le graphe (un patch peut y faire référence).
+    await useSuperModules().ready
     await ensureContext()
     if (!mainNodes) {
       buildMainPatch()

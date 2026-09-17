@@ -3,8 +3,9 @@
 // Un seul AudioContext + une seule instance usePatchVoice => toutes les pistes
 // jouent sur la même horloge et sortent par le même patch principal.
 
-import { usePatchVoice } from "./usePatchVoice"
-import { getAudioBuffer, ensureAudioBuffer } from "./useAudioBufferCache"
+import { usePatchVoice } from "./usePatchVoice.js"
+import { useSuperModules } from "./useSuperModules.js"
+import { getAudioBuffer, ensureAudioBuffer } from "./useAudioBufferCache.js"
 
 let sharedPatch = null
 let voice = null
@@ -95,9 +96,14 @@ export async function hydratePatchBuffers(patch) {
 export function setSharedPatch(patch) {
   sharedPatch = patch
   if (voice) {
-    voice.stopAll()
-    voice.rebuildMainPatch()
-    voice.setPatch(getPatch)
+    // les super-modules (persistés en IndexedDB) doivent être chargés avant
+    // de reconstruire le graphe, sinon leurs modules seraient ignorés.
+    const { ready } = useSuperModules()
+    Promise.resolve(ready).then(() => {
+      voice.stopAll()
+      voice.rebuildMainPatch()
+      voice.setPatch(getPatch)
+    })
   }
   // ré-hydratation asynchrone des buffers persistés (sauvegarde/rechargement)
   hydratePatchBuffers(patch).catch((e) => {

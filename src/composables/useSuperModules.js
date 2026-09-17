@@ -22,16 +22,18 @@
 // }
 
 import { ref } from "vue";
-import { useModuleCatalog } from "./useModuleCatalog";
+import { useModuleCatalog } from "./useModuleCatalog.js";
+import { kvPut, kvDelete, kvEntries } from "./useIndexedDb.js";
 
 const STORAGE_KEY = "modular-super-modules";
+const NS = "super-modules";
 
 /* =========================================================
  * État singleton (partagé entre tous les composants)
  * ========================================================= */
 
 const registry = {}; // type -> définition
-let initialized = false;
+let readyPromise = null;
 
 // version réactive du registre : incrémentée à chaque création/suppression,
 // permet aux composants (ex: SuperModuleEditor) de rafraîchir leurs listes.
@@ -41,20 +43,39 @@ const { registerModuleType, unregisterModuleType, getModuleByType } =
   useModuleCatalog();
 
 /* =========================================================
- * Persistance
+ * Persistance (IndexedDB avec migration localStorage)
  * ========================================================= */
 
-function readStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
+function ensureLoaded() {
+  if (readyPromise) return readyPromise;
 
-function writeStorage(all) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  readyPromise = (async () => {
+    // --- migration des anciennes données localStorage ---
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const legacy = JSON.parse(raw);
+        for (const [type, stored] of Object.entries(legacy)) {
+          await kvPut(NS, type, stored);
+        }
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (err) {
+      console.error("useSuperModules/migration :", err);
+    }
+
+    // --- chargement du registre ---
+    const all = await kvEntries(NS);
+    for (const { key, value } of all) {
+      // stockage = définition sans le champ "type" redondant
+      register({ type: key, ...value });
+    }
+  })().catch((err) => {
+    console.error("useSuperModules/load :", err);
+    readyPromise = null; // permet une nouvelle tentative
+  });
+
+  return readyPromise;
 }
 
 /* =========================================================
@@ -243,21 +264,6 @@ function register(def) {
 }
 
 /* =========================================================
- * Chargement initial
- * ========================================================= */
-
-function ensureLoaded() {
-  if (initialized) return;
-  initialized = true;
-
-  const all = readStorage();
-  for (const [type, stored] of Object.entries(all)) {
-    // stockage = définition sans le champ "type" redondant
-    register({ type, ...stored });
-  }
-}
-
-/* =========================================================
  * API publique
  * ========================================================= */
 
@@ -304,12 +310,13 @@ export function useSuperModules() {
 
     register(def);
 
-    // persistance
-    const all = readStorage();
-    if (typeToUpdate && typeToUpdate !== type) delete all[typeToUpdate];
-    all[type] = { ...def };
-    delete all[type].type; // évite la redondance au stockage
-    writeStorage(all);
+    // persistance (IndexedDB)
+    const stored = { ...def };
+    delete stored.type; // évite la redondance au stockage
+    kvPut(NS, type, stored).catch(() => {});
+    if (typeToUpdate && typeToUpdate !== type) {
+      kvDelete(NS, typeToUpdate).catch(() => {});
+    }
 
     return def;
   }
@@ -320,12 +327,10 @@ export function useSuperModules() {
     delete registry[type];
     unregisterModuleType(type);
 
-    const all = readStorage();
-    delete all[type];
-    writeStorage(all);
+    kvDelete(NS, type).catch(() => {});
     version.value++;
     return true;
   }
 
-  return { list, get, saveFromGraph, remove, version };
+  return { list, get, saveFromGraph, remove, version, ready: readyPromise };
 }
