@@ -2,6 +2,10 @@
 import { ref, computed } from "vue"
 import Swal from "sweetalert2"
 import { usePatchStorage } from "../composables/usePatchStorage"
+import {
+  collectSuperModules,
+  installSuperModulesFromFile,
+} from "../composables/superModuleTransfer.js"
 
 const emit = defineEmits(['patch-loaded'])
 
@@ -94,6 +98,11 @@ const exportFile = () => {
   const patch = props.paperRef.exportPatch()
   patch.name = patchName.value || "patch"
 
+  // Emporter les super-modules utilisés par le patch pour permettre
+  // l'importation sur un poste qui ne les connaît pas encore.
+  const defs = collectSuperModules(patch)
+  if (defs.length) patch.superModule = defs
+
   const blob = new Blob(
     [JSON.stringify(patch, null, 2)],
     { type: "application/json" }
@@ -113,11 +122,25 @@ const importFile = async (e) => {
   const file = e.target.files[0]
   if (!file) return
 
-  const text = await file.text()
-  const patch = JSON.parse(text)
+  try {
+    const text = await file.text()
+    const patch = JSON.parse(text)
 
-  patchName.value = patch.name || ""
-  props.paperRef.importPatch(patch)
+    // Crée d'abord les super-modules du fichier (avec confirmation en cas
+    // de collision de nom), puis seulement le patch qui les référence.
+    const proceed = await installSuperModulesFromFile(patch.superModule)
+    if (!proceed) return
+
+    patchName.value = patch.name || ""
+    props.paperRef.importPatch(patch)
+  } catch (err) {
+    Swal.fire({
+      title: "Import impossible",
+      text: err.message,
+      icon: "error",
+      confirmButtonText: "OK",
+    })
+  }
 }
 </script>
 

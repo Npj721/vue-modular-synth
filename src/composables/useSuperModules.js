@@ -332,5 +332,48 @@ export function useSuperModules() {
     return true;
   }
 
-  return { list, get, saveFromGraph, remove, version, ready: readyPromise };
+  /** Récupère récursivement les super-modules référencés par un graphe
+   *  (y compris les super-modules imbriqués dans leurs définitions).
+   *  @param {object} graph  { modules, connections }
+   *  @returns {object[]} définitions complètes (champ `type` présent)
+   */
+  function collectDefinitions(graph) {
+    const found = new Map(); // type -> définition
+    const visit = (g) => {
+      for (const m of g?.modules ?? []) {
+        const def = registry[m.type];
+        if (def && !found.has(def.type)) {
+          found.set(def.type, { ...def });
+          visit(def.graph); // descente dans les super-modules imbriqués
+        }
+      }
+    };
+    visit(graph);
+    return [...found.values()];
+  }
+
+  /** Enregistre une définition chargée depuis un fichier d'importation.
+   *  Écrase un éventuel super-module existant du même type et persiste en
+   *  IndexedDB. @returns {object} la définition enregistrée */
+  function registerDefinition(def) {
+    if (!def || !def.type) {
+      throw new Error("Super-module invalide : champ « type » manquant.");
+    }
+    register(deepClone(def));
+    const stored = { ...def };
+    delete stored.type; // évite la redondance au stockage
+    kvPut(NS, def.type, stored).catch(() => {});
+    return registry[def.type];
+  }
+
+  return {
+    list,
+    get,
+    saveFromGraph,
+    remove,
+    version,
+    ready: readyPromise,
+    collectDefinitions,
+    registerDefinition,
+  };
 }

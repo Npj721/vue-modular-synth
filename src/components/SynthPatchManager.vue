@@ -3,6 +3,10 @@ import { ref, computed, watch, onBeforeUnmount } from "vue"
 import Swal from "sweetalert2"
 import MidiController from "./MidiController.vue"
 import { usePatchStorage } from "../composables/usePatchStorage"
+import {
+  collectSuperModules,
+  installSuperModulesFromFile,
+} from "../composables/superModuleTransfer.js"
 
 /* =========================================================
  * Synthé complet (patch complet) : enregistre le VOICE + MAIN
@@ -12,7 +16,8 @@ import { usePatchStorage } from "../composables/usePatchStorage"
  *
  * Format sauvegardé :
  *   { version, name, voicePatch: {modules, connections},
- *     mainPatch: {modules, connections} }
+ *     mainPatch: {modules, connections},
+ *     superModule?: [définitions de super-modules utilisés] }
  * ========================================================= */
 
 const emit = defineEmits(["load"])
@@ -158,6 +163,17 @@ const deletePatch = async () => {
  * ========================= */
 const exportFile = () => {
   const data = buildSynthPatch()
+
+  // Emporter les super-modules utilisés (récursivement) pour permettre
+  // l'importation sur un poste qui ne les connaît pas encore.
+  const byType = new Map(
+    [
+      ...collectSuperModules(data.voicePatch),
+      ...collectSuperModules(data.mainPatch),
+    ].map((d) => [d.type, d])
+  )
+  if (byType.size) data.superModule = [...byType.values()]
+
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
   const a = document.createElement("a")
   a.href = URL.createObjectURL(blob)
@@ -185,6 +201,12 @@ const importFile = async (e) => {
       })
       return
     }
+
+    // Crée d'abord les super-modules du fichier (avec confirmation en cas
+    // de collision de nom), puis seulement le synthé qui les référence.
+    const proceed = await installSuperModulesFromFile(data.superModule)
+    if (!proceed) return
+
     emit("load", data)
   } catch (err) {
     Swal.fire({
