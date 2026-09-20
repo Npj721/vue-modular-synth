@@ -4,5 +4,5 @@ import vue from '@vitejs/plugin-vue'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
-  base: 'https://github.com/Npj721/vue-modular-synth/'
+  base: '/vue-modular-synth/'
 })
