@@ -63,6 +63,7 @@ export function usePatchStorage(key = DEFAULT_KEY) {
   const list = () => state.entries
   const names = () => Object.keys(state.entries)
   const load = (name) => state.entries[name] ?? null
+  const ready = () => state.loaded
 
   const save = (name, patch) => {
     if (!name) return
@@ -77,5 +78,5 @@ export function usePatchStorage(key = DEFAULT_KEY) {
     kvDelete(ns, name).catch(() => {})
   }
 
-  return { list, save, load, remove, names }
+  return { list, save, load, remove, names, ready }
 }

@@ -5,12 +5,14 @@ import MidiController from "./MidiController.vue"
 import { usePatchStorage } from "../composables/usePatchStorage"
 import {
   collectSuperModules,
-  installSuperModulesFromFile,
 } from "../composables/superModuleTransfer.js"
 import {
   buildAudioPayload,
-  installAudioFilesFromFile,
 } from "../composables/audioTransfer.js"
+import {
+  parseSynthText,
+  installSynthDependencies,
+} from "../composables/synthTransfer.js"
 
 /* =========================================================
  * Synthé complet (patch complet) : enregistre le VOICE + MAIN
@@ -200,25 +202,12 @@ const importFile = async (e) => {
   if (!file) return
 
   try {
-    const text = await file.text()
-    const data = JSON.parse(text)
-    if (!data.voicePatch || !data.mainPatch) {
-      Swal.fire({
-        title: "Fichier invalide",
-        text: "Un synthéthiseur complet doit contenir voicePatch et mainPatch.",
-        icon: "error",
-        confirmButtonText: "OK",
-      })
-      return
-    }
+    const data = parseSynthText(await file.text())
 
     // Crée d'abord les super-modules du fichier (avec confirmation en cas
     // de collision de nom), puis les fichiers audio, et seulement ensuite
     // le synthé qui les référence.
-    const proceedSuper = await installSuperModulesFromFile(data.superModule)
-    if (!proceedSuper) return
-    const proceedAudio = await installAudioFilesFromFile(data.FX)
-    if (!proceedAudio) return
+    if (!(await installSynthDependencies(data))) return
 
     emit("load", data)
   } catch (err) {

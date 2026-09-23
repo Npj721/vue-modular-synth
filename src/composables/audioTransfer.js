@@ -91,10 +91,11 @@ export async function buildAudioPayload(graphs) {
  * d'importation dans modular-synth-audio.
  *
  * - si un fichier du même nom existe déjà, une fenêtre demande si on
- *   écrase (tous) ou si on annule l'importation ;
+ *   écrase (tous) ou si on annule l'importation (sauf en mode silencieux,
+ *   où l'on conserve simplement les fichiers existants) ;
  * - retourne true pour continuer l'importation, false si elle est annulée.
  */
-export async function installAudioFilesFromFile(fxPayload) {
+export async function installAudioFilesFromFile(fxPayload, { silent = false } = {}) {
   if (!fxPayload || typeof fxPayload !== "object") return true
   const names = Object.keys(fxPayload).filter((k) => fxPayload[k])
   if (!names.length) return true
@@ -104,7 +105,12 @@ export async function installAudioFilesFromFile(fxPayload) {
     if (await getAudioFileBytes(name)) existing.add(name)
   }
 
-  if (existing.size) {
+  if (existing.size && silent) {
+    for (let i = names.length - 1; i >= 0; i--) {
+      if (existing.has(names[i])) names.splice(i, 1)
+    }
+    if (!names.length) return true
+  } else if (existing.size) {
     const labels = [...existing].map((n) => `« ${n} »`).join(", ")
     const res = await Swal.fire({
       title: "Fichier(s) audio déjà présent(s)",

@@ -14,10 +14,11 @@ export function collectSuperModules(graph) {
  *
  * - les définitions invalides ou dupliquées sont ignorées ;
  * - si un super-module du même nom existe déjà, une fenêtre demande si on
- *   écrase (tous) ou si on annule l'importation ;
+ *   écrase (tous) ou si on annule l'importation (sauf en mode silencieux,
+ *   où l'on ignore simplement les définitions en conflit) ;
  * - retourne true pour continuer l'importation, false si elle est annulée.
  */
-export async function installSuperModulesFromFile(defs) {
+export async function installSuperModulesFromFile(defs, { silent = false } = {}) {
   if (!Array.isArray(defs) || !defs.length) return true
   await superModulesReady
 
@@ -32,7 +33,13 @@ export async function installSuperModulesFromFile(defs) {
   if (!valid.length) return true
 
   const conflicts = valid.filter((d) => get(d.type))
-  if (conflicts.length) {
+  if (conflicts.length && silent) {
+    const conflicting = new Set(conflicts.map((d) => d.type))
+    for (let i = valid.length - 1; i >= 0; i--) {
+      if (conflicting.has(valid[i].type)) valid.splice(i, 1)
+    }
+    if (!valid.length) return true
+  } else if (conflicts.length) {
     const names = [...new Set(conflicts.map((d) => `« ${d.label || d.type} »`))].join(", ")
     const res = await Swal.fire({
       title: "Super-module(s) déjà présent(s)",

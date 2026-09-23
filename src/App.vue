@@ -5,6 +5,7 @@
   import MultiTrackSequencer from './components/MultiTrackSequencer.vue'
   import AudioVisualizer from './components/AudioVisualizer.vue'
   import { useDockState } from './composables/useDockState'
+  import { seedBaseSynths } from './composables/useBaseSynths'
   const { showVisualizer, showKeyboard } = useDockState()
   const patch = reactive({})
 
@@ -20,6 +21,11 @@
       dockHeight.value = dock.value ? dock.value.offsetHeight : 0
     })
     if (dock.value) dockObserver.observe(dock.value)
+
+    /* Pré-installe les synthés de base (IndexedDB) au premier lancement. */
+    seedBaseSynths().catch((e) => {
+      console.error("seedBaseSynths :", e)
+    })
   })
 
   onUnmounted(() => {
