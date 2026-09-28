@@ -177,7 +177,7 @@ Chaque stage est `{ from, to, duration, curve }` :
 - **Replace** : les valeurs remplacent directement le paramètre (style CV).  
   Ex. : enveloppe 0→1 replace sur une fréquence de filtre → va de 0 Hz à 1 Hz.
 
-**Loop** : l'enveloppe boucle les stages `press` indéfiniment (pré-schédule sur 180 secondes, précision Web Audio).
+**Loop** : l'enveloppe répète les stages `press` indéfiniment. Une courte fenêtre d'automation (5 s) est planifiée au `noteOn`, puis **allongée au fur et à mesure** dans la timeline Web Audio — les évènements ne sont jamais réécrits, seulement ajoutés après le dernier, ce qui conserve la précision échantillon sans jamais laisser une automation de plusieurs minutes s'accumuler dans les AudioParam.
 
 **Vélocité** : les valeurs `to` des stages press sont multipliées par la vélocité de la note.
 

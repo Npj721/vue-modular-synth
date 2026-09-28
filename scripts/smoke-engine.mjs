@@ -1163,5 +1163,181 @@ saveFromGraph({
   );
 }
 
+/* =========================================================
+ * Scénario 11 : enveloppe LOOPABLE construite au fur et à mesure
+ * =========================================================
+ *
+ * L'enveloppe doit être un sustain réellement infini, sans pour autant
+ * empiler 180 s d'avance dans la timeline : une petite fenêtre est planifiée
+ * au noteOn puis allongée append-only (les évènements ne sont jamais réécrits,
+ * seulement ajoutés APRÈS le dernier). Sur un cycle de 0.5 s, l'ancienne
+ * version posait 360 cycles / 720 évènements par note, et gelait à 180 s.
+ */
+{
+  const CYCLE = 0.5;
+  const WINDOW = 5;
+  const loopStages = {
+    loop: true,
+    press: [
+      { from: 1, to: 0.25, duration: 0.4, curve: "linear" },
+      { from: 0.25, to: 1, duration: 0.1, curve: "linear" },
+    ],
+    release: [{ from: "current", to: 0, duration: 0.2, curve: "linear" }],
+  };
+
+  const patch = {
+    mainPatch: { modules: [], connections: [] },
+    voicePatch: {
+      modules: [
+        { id: "v11", type: "voice", params: {}, position: {} },
+        {
+          id: "e11",
+          type: "envelope",
+          params: { modulation: "replace", stages: loopStages },
+          position: {},
+        },
+        { id: "d11", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "v11", port: "out:out" }, to: { id: "d11", port: "in:in" } },
+        { from: { id: "e11", port: "out:out" }, to: { id: "v11", port: "in:frequency" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+
+  const ctx = synth.getContext();
+  // le contexte contient aussi l'osc du keep-alive : on prend celui que
+  // l'enveloppe programme
+  const param = of(ctx, "osc").find((o) => o.frequency.events.length > 0).frequency;
+  const times = () => param.events.filter((e) => e[2] != null).map((e) => e[2]);
+  const lastAt = () => times()[times().length - 1];
+  const ramps = () => param.events.filter(([k]) => k === "linRamp" || k === "expRamp");
+
+  // 1. fenêtre bornée dès le noteOn (10 cycles pour 5 s) — et surtout pas
+  //    les 360 cycles / 720 évènements de l'ancien horizon de 180 s
+  check("loop : peu d'évènements au noteOn (fenêtre, pas horizon)", ramps().length === 20);
+
+  // 2. la couverture est bien ~WINDOW, pas 180 s
+  check("loop : couverture ≈ la fenêtre au noteOn", lastAt() >= WINDOW && lastAt() < WINDOW + CYCLE);
+
+  // 3. append-only : les temps sont croissants → rien n'est réécrit
+  const sorted = () => times().every((t, i) => i === 0 || t >= times()[i - 1]);
+  check("loop : évènements strictement croissants (append-only)", sorted());
+
+  // 4. les cycles s'enchaînent sans trou : la dernière retombée tombe sur un
+  //    multiple du cycle (couture exacte entre deux cycles)
+  check("loop : la couture des cycles est exacte", approx(lastAt() % CYCLE, 0));
+
+  // 5. le ravitaillement ALLONGE la timeline (n'ajoute jamais avant le dernier)
+  const firstRefillCount = param.events.length;
+  const lastBeforeRefill = lastAt();
+  ctx.currentTime = 1; // le temps avance : la fenêtre doit être complétée
+  await new Promise((r) => setTimeout(r, 300));
+  check("loop : le ravitaillement ajoute des évènements", param.events.length > firstRefillCount);
+  check(
+    "loop : rien n'est écrit avant le dernier évènement déjà posé",
+    Math.min(...times().slice(firstRefillCount)) >= lastBeforeRefill
+  );
+  check(
+    "loop : le ravitaillement reste borné (fenêtre)",
+    lastAt() <= ctx.currentTime + WINDOW + CYCLE
+  );
+
+  // 6. plus rien ne bouge après le noteOff (timer arrêté, release posée)
+  const atOff = param.events.length;
+  synth.noteOff(60);
+  check(
+    "loop : release programmée au noteOff",
+    param.events.slice(atOff).some(([k, v]) => k === "linRamp" && v === 0)
+  );
+  const afterRelease = param.events.length;
+  ctx.currentTime = 5;
+  await new Promise((r) => setTimeout(r, 300));
+  check("loop : aucun ravitaillement après le noteOff", param.events.length === afterRelease);
+}
+
+/* =========================================================
+ * Scénario 12 : le ravitaillement reste borné et se rattrape
+ * =========================================================
+ *
+ * Deux propriétés qui séparent cette implémentation d'une fuite mémoire :
+ *  - IDEMPOTENCE : deux ticks rapprochés (ou un currentTime figé, contexte
+ *    suspendu) ne doivent rien écrire de plus — sinon la timeline
+ *    grossirait plus vite que le temps ne la consomme ;
+ *  - RATTRAPAGE : si le main thread s'est bloqué plus longtemps que la
+ *    fenêtre, le cycle suivant repart du présent (pas de trou de silence).
+ */
+{
+  const WINDOW = 5;
+  const loopStages = {
+    loop: true,
+    press: [{ from: 1, to: 0.25, duration: 0.4, curve: "linear" }],
+    release: [{ from: "current", to: 0, duration: 0.1, curve: "linear" }],
+  };
+
+  const patch = {
+    mainPatch: { modules: [], connections: [] },
+    voicePatch: {
+      modules: [
+        { id: "v12", type: "voice", params: {}, position: {} },
+        {
+          id: "e12",
+          type: "envelope",
+          params: { modulation: "replace", stages: loopStages },
+          position: {},
+        },
+        { id: "d12", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "v12", port: "out:out" }, to: { id: "d12", port: "in:in" } },
+        { from: { id: "e12", port: "out:out" }, to: { id: "v12", port: "in:frequency" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+
+  const ctx = synth.getContext();
+  const param = of(ctx, "osc").find((o) => o.frequency.events.length > 0).frequency;
+  const lastAt = () => {
+    const t = param.events.map((e) => e[2]).filter((x) => x != null);
+    return t[t.length - 1];
+  };
+
+  // 1. currentTime FIGÉ (contexte suspendu) : 10 ticks, zéro écriture
+  const frozen = param.events.length;
+  await new Promise((r) => setTimeout(r, 400));
+  check("loop : currentTime figé → aucun empilement", param.events.length === frozen);
+
+  // 2. le temps avance normalement : la timeline avance AU MÊME RYTHME que
+  //    currentTime, elle ne dérape pas
+  const inWindow = (lead) => lead > WINDOW - 1 && lead < WINDOW + 1;
+  ctx.currentTime = 1;
+  await new Promise((r) => setTimeout(r, 400));
+  check("loop : avance stable dans le temps (fenêtre constante)", inWindow(lastAt() - ctx.currentTime));
+  ctx.currentTime = 2;
+  await new Promise((r) => setTimeout(r, 400));
+  check("loop : avance toujours stable (aucune dérive)", inWindow(lastAt() - ctx.currentTime));
+
+  // 3. main thread bloqué 10 s : on repart du présent, sans trou
+  ctx.currentTime = 12;
+  await new Promise((r) => setTimeout(r, 400));
+  check("loop : rattrapage après un long blocage", inWindow(lastAt() - ctx.currentTime));
+  // seul le chemin de re-ancre émet un cancel à l'instant courant du timer
+  // (le stub enregistre ["cancel", t] sur deux cases)
+  check(
+    "loop : re-ancre au présent (cancel à t=12)",
+    param.events.some((e) => e[0] === "cancel" && e[1] === 12)
+  );
+
+  synth.noteOff(60);
+}
+
 console.log(failures === 0 ? "\nTous les tests passent." : `\n${failures} échec(s).`);
 process.exit(failures === 0 ? 0 : 1);

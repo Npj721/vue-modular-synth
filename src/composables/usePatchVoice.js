@@ -9,11 +9,31 @@ import { getAudioBuffer } from "./useAudioBufferCache.js"
 
 const EPS = 0.0001
 
-// Enveloppes loopables : durée totale couverte par les cycles planifiés
-// d'avance dans la timeline Web Audio (un très long "sustain" simulé par
-// la répétition des stages press). Pas de timer pendant la lecture.
-const LOOP_HORIZON_SECONDS = 180 // ≈ 3 min d'automation
-const LOOP_MAX_SCHEDULES = 4096 // garde-fou si le cycle est ultracourt
+/* Enveloppes loopables : le sustain infini est construit AU FUR ET À MESURE.
+ *
+/* On ne planifie jamais tout l'horizon d'avance : à chaque ravitaillement on
+ * n'ajoute que les cycles manquants pour couvrir [maintenant, now + WINDOW].
+ * La timeline Web Audio d'un paramètre reste donc de l'ordre de la dizaine
+ * d'évènements au lieu de quelques milliers — ce qui compte triple :
+ * insertion main-thread (O(n) par setValueAtTime), mémoire, et surtout le
+ * `cancelScheduledValues` du noteOff (autre O(n)).
+ *
+ * La taille de la fenêtre est le compromis direct entre coût et robustesse :
+ * plus elle est large, plus le nombre d'évènements vivants monte, mais plus
+ * on tolère un main thread qui saccade (le timer est d'ailleurs bridé à ~1 s
+ * par les navigateurs sur un onglet masqué, d'où les 5 s). Un ravitaillement
+ * n'écrit que les cycles MANQUANTS, donc le coût total sur la durée d'une note
+ * est indépendant de cette valeur.
+ *
+ * L'ajout est APPEND-ONLY : on n'écrit jamais avant l'instant déjà couvert
+ * (`cancelAndHoldAtTime` détruirait le futur). Comme les cycles sont
+ * enchaînés de bout en bout — `loop.t` est l'instant de fin exact du dernier
+ * évènement posé, réutilisé comme départ du suivant — la couture reste
+ * échantillon-précise.
+ */
+const LOOP_WINDOW_SECONDS = 5 // avance planifiée devant l'instant présent
+const LOOP_MAX_CYCLES = 128 // garde-fou si le cycle est sub-milliseconde
+const LOOP_REFRESH_MS = 250 // période du timer de ravitaillement
 
 const noteToFreq = (note) =>
   440 * Math.pow(2, (note - 69) / 12)
@@ -574,17 +594,45 @@ function normalizeGraph(graph) {
  * Envelope scheduler
  * ========================================================= */
 
+/* "Fige" le param à sa valeur courante : détache les évènements futurs sans
+ * changer la valeur, et la RENVOIE.
+ *
+ * Le `param.value` n'est lu qu'ici, une seule fois : c'est un point de
+ * synchronisation avec le thread audio, pas une propriété bon marché. */
+function holdParam(param, now) {
+  const v = param.value
+  if (param.cancelAndHoldAtTime) {
+    param.cancelAndHoldAtTime(now)
+  } else {
+    param.cancelScheduledValues(now)
+    param.setValueAtTime(v, now)
+  }
+  return v
+}
+
 /* Programme un cycle complet d'enveloppe sur le param, à partir de la date
- * absolue t0, sans toucher aux évènements déjà planifiés. */
-function scheduleCycle(param, stages, ctx, velocity = 1, base = 1, t0) {
+ * absolue t0, sans toucher aux évènements déjà planifiés.
+ *
+ * currentValue : valeur à utiliser pour un stage "from: current". Elle est
+ *   résolue par l'appelant (UNE lecture de param.value), pas ici : relire la
+ *   valeur à chaque stage revient à la relire à chaque cycle, donc des
+ *   milliers de synchronisations avec le thread audio dans le noteOn, pour une
+ *   valeur qui ne changeait de toute façon pas.
+ *
+ * hold : { time, value } décrivant le dernier évènement RÉELLEMENT posé. Si le
+ *   stage suivant part de cette valeur-là à cet instant-là exactement, son
+ *   setValueAtTime est inutile : après la fin d'une rampe, la spec tient la
+ *   valeur d'arrivée. C'est la moitié des évènements d'une boucle qu'on
+ *   économise, sans aucun changement de comportement.
+ *
+ * Retourne { time, value } = l'état du paramètre à la fin du cycle, à
+ * réinjecter comme `hold` du cycle suivant. */
+function scheduleCycle(param, stages, currentValue, velocity = 1, base = 1, t0, hold = null) {
   let t = t0
+  let last = hold
 
   for (const stage of stages) {
-    let from =
-      stage.from === "current"
-        ? param.value
-        : stage.from * base
-
+    let from = stage.from === "current" ? currentValue : stage.from * base
     let to = stage.to * velocity * base
 
     if (stage.curve === "exponential") {
@@ -592,7 +640,10 @@ function scheduleCycle(param, stages, ctx, velocity = 1, base = 1, t0) {
       to = Math.max(EPS, to)
     }
 
-    param.setValueAtTime(from, t)
+    if (!last || last.time !== t || last.value !== from) {
+      param.setValueAtTime(from, t)
+    }
+
     t += stage.duration
 
     if (stage.curve === "exponential") {
@@ -600,55 +651,101 @@ function scheduleCycle(param, stages, ctx, velocity = 1, base = 1, t0) {
     } else {
       param.linearRampToValueAtTime(to, t)
     }
+
+    last = { time: t, value: to }
   }
 
-  return t - t0
+  return last
 }
 
 function scheduleStages(param, stages, ctx, velocity = 1, base = 1, startOffset = 0) {
   const now = ctx.currentTime
-  const t0 = now + startOffset
+  const currentValue = holdParam(param, now)
+  return scheduleCycle(param, stages, currentValue, velocity, base, now + startOffset)
+}
 
-  if (param.cancelAndHoldAtTime) {
-    param.cancelAndHoldAtTime(now)
-  } else {
+/* =========================================================
+ * Enveloppe LOOPABLE (append-only)
+ * =========================================================
+ *
+ * `loop` décrit une enveloppe dont les stages "press" se répètent
+ * indéfiniment. Il ne contient que l'état du curseur dans la timeline :
+ *
+ *  - t     : instant absolu du prochain point d'écriture (= fin exacte du
+ *            dernier évènement posé, réutilisée telle quelle comme départ du
+ *            cycle suivant → couture flottante exacte) ;
+ *  - hold  : dernier évènement posé ({ time, value }) ;
+ *  - cycle : durée d'un cycle, en secondes.
+ */
+
+/* Prolonge `loop` jusqu'à LOOP_WINDOW_SECONDS d'avance.
+ *
+ * IDEMPOTENT : si l'avance déjà planifiée couvre la fenêtre, on n'écrit RIEN.
+ * C'est ce qui borne la croissance — deux ticks successifs ne peuvent pas
+ * empiler de cycles, et un AudioContext suspendu (currentTime figé, donc
+ * "lead" constant) ne fait rien non plus. Quelle que soit la latence du
+ * main thread, on n'écrit jamais au-delà de now + fenêtre. */
+function extendLoop(loop, now, force = false) {
+  const { param, stages, velocity, base, currentValue } = loop
+
+  let t = loop.t
+  if (!force && t - now >= LOOP_WINDOW_SECONDS) return
+
+  let hold = loop.hold
+
+  // Garde-fou : le main thread a été bloqué plus longtemps que la fenêtre
+  // (GC, construction d'un gros patch). Le passé est irrécupérable, on
+  // ré-ancre au présent plutôt que de laisser un trou de silence — la
+  // discontinuité résiduelle est inaudible : on se replace sur la valeur
+  // courante, on ne rejoue pas la phase perdue.
+  if (t < now) {
     const v = param.value
     param.cancelScheduledValues(now)
     param.setValueAtTime(v, now)
+    t = now
+    hold = { time: now, value: v }
   }
 
-  return scheduleCycle(param, stages, ctx, velocity, base, t0)
+  const target = now + LOOP_WINDOW_SECONDS
+  let n = 0
+  while (t < target && n < LOOP_MAX_CYCLES) {
+    hold = scheduleCycle(param, stages, currentValue, velocity, base, t, hold)
+    t = hold.time
+    n++
+  }
+
+  loop.t = t
+  loop.hold = hold
 }
 
-/* Enveloppe LOOPABLE : répète les stages "press" N fois en incrémentant le
- * décalage de la durée totale d'un cycle. Tout est planifié d'avance dans la
- * timeline Web Audio (les évènements se touchent exactement), aucune boucle
- * JS n'est exécutée pendant la lecture → précision échantillon, même pour
- * des cycles plus courts qu'un millisecond. */
-function scheduleLoopingEnvelope(param, stages, ctx, velocity = 1, base = 1, startOffset = 0) {
+/* Démarre une enveloppe loopable : reset unique, puis première fenêtre.
+ * Renvoie l'état de boucle à conserver, ou null si le cycle est invalide
+ * (durée nulle) — l'enveloppe est alors traitée comme une enveloppe simple. */
+function startLoop(param, stages, ctx, velocity, base, startOffset) {
   const cycle = getEnvelopeDuration(stages)
   if (!(cycle > 0)) {
-    return scheduleStages(param, stages, ctx, velocity, base, startOffset)
+    scheduleStages(param, stages, ctx, velocity, base, startOffset)
+    return null
   }
 
   const now = ctx.currentTime
+  const currentValue = holdParam(param, now)
 
-  // reset UNE seule fois : cancelAndHoldAtTime annulerait les itérations posées
-  if (param.cancelAndHoldAtTime) {
-    param.cancelAndHoldAtTime(now)
-  } else {
-    const v = param.value
-    param.cancelScheduledValues(now)
-    param.setValueAtTime(v, now)
+  const loop = {
+    param,
+    stages,
+    cycle,
+    velocity,
+    base,
+    currentValue,
+    t: now + startOffset,
+    hold: null,
   }
+  // force : le curseur démarre peut-être déjà au-delà de la fenêtre si la
+  // compensation de delay est grande, or il faut bien poser un premier cycle
+  extendLoop(loop, now, true)
 
-  const total = Math.max(1, Math.ceil(LOOP_HORIZON_SECONDS / cycle))
-  const n = Math.min(total, LOOP_MAX_SCHEDULES)
-  const t0 = now + startOffset
-
-  for (let i = 0; i < n; i++) {
-    scheduleCycle(param, stages, ctx, velocity, base, t0 + i * cycle)
-  }
+  return loop
 }
 
 /* =========================================================
@@ -675,6 +772,7 @@ export function usePatchVoice(patch) {
   let mainNodes = null
   let mainInputNode = null
   let mainStarted = [] // nœuds à cycle de vie global (oscs, constants...)
+  let mainEnvs = [] // enveloppes du mainPatch (boucles à ravitailler à débrancher)
   let mainRunning = false
 
   // AnalyserNode branché "juste avant la sortie" (pas une partie du patch) :
@@ -685,6 +783,59 @@ export function usePatchVoice(patch) {
 
   // GainNodes indépendants par piste de séquenceur (volume par piste)
   const trackGains = new Set()
+
+  /* =========================
+   * Enveloppes loopables : registre + ravitaillement
+   * =========================
+   *
+   * Un SEUL timer pour toutes les boucles du contexte. Il ne fait
+   * qu'ALLONGER les automation déjà posées dans la timeline Web Audio (donc
+   * aucun risque de glitch : rien n'est recalculé pendant la lecture, et la
+   * couture entre deux cycles est un simple enchaînement d'évènements) — même
+   * approche que le scan de morph, où seul le changement de donnée passe par
+   * un timer.
+   *
+   * Le timer s'arrête dès la dernière boucle morte : une enveloppe non
+   * bouclée ne coûte donc rien. */
+  const loopingEnvs = new Set()
+  let loopTimer = null
+
+  function stopLoopRefill() {
+    if (!loopTimer) return
+    clearInterval(loopTimer)
+    loopTimer = null
+  }
+
+  function refillLoopingEnvelopes() {
+    if (!loopingEnvs.size) {
+      stopLoopRefill()
+      return
+    }
+    const ctx = audioCtx.value
+    if (!ctx) return
+
+    const now = ctx.currentTime
+    for (const loop of loopingEnvs) {
+      // auto-réparation : une enveloppe qui planterait ici ne doit pas
+      // empêcher les autres d'être ravitaillées
+      try {
+        extendLoop(loop, now)
+      } catch {}
+    }
+  }
+
+  function registerLoop(loop) {
+    if (!loop) return null
+    loopingEnvs.add(loop)
+    if (!loopTimer) loopTimer = setInterval(refillLoopingEnvelopes, LOOP_REFRESH_MS)
+    return loop
+  }
+
+  function unregisterLoop(loop) {
+    if (!loop) return
+    loopingEnvs.delete(loop)
+    if (!loopingEnvs.size) stopLoopRefill()
+  }
 
   /* =========================
    * Init (lazy safe)
@@ -1280,17 +1431,24 @@ export function usePatchVoice(patch) {
 
       const scheduleOn = (param, baseValue, affectsAmplitude = false) => {
         if (!param || typeof param.setValueAtTime !== "function") return
+
+        // Une enveloppe loopable conserve son état de boucle dans
+        // activeEnvs : c'est ce qui permet de la prolonger après la
+        // construction du graphe, et de l'arrêter au noteOff.
+        let loop = null
         if (looping) {
-          scheduleLoopingEnvelope(param, stages.press, ctx, o.velocity, baseValue, shift)
+          loop = startLoop(param, stages.press, ctx, o.velocity, baseValue, shift)
         } else {
           scheduleStages(param, stages.press, ctx, o.velocity, baseValue, shift)
         }
+
         o.activeEnvs.push({
           param,
           base: baseValue,
           release: stages.release,
           affectsAmplitude,
           modulatorType: from.modType,
+          loop: registerLoop(loop),
         })
       }
 
@@ -1419,10 +1577,12 @@ export function usePatchVoice(patch) {
 
     const started = []
 
+    mainEnvs = []
     const { nodes } = buildGraph(ctx, normalizeGraph(getPatch()?.mainPatch), {
       destinationNode: ctx.destination,
       deferStart: true, // démarrés explicitement dans startMainPatch
       started,
+      activeEnvs: mainEnvs,
     })
 
     mainNodes = nodes
@@ -1470,6 +1630,15 @@ export function usePatchVoice(patch) {
   function teardownMainPatch() {
     stopAll()
     stopMainPatch()
+
+    // les boucles du mainPatch vivent aussi longtemps que le graphe : sans ça
+    // le timer ne s'arrêterait jamais et l'enveloppe continuerait de tourner
+    // sur des AudioParams qui ne sont plus connectés
+    for (const env of mainEnvs) {
+      if (env.loop) unregisterLoop(env.loop)
+      env.loop = null
+    }
+    mainEnvs = []
 
     if (!mainNodes) return
     for (const entry of mainNodes.values()) {
@@ -1560,6 +1729,14 @@ export function usePatchVoice(patch) {
         }
 
         for (const env of activeEnvs) {
+          // la boucle s'arrête AVANT le release : plus aucun ravitaillement ne
+          // doit pouvoir réécrire derrière la release qu'on pose ici
+          if (env.loop) {
+            unregisterLoop(env.loop)
+            env.loop = null
+          }
+          // ne reste que la fenêtre (~2 s) à nettoyer : quelques évènements,
+          // au lieu de la timeline entière d'un horizon de 180 s
           env.param.cancelScheduledValues(now)
           scheduleStages(env.param, env.release, ctx, 1, env.base)
           maxRelease = Math.max(maxRelease, getEnvelopeDuration(env.release))
