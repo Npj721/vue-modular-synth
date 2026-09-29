@@ -93,6 +93,10 @@ const closeJsonModal = () => {
 
 const { getModuleByType } = useModuleCatalog()
 
+// Clone profond par JSON : structuredClone refuse les proxys réactifs du
+// catalogue, alors que JSON.stringify traverse le proxy sans problème.
+const deepClone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)))
+
 // Quand module sélectionné change
 watch(
   () => props.module,
@@ -118,7 +122,11 @@ watch(
 
       // initialisation par INSTANCE
       if (mod.params[key] === undefined) {
-        mod.params[key] = defParam.default
+        // COPIE PROFONDE obligatoire : getModuleByType renvoie le singleton du
+        // catalogue, donc sans ce clone tous les modules démunis du paramètre
+        // partageraient le MÊME objet (pour une enveloppe : les mêmes stages,
+        // donc la même plage min/max).
+        mod.params[key] = deepClone(defParam.default)
       }
 
       // copie locale pour l’UI
@@ -699,9 +707,16 @@ onBeforeUnmount(stopViewer)
              type="checkbox"
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
-      <!-- Enveloppe : éditeur graphique -->
+      <!-- Enveloppe : éditeur graphique
+           :key = module.id → l'éditeur est RECRÉÉ à chaque changement de
+           module. Le panel de propriétés est lui-même réutilisé (PatchEditor
+           ne met pas de :key), donc sans cette clé le composant d'édition
+           survivait au changement d'enveloppe et conservait l'état interne
+           de la précédente — notamment la plage min/max, relue uniquement au
+           montage. -->
       <GraphEnvelopeEditor
         v-else-if="def.type === 'envelope'"
+        :key="module.id + ':' + key"
         :stages="params.stages"
         :min="def.min != null ? def.min : 0"
         :max="def.max != null ? def.max : 1"

@@ -700,6 +700,9 @@ function drawPhase(p) {
 watch(() => props.stages, () => syncFromProps(false), { deep: true })
 
 onMounted(() => {
+  // La plage min/max n'est relue qu'ici : c'est le seul point où le modèle est
+  // la source de vérité pour min/max. L'éditeur doit donc être une instance
+  // neuve par enveloppe — ModulePropertyPanel le garantit via :key.
   syncFromProps(true)
   refreshPresetList()
 })
