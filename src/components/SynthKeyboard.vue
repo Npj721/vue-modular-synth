@@ -19,8 +19,13 @@ const props = defineProps({
  * ========================= */
 const ready = ref(false)
 const activeNotes = ref(new Set())
-const heldByMouse = ref(null)
-const heldByTouch = ref(new Map())
+/* Nombre de sources (doigts, souris, clavier physique, MIDI) qui tiennent
+ * chaque note. La voix ne gère qu'une entrée par note (usePatchVoice.js:1781)
+ * : sans compteur, le relâchement d'un doigt coupait une note encore tenue par
+ * un autre. */
+const noteRefs = new Map()
+/* pointerId -> note tenue, ou null si le pointeur a glissé hors du clavier. */
+const pointerNotes = new Map()
 
 /* =========================
  * Piano layout (from example/synth.js)
@@ -97,98 +102,104 @@ async function initAudio() {
   ready.value = true
 }
 
+/* Un NOUVEAU patch (et non un simple réglage) : on relâche les notes tenues. */
 watch(
   () => props.patch,
-  () => {
-    if (!ready.value) return
-    activeNotes.value.clear()
-  },
-  { deep: true },
+  () => releaseAll(),
 )
 
 function noteOn(midi, velocity = 1) {
-  if (activeNotes.value.has(midi)) return
+  const n = noteRefs.get(midi) || 0
+  noteRefs.set(midi, n + 1)
+  if (n > 0) return // déjà tenue par une autre source
+  activeNotes.value.add(midi)
   if (!ready.value) {
     initAudio().then(() => {
-      getSharedVoice().noteOn(midi, velocity)
-      activeNotes.value.add(midi)
+      // le doigt a pu être relâché pendant l'initialisation
+      if (noteRefs.has(midi)) getSharedVoice().noteOn(midi, velocity)
     })
     return
   }
   getSharedVoice().noteOn(midi, velocity)
-  activeNotes.value.add(midi)
 }
 
 function noteOff(midi) {
-  if (!ready.value || !activeNotes.value.has(midi)) return
-  getSharedVoice().noteOff(midi)
+  const n = noteRefs.get(midi) || 0
+  if (n === 0) return
+  if (n > 1) {
+    noteRefs.set(midi, n - 1)
+    return
+  }
+  noteRefs.delete(midi)
   activeNotes.value.delete(midi)
+  if (ready.value) getSharedVoice().noteOff(midi)
+}
+
+/** Relâche tout : perte de focus, onglet masqué, changement de patch. */
+function releaseAll() {
+  for (const midi of [...noteRefs.keys()]) noteOff(midi)
+  pointerNotes.clear()
+}
+
+function onVisibilityChange() {
+  if (document.hidden) releaseAll()
 }
 
 /* =========================
- * Mouse interaction
- * ========================= */
-function onKeyMouseDown(midi, e) {
+ * Souris / tactile / stylet
+ * =========================
+ * Les Pointer Events unifient les trois : chaque doigt a son propre
+ * pointerId, donc plus besoin de trier plusieurs contacts à l'intérieur d'un
+ * seul handler (c'était le défaut de l'ancienne approche à base de
+ * e.touches[0] : seul le premier doigt était suivi, et un doigt relâché
+ * libérait la note du doigt restant). */
+
+/** Note sous le pointeur, ou null si le pointeur n'est pas sur une touche. */
+function midiAtPoint(x, y) {
+  const el = document.elementFromPoint(x, y)
+  const keyEl = el?.closest?.("[data-midi]")
+  return keyEl ? parseInt(keyEl.dataset.midi, 10) : null
+}
+
+function onKeyPointerDown(midi, e) {
+  if (e.pointerType === "mouse" && e.button !== 0) return
   e.preventDefault()
-  heldByMouse.value = midi
+  pointerNotes.set(e.pointerId, midi)
+  /* La capture attache le flux d'événements de CE doigt à la touche d'origine :
+   * il continue donc d'être suivi même en glissant hors de la touche, et son
+   * pointerup est garanti même si le doigt quitte le clavier. */
+  e.currentTarget.setPointerCapture?.(e.pointerId)
   noteOn(midi)
 }
 
-function onMouseUp() {
-  if (heldByMouse.value != null) {
-    noteOff(heldByMouse.value)
-    heldByMouse.value = null
-  }
+function onKeyPointerMove(midi, e) {
+  // un pointeur qui n'appuie sur rien (simple survol souris) est ignoré
+  if (!pointerNotes.has(e.pointerId)) return
+  const prev = pointerNotes.get(e.pointerId)
+  const next = midiAtPoint(e.clientX, e.clientY)
+  if (next === prev) return
+  if (prev != null) noteOff(prev)
+  pointerNotes.set(e.pointerId, next)
+  if (next != null) noteOn(next)
 }
 
-function onKeyboardPointerLeave() {
-  if (heldByMouse.value != null) {
-    noteOff(heldByMouse.value)
-    heldByMouse.value = null
-  }
-}
-
-/* =========================
- * Touch interaction
- * ========================= */
-function getMidiFromEvent(e) {
-  const touch = e.touches?.[0] || e.changedTouches?.[0]
-  if (!touch) return null
-  const el = document.elementFromPoint(touch.clientX, touch.clientY)
-  if (!el) return null
-  const keyEl = el.closest("[data-midi]")
-  return keyEl ? parseInt(keyEl.dataset.midi) : null
-}
-
-function onTouchStart(e) {
-  const midi = getMidiFromEvent(e)
-  if (midi == null) return
-  const id = e.touches[0].identifier
-  heldByTouch.value.set(id, midi)
-  noteOn(midi)
-}
-
-function onTouchMove(e) {
-  e.preventDefault()
-  const touch = e.touches[0]
-  const id = touch.identifier
-  const el = document.elementFromPoint(touch.clientX, touch.clientY)
-  const keyEl = el?.closest("[data-midi]")
-  const newMidi = keyEl ? parseInt(keyEl.dataset.midi) : null
-  const prevMidi = heldByTouch.value.get(id)
-  if (newMidi !== prevMidi) {
-    if (prevMidi != null) noteOff(prevMidi)
-    if (newMidi != null) noteOn(newMidi)
-    if (newMidi != null) heldByTouch.value.set(id, newMidi)
-    else heldByTouch.value.delete(id)
-  }
-}
-
-function onTouchEnd(e) {
-  const id = e.touches[0]?.identifier
-  const midi = heldByTouch.value.get(id)
+function releasePointer(pointerId) {
+  if (!pointerNotes.has(pointerId)) return
+  const midi = pointerNotes.get(pointerId)
   if (midi != null) noteOff(midi)
-  heldByTouch.value.delete(id)
+  pointerNotes.delete(pointerId)
+}
+
+function onKeyPointerUp(e) {
+  releasePointer(e.pointerId)
+  e.currentTarget.releasePointerCapture?.(e.pointerId)
+}
+
+/* Filet de sécurité : si un pointerup atterrit ailleurs que sur la touche
+ * (capture refusée, doigt sorti de la fenêtre…), la note est malgré tout
+ * relâchée au niveau de la fenêtre. */
+function onWindowPointerUp(e) {
+  releasePointer(e.pointerId)
 }
 
 /* =========================
@@ -210,7 +221,10 @@ let unregisterMidi = null
 onMounted(() => {
   window.addEventListener("keydown", handleKeyDown)
   window.addEventListener("keyup", handleKeyUp)
-  window.addEventListener("mouseup", onMouseUp)
+  window.addEventListener("pointerup", onWindowPointerUp)
+  window.addEventListener("pointercancel", onWindowPointerUp)
+  window.addEventListener("blur", releaseAll)
+  document.addEventListener("visibilitychange", onVisibilityChange)
   unregisterMidi = registerMidiNoteHandler((msg) => {
     if (msg.type === "noteOn") noteOn(msg.note, msg.velocity ?? 1)
     else if (msg.type === "noteOff") noteOff(msg.note)
@@ -220,8 +234,12 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown)
   window.removeEventListener("keyup", handleKeyUp)
-  window.removeEventListener("mouseup", onMouseUp)
+  window.removeEventListener("pointerup", onWindowPointerUp)
+  window.removeEventListener("pointercancel", onWindowPointerUp)
+  window.removeEventListener("blur", releaseAll)
+  document.removeEventListener("visibilitychange", onVisibilityChange)
   if (unregisterMidi) unregisterMidi()
+  releaseAll()
   getSharedVoice()?.stopAll()
 })
 </script>
@@ -231,11 +249,6 @@ onUnmounted(() => {
     <div
       class="piano"
       :style="{ '--num-white-keys': numOctaves * 7 }"
-      @touchstart="onTouchStart"
-      @touchmove="onTouchMove"
-      @touchend="onTouchEnd"
-      @touchcancel="onTouchEnd"
-      @pointerleave="onKeyboardPointerLeave"
     >
       <div
         v-for="key in pianoKeys"
@@ -253,8 +266,11 @@ onUnmounted(() => {
               }
             : {}
         "
-        @mousedown="onKeyMouseDown(key.midi, $event)"
-        @mouseenter="(e) => { if (heldByMouse != null) { noteOff(heldByMouse); heldByMouse = key.midi; noteOn(key.midi) } }"
+        @pointerdown="onKeyPointerDown(key.midi, $event)"
+        @pointermove="onKeyPointerMove(key.midi, $event)"
+        @pointerup="onKeyPointerUp"
+        @pointercancel="onKeyPointerUp"
+        @lostpointercapture="onKeyPointerUp"
       >
         <span class="key-note">{{ key.note }}</span>
         <span v-if="keyBindings[key.midi]" class="key-binding">{{
@@ -285,6 +301,9 @@ onUnmounted(() => {
 .piano-key {
   cursor: pointer;
   box-sizing: border-box;
+  /* indispensable pour que les glissements de doigts ne deviennent pas des
+   * défilements de page (et pour que le zoom double-tap n'interfère pas) */
+  touch-action: none;
 }
 
 .piano-key.white {
