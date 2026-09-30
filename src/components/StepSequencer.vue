@@ -108,7 +108,7 @@ watch(
     if (!ready.value) return
     synth.value.stopAll()
     await nextTick()
-    synth.value.rebuildMainPatch()
+    await synth.value.rebuildMainPatch()
   },
   { deep: true }
 )

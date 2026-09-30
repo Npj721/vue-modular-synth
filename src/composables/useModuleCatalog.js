@@ -1,5 +1,19 @@
 // composables/useModuleCatalog.js
 import { reactive, readonly } from "vue";
+import {
+  getWorkletDefaults,
+} from "./useAudioWorklet.js";
+
+/* Le code et la config par défaut vivent dans useAudioWorklet.js (c'est lui
+ * qui empaquette le source en Blob) : on les récupère ici pour les insérer
+ * comme valeurs par défaut du descripteur `audioworklet`. */
+const { code: DEFAULT_WORKLET_CODE, options: DEFAULT_WORKLET_OPTIONS } =
+  getWorkletDefaults();
+
+// Ports de modulation exposés par le module AudioWorklet. Volontairement
+// fixes et nommés : c'est ce qui permet à `wireConnection` de les traiter
+// comme les AudioParams de n'importe quel autre module.
+const WORKLET_PARAMS = ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"];
 
 /* =========================================================
  * CATALOG (singleton au niveau module)
@@ -904,6 +918,70 @@ const catalog = reactive({
       },
 
       params: {},
+    },
+
+    /* =========================
+     * AUDIOWORKLET
+     *
+     * Traitement maison : le DSP est écrit dans le textarea du panneau de
+     * propriétés (paramètre `code`) puis compilé à partir de cette chaîne
+     * (voir useAudioWorklet.js). Le module n'expose que in/out côté audio ;
+     * p1..p8 sont de vrais AudioParams, donc câblables comme n'importe quel
+     * autre port modulable du catalogue.
+     * ========================= */
+
+    audioworklet: {
+      label: "AudioWorklet",
+      color: "#E8A33D",
+      category: "code",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "audioIn",
+            multiple: true,
+          },
+          ...paramPorts(WORKLET_PARAMS),
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            // modulateur : la sortie peut alimenter un AudioParam comme
+            // celle de `gain` (filtrage audio-rate, etc.)
+            role: "modulator",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        code: {
+          type: "code",
+          default: DEFAULT_WORKLET_CODE,
+          rows: 18,
+        },
+        rate: {
+          type: "enum",
+          values: ["a-rate", "k-rate"],
+          default: "a-rate",
+        },
+        channels: {
+          type: "enum",
+          values: [1, 2],
+          default: 1,
+        },
+        options: {
+          type: "json",
+          default: DEFAULT_WORKLET_OPTIONS,
+        },
+        ...Object.fromEntries(WORKLET_PARAMS.map((n) => [n, num(-10, 10, 0.001, 0)])),
+      },
     },
 
     input: {

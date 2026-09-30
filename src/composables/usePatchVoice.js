@@ -2,12 +2,21 @@
 import { ref } from "vue"
 import { useSuperModules } from "./useSuperModules.js"
 import { getAudioBuffer } from "./useAudioBufferCache.js"
+import {
+  peekWorklet,
+  preloadGraphWorklets,
+  WORKLET_PARAM_NAMES,
+} from "./useAudioWorklet.js"
 
 /* =========================================================
  * Utils
  * ========================================================= */
 
 const EPS = 0.0001
+
+/* WORKLET_PARAM_NAMES (p1..p8) vient de useAudioWorklet.js, seul endroit où
+ * ils sont déclarés : c'est lui qui les injecte comme descripteurs dans le
+ * code compilé. Le DSP écrit par l'utilisateur les lit via `parameters.pN`. */
 
 /* Enveloppes loopables : le sustain infini est construit AU FUR ET À MESURE.
  *
@@ -69,6 +78,54 @@ const safeStop = (node, t) => {
 
 const safeDisconnect = (node) => {
   try { node.disconnect() } catch {}
+}
+
+/* Repli du module `audioworklet` : un simple GainNode à gain 1.
+ *
+ * Un AudioWorklet ne peut pas toujours être construit au moment où le graphe
+ * est assemblé (code pas encore compilé, code invalide, navigateur sans
+ * AudioWorklet). On ne casse JAMAIS le graphe pour autant : le signal traverse
+ * le module inchangé, et l'utilisateur voit l'avertissement en console. */
+const makePassthrough = (ctx, now) => {
+  const g = ctx.createGain()
+  g.gain.setValueAtTime(1, now)
+  return g
+}
+
+// Un seul avertissement par code : le graphe voix est reconstruit à chaque
+// note, donc un module au repos spammerait la console indéfiniment.
+const warnedWorklets = new Set()
+const warnWorkletOnce = (code, reason) => {
+  const key = `${code}::${reason}`
+  if (warnedWorklets.has(key)) return
+  warnedWorklets.add(key)
+  console.warn("[audioworklet] module inactif :", reason)
+}
+
+/* Construit l'AudioWorkletNode à partir des params du module.
+ * Le nom du processor vient du registre (useAudioWorklet.js) : il n'est
+ * construit que si le code a déjà été compilé avec succès.
+ *
+ * ATTENTION : `parameterDescriptors` n'est PAS une option d'AudioWorkletNode.
+ * Ne le passer ici est sans effet — la clé est inconnue du dictionnaire
+ * AudioWorkletNodeOptions et silencieusement ignorée, ce qui laisse
+ * `node.parameters` vide. Les descripteurs de p1..p8 sont déclarés par le
+ * processor lui-même, via `super({ parameterDescriptors })` (voir
+ * useAudioWorklet.js). */
+function createWorkletNode(ctx, name, p) {
+  let processorOptions = {}
+  try {
+    processorOptions = JSON.parse(p.options ?? "{}") ?? {}
+  } catch (e) {
+    console.warn("[audioworklet] options JSON invalide :", e?.message ?? e)
+  }
+
+  return new globalThis.AudioWorkletNode(ctx, name, {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [p.channels === 2 ? 2 : 1],
+    processorOptions,
+  })
 }
 
 const isNumericArray = (v) =>
@@ -892,11 +949,28 @@ export function usePatchVoice(patch) {
     masterAnalyser.connect(ctx.destination)
   }
 
+  /* Compile dans l'AudioContext tous les AudioWorklet référencés par le patch.
+   *
+   * Indispensable car instantiateModule est synchrone alors que
+   * audioWorklet.addModule() est asynchrone : le code doit être prêt AVANT
+   * l'assemblage du graphe, sans quoi le module bascule sur son repli
+   * pass-through. ensureWorklet est idempotent (registre indexé par source),
+   * donc un code déjà compilé ne coûte qu'un aller-retour de promesse. */
+  async function preloadWorklets() {
+    const ctx = audioCtx.value
+    if (!ctx?.audioWorklet) return
+    const patch = getPatch()
+    await preloadGraphWorklets(ctx, patch?.mainPatch)
+    await preloadGraphWorklets(ctx, patch?.voicePatch)
+  }
+
   async function init() {
     // les super-modules persistent dans IndexedDB : on attend leur chargement
     // avant de construire le graphe (un patch peut y faire référence).
     await useSuperModules().ready
     await ensureContext()
+    // idem pour le code des AudioWorklets (voir preloadWorklets)
+    await preloadWorklets()
     if (!mainNodes) {
       buildMainPatch()
     }
@@ -1264,6 +1338,61 @@ export function usePatchVoice(patch) {
       case "destination": {
         if (!o.destinationNode) return null
         return { node: o.destinationNode, params: {}, bases: {} }
+      }
+
+      case "audioworklet": {
+        // Le code a été compilé en amont (preloadWorklets, appelé par init() et
+        // rebuildMainPatch()). Si ce n'est pas le cas — ou si le code est
+        // invalide — on laisse le signal traverser tel quel plutôt que de
+        // casser le graphe.
+        const rec = peekWorklet(ctx, p.code, p.rate)
+        if (!rec || rec.status !== "ok") {
+          // le graphe voix est reconstruit à chaque note : sans ce dédoublonnage
+          // le même message s'installerait à chaque note jouée
+          warnWorkletOnce(
+            p.code,
+            rec?.error ?? "code non compilé (en attente de compilation)"
+          )
+          return { node: makePassthrough(ctx, now), params: {}, bases: {} }
+        }
+
+        let node
+        try {
+          node = createWorkletNode(ctx, rec.name, p)
+        } catch (e) {
+          console.warn("[audioworklet] création impossible :", e?.message ?? e)
+          return { node: makePassthrough(ctx, now), params: {}, bases: {} }
+        }
+
+        const params = {}
+        const bases = {}
+        let missing = 0
+        for (const n of WORKLET_PARAM_NAMES) {
+          const ap = node.parameters.get(n)
+          const v = p[n] ?? 0
+          // Un AudioParam absent ne doit jamais faire tomber la construction
+          // du graphe : on l'ignore et on garde le son.
+          if (!ap) {
+            missing++
+            continue
+          }
+          ap.setValueAtTime(v, now)
+          params[n] = ap
+          bases[n] = v
+        }
+        if (missing) {
+          // Cause quasi certaine : le code déclare un constructeur qui appelle
+          // `super()` sans transmettre `options`, ce qui efface les
+          // descripteurs injectés (cf. useAudioWorklet.js).
+          warnWorkletOnce(
+            p.code,
+            `${missing}/${WORKLET_PARAM_NAMES.length} paramètres p1..p8 absents. ` +
+              "Si votre classe déclare un constructeur, transmettez les options : " +
+              "constructor(options) { super(options) }"
+          )
+        }
+
+        return { node, params, bases, worklet: { name: rec.name } }
       }
 
       case "envelope":
@@ -1649,7 +1778,25 @@ export function usePatchVoice(patch) {
     mainInputNode = null
   }
 
+  // Le watcher deep de StepSequencer déclenche un rebuild par mutation du
+  // patch : en modifier un revient à en enfiler plusieurs en rafale. On les
+  // sérialise, sinon deux reconstructions concurrentes se marcheraient dessus
+  // (teardown croisé, mainNodes/mainStarted désynchronisés).
+  let rebuildChain = Promise.resolve()
+
   function rebuildMainPatch() {
+    const run = rebuildChain.then(
+      () => doRebuildMainPatch(),
+      () => doRebuildMainPatch(),
+    )
+    rebuildChain = run.catch(() => {})
+    return run
+  }
+
+  async function doRebuildMainPatch() {
+    // on compile d'abord, sans rien démonter : le son continue de jouer
+    // pendant le addModule (le repli pass-through prendrait le relais sinon).
+    await preloadWorklets()
     teardownMainPatch()
     buildMainPatch()
     startMainPatch()

@@ -75,7 +75,7 @@ export async function ensureSharedPatchBuffer(key) {
   // le fichier est utilisé par le patch : re-instantier pour l'appliquer
   if (patchUsesBuffer(sharedPatch, key)) {
     v.stopAll()
-    v.rebuildMainPatch()
+    await v.rebuildMainPatch()
   }
 }
 
@@ -99,9 +99,9 @@ export function setSharedPatch(patch) {
     // les super-modules (persistés en IndexedDB) doivent être chargés avant
     // de reconstruire le graphe, sinon leurs modules seraient ignorés.
     const { ready } = useSuperModules()
-    Promise.resolve(ready).then(() => {
+    Promise.resolve(ready).then(async () => {
       voice.stopAll()
-      voice.rebuildMainPatch()
+      await voice.rebuildMainPatch()
       voice.setPatch(getPatch)
     })
   }

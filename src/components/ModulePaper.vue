@@ -90,6 +90,7 @@ const CATEGORY_LABELS = {
   output: 'I/O',
   interface: 'Interface',
   super: 'Super Modules',
+  code: 'Code',
 };
 
 const menuGroups = computed(() => {

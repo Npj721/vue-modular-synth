@@ -161,6 +161,87 @@ Tous les filtres exposent `frequency` (20…20 000 Hz, défaut 1 000) et `Q` (0.
 | **Input** | Point d'entrée global des voix dans le mainPatch (singleton) |
 | **Destination** | Sortie vers l'analyser et les haut-parleurs (singleton) |
 
+### Code
+
+| Module | Description | Entrée | Sortie | Paramètres |
+|---|---|---|---|---|
+| **AudioWorklet** | Traitement DSP maison : le code du `AudioWorkletProcessor` s'écrit dans un `<textarea>` du panneau de propriétés, est compilé depuis cette chaîne de caractères et enveloppé dans un `AudioWorkletNode` | `in` (audio), `p1`…`p8` (params modulables) | `out` (audio) | `code` (source JS), `rate` a-rate/k-rate, `channels` 1/2, `options` (JSON), `p1`…`p8` −10…+10 |
+
+#### Écrire le DSP
+
+Le code s'écrit comme un `AudioWorklet` classique. Le nom passé à `registerProcessor` est
+**ignoré** : le moteur masque cette fonction et enregistre à la place votre classe sous un nom unique
+(Web Audio refuse d'enregistrer deux fois le même nom dans un contexte, et deux modules peuvent
+utiliser le même nom lisible). N'importe quelle valeur fonctionne, y compris calculée :
+
+```js
+class Tremolo extends AudioWorkletProcessor {
+  // NE PAS écrire `super()` seul : les descripteurs de p1..p8 sont injectés par
+  // le moteur dans les options du constructeur (voir plus bas).
+  constructor(options) {
+    super(options)
+    this.rate = options.processorOptions?.params?.rate ?? 5
+    this.phase = 0
+  }
+  process(inputs, outputs, parameters) {
+    const inp = inputs[0] || []
+    const out = outputs[0] || []
+    const depth = awParam(parameters.p1, 0)
+    this.phase += this.rate / sampleRate
+    const g = 1 - depth * 0.5 * (1 - Math.cos(2 * Math.PI * this.phase))
+    for (let ch = 0; ch < out.length; ch++) {
+      const src = inp[ch] ?? inp[0]
+      if (src) for (let i = 0; i < out[ch].length; i++) out[ch][i] = (src[i] || 0) * g
+      else out[ch].fill(0)
+    }
+    return true
+  }
+}
+registerProcessor("tremolo", Tremolo)
+```
+
+Le plus simple est de **ne pas déclarer de constructeur** : le constructeur implicite d'une classe
+dérivée transmet tout à `super()` et les paramètres sont disponibles automatiquement.
+
+Disposez en plus du standard :
+
+| Symbole | Rôle |
+|---|---|
+| `awParam(parameters.pN, i)` | lit un AudioParam `a-rate` (`Float32Array`) ou `k-rate` (`Number`) indifféremment — helper injecté par le moteur |
+| `p1`…`p8` | paramètres modulables : une enveloppe, un `gain`, une `constant` se câblent dessus comme sur n'importe quel autre module |
+| `options.processorOptions` | contenu JSON du champ `options` du panneau (configuration statique : coefficients, mixages…) |
+
+> **Si vous déclarez un constructeur, écrivez `super(options)`.** `p1`…`p8` sont déclarés par le
+> processor via `super({ parameterDescriptors })` — Web Audio ne connaît cette option que sur
+> `AudioWorkletProcessor`, et un `super()` sans argument efface la déclaration. Le cas le plus
+> fréquent est le constructeur absent ; un `super()` à vide n'y fait pas de mal. Si les paramètres
+> sont absents malgré tout, un avertissement le dit dans la console et le son passe quand même, les
+> paramètres restent simplement inertes.
+
+#### Quand le code est compilé
+
+Le code est compilé au **chargement du patch**, jamais en cours de lecture : on écrit le code,
+on enregistre, on rejoue. Un module du voice patch s'entend donc **à la note suivante** (le graphe
+voix est reconstruit à chaque note) ; un module du main patch prend effet à la reconstruction du
+main patch, c'est-à-dire au rechargement du patch ou à toute action qui le reconstruit — comme
+n'importe quel autre paramètre.
+
+#### Contraintes
+
+- **Un seul fichier** : pas d'`import` ES dans le code (un `import` depuis une URL `blob:` n'est
+  pas résolvable ici).
+- **Pas de `console.log`** visible : aucun `console` dans le `AudioWorkletGlobalScope`.
+- **CSP** : si l'hébergement impose une CSP, `script-src` doit autoriser `blob:` sinon
+  `addModule()` est bloqué.
+- **Le code s'exécute** : un patch `.json` importé d'une source tierce déclare et exécute un
+  processor.
+- **8 paramètres maximum** par module.
+- **`rate` figé à la compilation** : il est écrit dans le blob, donc changer `rate` recompile le
+  code (a-rate et k-rate sont deux processeurs distincts).
+- Un code invalide (erreur de syntaxe, aucun `registerProcessor`) ou un navigateur sans AudioWorklet
+  ne casse jamais le graphe : le module laisse passer le signal inchangé et l'avertissement va dans
+  la console du navigateur.
+
 ---
 
 ## Système de modulation

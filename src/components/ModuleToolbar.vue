@@ -28,6 +28,7 @@ const CATEGORY_LABELS = {
   output: 'I/O',
   interface: 'Interface',
   super: 'Super Modules',
+  code: 'Code',
 }
 
 // Modules groupés par catégorie

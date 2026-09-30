@@ -58,6 +58,59 @@ const jsonDraft = ref("")
 const jsonDraftStatus = ref({ pending: false, ok: false, message: "" })
 let jsonDraftTimer = 0
 
+/* =========================================================
+ * CHAMP CODE (module AudioWorklet)
+ *
+ * Le textarea est un DRAFT local : le commit vers le patch est différé
+ * (~500 ms après la dernière frappe) pour ne pas recompiler l'AudioWorklet
+ * ni reconstruire le main patch à chaque caractère. Aucune notion de
+ * changement "en direct" pendant la lecture : le code s'applique au prochain
+ * chargement du patch / à la note suivante.
+ * ========================================================= */
+
+const CODE_COMMIT_MS = 500
+
+const codeDrafts = reactive({})   // key -> texte en cours de saisie
+const codeTimers = {}              // key -> timer de commit
+
+const codeValue = (key) => codeDrafts[key] ?? params[key] ?? ""
+
+const onCodeInput = (key, e) => {
+  codeDrafts[key] = e.target.value
+  clearTimeout(codeTimers[key])
+  codeTimers[key] = setTimeout(() => commitCode(key), CODE_COMMIT_MS)
+}
+
+// Ctrl+Entrée (ou la perte de focus) valide immédiatement
+const commitCode = (key) => {
+  clearTimeout(codeTimers[key])
+  codeTimers[key] = undefined
+  if (codeDrafts[key] === undefined) return   // rien saisi : rien à commiter
+  emitChange(key, codeDrafts[key])
+}
+
+const onCodeKeydown = (key, e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    commitCode(key)
+  }
+}
+
+const resetCode = (key) => {
+  clearTimeout(codeTimers[key])
+  codeTimers[key] = undefined
+  const def = paramDefs[key]
+  const value = def?.default ?? ""
+  codeDrafts[key] = value
+  emitChange(key, value)
+}
+
+// le patch a changé ailleurs (chargement, annuler) : le draft suit
+const resetCodeDraft = () => {
+  Object.keys(codeTimers).forEach((k) => clearTimeout(codeTimers[k]))
+  Object.keys(codeDrafts).forEach((k) => delete codeDrafts[k])
+}
+
 const openJsonModal = (key) => {
   jsonModalKey.value = key
   jsonDraft.value = params[key] ?? ""
@@ -107,6 +160,7 @@ watch(
     Object.keys(jsonResults).forEach(k => delete jsonResults[k])
     Object.keys(jsonValidating).forEach(k => delete jsonValidating[k])
     Object.keys(jsonTimers).forEach(k => clearTimeout(jsonTimers[k]))
+    resetCodeDraft()
     closeJsonModal()
 
     if (!mod) return
@@ -608,7 +662,10 @@ watch(
   }
 )
 
-onBeforeUnmount(stopViewer)
+onBeforeUnmount(() => {
+  stopViewer()
+  resetCodeDraft()
+})
 </script>
 
 <template>
@@ -642,7 +699,7 @@ onBeforeUnmount(stopViewer)
       </div>
     </div>
 
-    <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' || def.type === 'json' }">
+    <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' || def.type === 'json', 'param-code': def.type === 'code' }">
       <label>{{ key }}</label>  
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
@@ -666,6 +723,30 @@ onBeforeUnmount(stopViewer)
              type="text"
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
+
+      <!-- Code DSP (module AudioWorklet) : textarea en ligne, le commit vers
+           le patch est différé de 500 ms (cf. codeDrafts plus haut) -->
+      <template v-else-if="def.type === 'code'">
+        <textarea
+          class="code-editor"
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          :rows="def.rows || 16"
+          :value="codeValue(key)"
+          @input="onCodeInput(key, $event)"
+          @keydown="onCodeKeydown(key, $event)"
+          @blur="commitCode(key)"
+        ></textarea>
+        <div class="code-actions">
+          <button type="button" @click="commitCode(key)">Valider (Ctrl+Entrée)</button>
+          <button type="button" @click="resetCode(key)">Code par défaut</button>
+          <span class="hint">
+            compilé au chargement du patch — rejouez une note ou rechargez le patch
+          </span>
+        </div>
+      </template>
 
       <!-- JSON (ex: wavetable) : bouton + résumé ici, le textarea géant n'est
            rendu QUE dans la modale (jamais en dur dans le panneau) -->
@@ -1031,6 +1112,60 @@ onBeforeUnmount(stopViewer)
 }
 .param-envelope > label {
   align-self: flex-start;
+}
+
+.param-code {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  margin-bottom: 14px;
+}
+.param-code > label {
+  align-self: flex-start;
+}
+
+.code-editor {
+  width: 100%;
+  min-height: 220px;
+  padding: 8px;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  tab-size: 2;
+  resize: vertical;
+  border: 1px solid #c9c9c9;
+  border-radius: 3px;
+  background: #fbfbf8;
+  color: #222;
+}
+.code-editor:focus {
+  outline: none;
+  border-color: #e8a33d;
+  background: #fff;
+}
+
+.code-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.code-actions button {
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid #c9c9c9;
+  border-radius: 3px;
+  background: #fff;
+}
+.code-actions button:hover {
+  background: #f1f1f1;
+}
+.code-actions .hint {
+  font-size: 11px;
+  color: #777;
 }
 
 .param-loop {
