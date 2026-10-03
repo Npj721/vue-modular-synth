@@ -99,10 +99,12 @@ class StubContext {
         if (globalThis.__stubAddModuleThrows) {
           throw new Error("SyntaxError: Unexpected token '}'");
         }
-        // Évaluation RÉELLE du blob. Le wrapper injecté est du JS ordinaire,
-        // on peut donc l'exécuter avec un AudioWorkletProcessor simulé et
-        // vérifier ce qu'il déclare vraiment : le nom imposé, et les
-        // descripteurs p1..p8 passés à super().
+        // Évaluation RÉELLE du blob dans un contexte global dédié (vm), pas
+        // un `new Function` : le code écrit `class X extends
+        // AudioWorkletProcessor`, et le préambule REMPLACE ce global par la
+        // classe de base qui injecte les descripteurs. Avec un simple paramètre
+        // de fonction, l'utilisateur verrait l'ancien global et la correction
+        // ne serait pas exercée.
         const declared = [];
         const FakeProcessor = class {
           constructor(options) {
@@ -111,9 +113,10 @@ class StubContext {
           }
         };
         const fakeGlobal = {
+          AudioWorkletProcessor: FakeProcessor,
           registerProcessor: (n, K) => declared.push({ name: n, Klass: K }),
         };
-        new Function("globalThis", "AudioWorkletProcessor", src)(fakeGlobal, FakeProcessor);
+        vm.runInNewContext(src, fakeGlobal);
         if (!declared.length) throw new Error("SyntaxError: aucun registerProcessor");
         globalThis.__stubProcessors.get(this).set(declared[0].name, declared[0].Klass);
         this.audioWorklet.declared = this.audioWorklet.declared ?? [];
@@ -152,6 +155,23 @@ class StubContext {
     this.created.push(n);
     return n;
   }
+  // Le module "compressor" fait partie du catalogue : sans ce stub, tout patch
+  // réel qui l'utilise échoue sur `createDynamicsCompressor is not a function`.
+  createDynamicsCompressor() {
+    const n = new StubNode(this, "compressor");
+    for (const [k, d] of Object.entries({
+      threshold: -24,
+      knee: 30,
+      ratio: 12,
+      attack: 0.003,
+      release: 0.25,
+    })) {
+      n[k] = new StubParam(d);
+    }
+    n.reduction = -0;
+    this.created.push(n);
+    return n;
+  }
 }
 
 globalThis.AudioContext = StubContext;
@@ -183,11 +203,14 @@ globalThis.URL.revokeObjectURL = (url) => {
 };
 
 import { toRaw } from "vue";
+import vm from "node:vm";
 import { usePatchVoice } from "../src/composables/usePatchVoice.js";
 import {
   ensureWorklet,
   peekWorklet,
   getWorkletDefaults,
+  parseRanges,
+  clampParamValue,
   WORKLET_PARAM_NAMES,
 } from "../src/composables/useAudioWorklet.js";
 import { useModuleCatalog } from "../src/composables/useModuleCatalog.js";
@@ -267,7 +290,7 @@ globalThis.URL.createObjectURL = (blob) => {
 
 {
   // rate k-rate : figé dans les descripteurs du blob, donc compilation distincte
-  krate = await ensureWorklet(ctxA, validCode, "k-rate");
+  krate = await ensureWorklet(ctxA, validCode, { rate: "k-rate" });
   check("k-rate : processor distinct du a-rate",
     krate.name !== peekWorklet(ctxA, validCode).name);
   check("k-rate : deuxième compilation du même code",
@@ -282,6 +305,58 @@ globalThis.URL.createObjectURL = (blob) => {
 }
 
 {
+  // Plages de valeurs déclarées dans options.ranges. C'est LA cause rapportée :
+  // un AudioParam est borné par le navigateur, donc une plage figée à ±10 rend
+  // inexprimables les profondeurs de bits (1..16) ou les fréquences en Hz, et
+  // une modulation à 12000 se retrouve épinglée à 10 en permanence.
+  check("parseRanges : [min, max]",
+    parseRanges('{"ranges":{"p1":[1,16]}}').p1?.minValue === 1 &&
+    parseRanges('{"ranges":{"p1":[1,16]}}').p1?.maxValue === 16);
+  check("parseRanges : nombre = plage symétrique",
+    parseRanges('{"ranges":{"p2":0.5}}').p2?.minValue === -0.5 &&
+    parseRanges('{"ranges":{"p2":0.5}}').p2?.maxValue === 0.5);
+  check("parseRanges : JSON invalide -> plages par défaut",
+    Object.keys(parseRanges("{pas du json")).length === 0);
+  check("parseRanges : pas de ranges -> vide",
+    Object.keys(parseRanges('{"params":{}}')).length === 0);
+  check("parseRanges : plage incohérente ignorée",
+    Object.keys(parseRanges('{"ranges":{"p1":[5,5],"p3":"x"}}')).length === 0);
+  check("clampParamValue borne dans la plage déclarée",
+    clampParamValue(parseRanges('{"ranges":{"p1":[1,16]}}'), "p1", 10000) === 16);
+  check("clampParamValue : hors plage basse",
+    clampParamValue(parseRanges('{"ranges":{"p1":[1,16]}}'), "p1", -3) === 1);
+  check("clampParamValue : sans plage, valeur inchangée",
+    clampParamValue({}, "p1", 10000) === 10000);
+}
+
+{
+  // le cas exact du bitcrusher : constant à 12000 sur un p2 dont la plage par
+  // défaut le plafonne à 10
+  const bitCode = `class Bitcrusher extends AudioWorkletProcessor {
+  process(inputs, outputs, parameters) {
+    return true
+  }
+}
+registerProcessor("bitcrusher", Bitcrusher)
+`;
+  const bitOpts = '{"params":{},"ranges":{"p1":[1,16],"p2":[100,20000]}}';
+  const rec = await ensureWorklet(ctxA, bitCode, { options: bitOpts });
+  check("plages : compilation ok", rec.status === "ok");
+  const bitProc = new (globalThis.__stubProcessors.get(ctxA).get(rec.name))({});
+  const d1 = bitProc.__parameterDescriptors.find((d) => d.name === "p1");
+  const d2 = bitProc.__parameterDescriptors.find((d) => d.name === "p2");
+  check("plages : p1 borné à 1..16", d1.minValue === 1 && d1.maxValue === 16);
+  check("plages : p2 borné à 100..20000", d2.minValue === 100 && d2.maxValue === 20000);
+  check("plages : les 6 autres restent en -10..10",
+    bitProc.__parameterDescriptors.find((d) => d.name === "p3").maxValue === 10);
+  check("plages : un code identique SANS ranges est un autre processor",
+    (await ensureWorklet(ctxA, bitCode)).name !== rec.name);
+  check("plages :.peekWorklet retrouve le bon processor selon options",
+    peekWorklet(ctxA, bitCode, { options: bitOpts })?.name === rec.name &&
+    peekWorklet(ctxA, bitCode)?.name !== rec.name);
+}
+
+{
   // idempotence : un 2e appel pour le même code ne recompile pas
   const before = globalThis.__stubAddModuleCalls.length;
   const rec = await ensureWorklet(ctxA, validCode);
@@ -292,15 +367,26 @@ globalThis.URL.createObjectURL = (blob) => {
   check("peekWorklet ignore un code inconnu",
     peekWorklet(ctxA, "jamais compile") === null);
   check("peekWorklet distingue a-rate et k-rate",
-    peekWorklet(ctxA, validCode, "k-rate")?.name === krate.name);
+    peekWorklet(ctxA, validCode, { rate: "k-rate" })?.name === krate.name);
   check("URL blob révoquée après compilation",
     __blobs.size === 0);
 }
 
 {
-  const other = await ensureWorklet(ctxA, otherCode);
-  check("deux codes différents -> deux processeurs",
-    other.name !== undefined && other.name !== peekWorklet(ctxA, validCode).name);
+  // Le nom doit dépendre du PRÉAMBULE, pas seulement du code de l'utilisateur :
+  // après une correction du moteur (rechargement à chaud), le registre mémoire
+  // est perdu et le même `aw_<hash>` serait déjà pris dans l'AudioContext, ce qui
+  // ferait rejeter registerProcessor. Ici on vérifie le cas observable : deux
+  // rates du même code donnent deux noms distincts, et le nom est bien dérivé du
+  // préambule complet.
+  const krate = await ensureWorklet(ctxA, validCode, { rate: "k-rate" });
+  check("deux rates du même code -> deux noms distincts",
+    krate.name !== peekWorklet(ctxA, validCode).name);
+  check("le nom change avec les plages du préambule",
+    (await ensureWorklet(ctxA, validCode, { options: '{"ranges":{"p1":[0,16]}}' })).name !==
+      peekWorklet(ctxA, validCode).name);
+  check("le nom est bien aw_<hash base36 du préambule+code>",
+    /^aw_[0-9a-z]{10,20}$/.test(peekWorklet(ctxA, validCode).name));
 }
 
 {
@@ -417,27 +503,30 @@ registerProcessor("ctor", Ctor)
 }
 
 {
-  // Régression du bug signalé : `super()` sans options efface les descripteurs
-  // injectés, node.parameters est vide, et parameters.get("p1") valait
-  // undefined -> TypeError qui faisait tomber TOUT le buildMainPatch (plus aucun
-  // son). Le module doit rester jouable, les params simplement inertes.
-  const p = patch();
-  p.mainPatch.modules[1].params.code = `class NoOpts extends AudioWorkletProcessor {
-  constructor() { super() }
+  // Une forme de constructeur ne doit PLUS jamais perdre les descripteurs :
+  // la classe de base injectée les repose au plus profond de la chaîne
+  // d'héritage, donc même `super()` à vide est sans effet.
+  for (const [label, ctor] of [
+    ["super(options)", "constructor(options) { super(options) }"],
+    ["super()", "constructor() { super() }"],
+    ["sans constructeur", ""],
+  ]) {
+    const p = patch();
+    p.mainPatch.modules[1].params.code = `class Ctor extends AudioWorkletProcessor {
+  ${ctor}
   process() { return true }
 }
-registerProcessor("noopts", NoOpts)
+registerProcessor("ctor", Ctor)
 `;
-  const synth = usePatchVoice(() => p);
-  let threw = null;
-  try { await synth.init(); } catch (e) { threw = e; }
-  check("descr. effacées : aucune exception", threw === null);
-  const node = globalThis.__stubWorkletNodes[globalThis.__stubWorkletNodes.length - 1];
-  check("descr. effacées : le nœud est quand même construit", !!node);
-  check("descr. effacées : aucun AudioParam (inertes, pas de crash)",
-    WORKLET_PARAM_NAMES.every((n) => node.parameters.get(n) === null));
-  check("descr. effacées : le son sort quand même",
-    synth.getAnalyser().connections.length > 0);
+    const synth = usePatchVoice(() => p);
+    let threw = null;
+    try { await synth.init(); } catch (e) { threw = e; }
+    const node = globalThis.__stubWorkletNodes[globalThis.__stubWorkletNodes.length - 1];
+    check(`constructeur « ${label} » : aucune exception`, threw === null);
+    check(`constructeur « ${label} » : p1..p8 déclarés`,
+      node?.descriptors.length === 8 &&
+      WORKLET_PARAM_NAMES.every((n) => !!node.parameters.get(n)));
+  }
 }
 
 {
@@ -500,6 +589,25 @@ registerProcessor("noopts", NoOpts)
   await synth.init();
   const node = globalThis.__stubWorkletNodes[globalThis.__stubWorkletNodes.length - 1];
   check("options JSON invalide : processorOptions = {}", !!node);
+}
+
+{
+  // le moteur borne la valeur initiale ET la base de modulation dans la plage
+  // déclarée : sinon la base mémorisée garderait une valeur que l'AudioParam ne
+  // peut pas rendre, et une modulation "relative" partirait de zéro.
+  const p = patch();
+  p.mainPatch.modules[1].params.options = '{"params":{},"ranges":{"p1":[1,16]}}';
+  p.mainPatch.modules[1].params.p1 = 0.5; // hors de 1..16
+  const synth = usePatchVoice(() => p);
+  await synth.init();
+  const node = globalThis.__stubWorkletNodes[globalThis.__stubWorkletNodes.length - 1];
+  check("moteur : p1 initialisé dans la plage (0.5 -> 1)",
+    node.parameters.get("p1").events.some((e) => e[0] === "set" && e[1] === 1));
+  check("moteur : descripteur p1 = 1..16",
+    node.descriptors.find((d) => d.name === "p1").maxValue === 16);
+  check("moteur : `ranges` retiré des processorOptions",
+    node.options.processorOptions.ranges === undefined &&
+    node.options.processorOptions.params !== undefined);
 }
 
 {

@@ -980,7 +980,16 @@ const catalog = reactive({
           type: "json",
           default: DEFAULT_WORKLET_OPTIONS,
         },
-        ...Object.fromEntries(WORKLET_PARAMS.map((n) => [n, num(-10, 10, 0.001, 0)])),
+        // p1 est le gain du code de départ : 0 = silence, 1 = bypass, >1 =
+        // amplification. Sa plage suit celle déclarée dans `options.ranges`
+        // (0..100), sinon l'AudioParam bornerait le knob à la valeur par
+        // défaut du navigateur.
+        ...Object.fromEntries(
+          WORKLET_PARAMS.map((n) => [
+            n,
+            n === "p1" ? num(0, 100, 0.001, 1) : num(-10, 10, 0.001, 0),
+          ]),
+        ),
       },
     },
 

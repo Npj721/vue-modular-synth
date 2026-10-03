@@ -5,6 +5,8 @@ import { getAudioBuffer } from "./useAudioBufferCache.js"
 import {
   peekWorklet,
   preloadGraphWorklets,
+  clampParamValue,
+  DEFAULT_PARAM_RANGE,
   WORKLET_PARAM_NAMES,
 } from "./useAudioWorklet.js"
 
@@ -108,24 +110,49 @@ const warnWorkletOnce = (code, reason) => {
  *
  * ATTENTION : `parameterDescriptors` n'est PAS une option d'AudioWorkletNode.
  * Ne le passer ici est sans effet — la clé est inconnue du dictionnaire
- * AudioWorkletNodeOptions et silencieusement ignorée, ce qui laisse
- * `node.parameters` vide. Les descripteurs de p1..p8 sont déclarés par le
- * processor lui-même, via `super({ parameterDescriptors })` (voir
- * useAudioWorklet.js). */
-function createWorkletNode(ctx, name, p) {
-  let processorOptions = {}
+ * AudioWorkletNodeOptions et silencieusement ignorée. Les descripteurs de p1..p8
+ * sont déclarés par le processor, via son getter STATIQUE
+ * `static get parameterDescriptors()` (voir useAudioWorklet.js) : c'est le seul
+ * canal que le navigateur lit pour construire les AudioParams, depuis le thread
+ * principal.
+ *
+ * `parameterData` est une autre chose : les valeurs INITIALES des AudioParams,
+ * pour le nœud. Ce n'est pas une liste positionnelle mais un objet indexé par
+ * nom de paramètre (`record<DOMString, double>`). Sans lui les AudioParams
+ * restent à leur defaultValue le temps que le moteur les programme. */
+function createWorkletNode(ctx, name, p, parameterData) {
+  let parsed = {}
   try {
-    processorOptions = JSON.parse(p.options ?? "{}") ?? {}
+    parsed = JSON.parse(p.options ?? "{}") ?? {}
   } catch (e) {
     console.warn("[audioworklet] options JSON invalide :", e?.message ?? e)
   }
+  // `ranges` est une directive pour le moteur (elle fige les descripteurs de
+  // p1..p8 dans le blob compilé), pas une configuration du DSP.
+  const { ranges: _ignored, ...processorOptions } =
+    typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
 
   return new globalThis.AudioWorkletNode(ctx, name, {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     outputChannelCount: [p.channels === 2 ? 2 : 1],
+    parameterData,
     processorOptions,
   })
+}
+
+/* Valeurs initiales de p1..p8, indexées par nom. `ranges` ne contient que les
+ * params déclarés dans options.ranges : les autres gardent la plage par défaut
+ * (±10), celle qui est réellement figée dans le descripteur. Une valeur hors
+ * plage serait bornée en silence par l'AudioParam — on la borne donc ici. */
+function parameterDataForWorklet(ranges, params) {
+  const descRanges = {}
+  const data = {}
+  for (const n of WORKLET_PARAM_NAMES) {
+    descRanges[n] = ranges?.[n] ?? DEFAULT_PARAM_RANGE
+    data[n] = clampParamValue(descRanges, n, params?.[n] ?? 0)
+  }
+  return data
 }
 
 const isNumericArray = (v) =>
@@ -1345,7 +1372,7 @@ export function usePatchVoice(patch) {
         // rebuildMainPatch()). Si ce n'est pas le cas — ou si le code est
         // invalide — on laisse le signal traverser tel quel plutôt que de
         // casser le graphe.
-        const rec = peekWorklet(ctx, p.code, p.rate)
+        const rec = peekWorklet(ctx, p.code, { rate: p.rate, options: p.options })
         if (!rec || rec.status !== "ok") {
           // le graphe voix est reconstruit à chaque note : sans ce dédoublonnage
           // le même message s'installerait à chaque note jouée
@@ -1358,7 +1385,7 @@ export function usePatchVoice(patch) {
 
         let node
         try {
-          node = createWorkletNode(ctx, rec.name, p)
+          node = createWorkletNode(ctx, rec.name, p, parameterDataForWorklet(rec.ranges, p))
         } catch (e) {
           console.warn("[audioworklet] création impossible :", e?.message ?? e)
           return { node: makePassthrough(ctx, now), params: {}, bases: {} }
@@ -1367,28 +1394,37 @@ export function usePatchVoice(patch) {
         const params = {}
         const bases = {}
         let missing = 0
+        // Les plages déclarées dans `options.ranges` bornent l'AudioParam côté
+        // navigateur. La base de modulation doit être bornée de la même façon,
+        // sinon elle garderait une valeur que l'AudioParam ne peut pas rendre
+        // (ex. une base à 10000 sur un paramètre plafonné à 10).
+        const ranges = rec.ranges
         for (const n of WORKLET_PARAM_NAMES) {
           const ap = node.parameters.get(n)
-          const v = p[n] ?? 0
           // Un AudioParam absent ne doit jamais faire tomber la construction
           // du graphe : on l'ignore et on garde le son.
           if (!ap) {
             missing++
             continue
           }
+          const v = clampParamValue(ranges, n, p[n] ?? 0)
           ap.setValueAtTime(v, now)
           params[n] = ap
           bases[n] = v
         }
         if (missing) {
-          // Cause quasi certaine : le code déclare un constructeur qui appelle
-          // `super()` sans transmettre `options`, ce qui efface les
-          // descripteurs injectés (cf. useAudioWorklet.js).
+          // Le processor compilé n'a déclaré AUCUN descripteur, donc
+          // node.parameters est vide. Avec le préambule actuel, la déclaration
+          // est posée au plus profond de la chaîne d'héritage : la seule façon
+          // d'en être privé est que le processor ait été compilé par une
+          // version antérieure du moteur, restée en mémoire dans ce contexte
+          // audio (rechargement de la page ou du contexte nécessaires).
           warnWorkletOnce(
             p.code,
-            `${missing}/${WORKLET_PARAM_NAMES.length} paramètres p1..p8 absents. ` +
-              "Si votre classe déclare un constructeur, transmettez les options : " +
-              "constructor(options) { super(options) }"
+            `${missing}/${WORKLET_PARAM_NAMES.length} paramètres p1..p8 absents : ` +
+              `le processor "${rec.name}" ne déclare aucun descripteur. S'il vient ` +
+              "d'une version antérieure, recharge la page (le code compilé n'est " +
+              "jamais déchargé d'un AudioContext)."
           )
         }
 

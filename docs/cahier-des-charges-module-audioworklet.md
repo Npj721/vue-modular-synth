@@ -91,7 +91,8 @@ Faits structurants à respecter :
    ```js
    class Tremolo extends AudioWorkletProcessor {
      constructor(options) {
-       super()
+        super()   // les p1..p8 sont poses par le preambule, cf. section 5.4
+
        this.rate = options.processorOptions?.params?.rate ?? 5
        this.phase = 0
      }
@@ -180,9 +181,12 @@ PRELUDE  +  <code utilisateur>  +  EPILOGUE
 const awParam = (v, i = 0) => (ArrayBuffer.isView(v) ? v[i] : v);
 ```
 
-`awParam(parameters.p1, i)` retourne `parameters.p1` si le paramètre est en `k-rate` (un `Number`),
-ou `parameters.p1[i]` s'il est en `a-rate` (un `Float32Array`). Sans ce helper l'utilisateur
-devrait deviner le mode et écrire deux branches.
+`awParam(this.parameters.p1, i)` retourne `this.parameters.p1` si le paramètre est en `k-rate` (un
+`Number`), ou `this.parameters.p1[i]` s'il est en `a-rate` (un `Float32Array`). Sans ce helper
+l'utilisateur devrait deviner le mode et écrire deux branches.
+
+> On lit la map via le **3ᵉ argument de `process()`**, jamais via le global `parameters` (qui n'est
+> pas exposé → `ReferenceError`) ni `this.parameters` (non fiable selon les navigateurs → `undefined`).
 
 **Masquage de `registerProcessor` (et non réécriture).** `registerProcessor()` lève
 `NotSupportedError` si le nom est déjà enregistré, et la création du nœud exige le nom exact. Le
@@ -202,32 +206,69 @@ const registerProcessor = (nom, Classe) => {
 - ✘ `const registerProcessor = …` dans le code de l'utilisateur → collision de déclaration,
   `SyntaxError` remonté tel quel par `addModule()` (et le module retombe sur son repli).
 
-**Déclaration de `p1..p8` — le point piégeux de l'API.** `parameterDescriptors` n'existe que sur le
-constructeur de `AudioWorkletProcessor`. Le passer à `new AudioWorkletNode()` est **silencieusement
-ignoré** (clé inconnue du dictionnaire `AudioWorkletNodeOptions`) et `node.parameters` reste vide :
-`node.parameters.get("p1")` renvoie alors `undefined`. Les descripteurs sont donc injectés par le
-wrapper, qui sous-classe la classe de l'utilisateur :
+**Déclaration de `p1..p8` — le point piégeux de l'API.** Elle se fait en **deux endroits
+indépendants**, tous deux obligatoires.
+
+1. `parameterDescriptors` n'existe pas dans `AudioWorkletNodeOptions` : le passer à `new
+   AudioWorkletNode()` est **silencieusement ignoré** et `node.parameters` reste vide
+   (`get("p1")` → `undefined`).
+
+2. Le passage par `super({ parameterDescriptors })` ne suffit pas non plus : le navigateur construit
+   les AudioParams du nœud à partir du **getter statique** `static get parameterDescriptors()` du
+   constructeur enregistré (cf. `AudioWorkletNode::initializeAudioParameters`, qui lit le registre
+   de descripteurs rempli à l'enregistrement). C'est le seul canal qui traverse la frontière entre
+   le thread principal et le worklet. Un DSP qui ne déclare ses descripteurs que par `super()` se
+   voit donc servir une map **vide** : `node.parameters` vide côté moteur, `parameters.p1`
+   `undefined` (et `this.parameters` `undefined`) côté DSP — sans lever la moindre erreur.
+
+D'où le préambule, qui pose le getter statique sur la classe de base injectée (hérité par la classe
+de l'utilisateur) **et** sur la classe effectivement enregistrée, plus une transmission par
+`options` pour les implémentations qui lisent le constructeur :
+
+```js
+class __awProcessor extends __awNativeProcessor {
+  static get parameterDescriptors() { return __awDescriptors; }
+  constructor(options) {
+    super(__awPending
+      ? Object.assign({}, options ?? {}, {
+          parameterDescriptors: __awPending,
+          parameterData: __awPending.map((d) => d.defaultValue),
+        })
+      : options);
+  }
+}
+try { globalThis.AudioWorkletProcessor = __awProcessor; } catch (e) {}
+```
+
+Et le wrapper enregistré :
 
 ```js
 __awNativeRegister(name, class extends Classe {
+  static get parameterDescriptors() { return __awDescriptors; }
   constructor(options) {
-    super(Object.assign({}, options, {
-      parameterDescriptors: PARAM_NAMES.map(n => ({
-        name: n, defaultValue: 0, minValue: -10, maxValue: 10,
-        automationRate: rate,            // "a-rate" | "k-rate"
-      })),
-    }));
+    const merged = Object.assign({}, options ?? {}, {
+      parameterDescriptors: __awDescriptors,
+      parameterData: __awDescriptors.map((d) => d.defaultValue),
+    });
+    __awPending = __awDescriptors;   // pour la base injectée ci-dessus
+    try { super(merged); } finally { __awPending = null; }
   }
 });
 ```
 
-Conséquence à documenter pour l'utilisateur : **s'il déclare un constructeur, il doit transmettre
-les options** (`constructor(options) { super(options) }`), sinon son `super()` à vide efface la
-déclaration. Le cas le plus fréquent (pas de constructeur) est couvert : le constructeur implicite
-d'une classe dérivée transmet tous les arguments à `super()`.
+Le `try/finally` autour de `super()` sert à ce qu'un `super()` à vide de l'utilisateur n'efface
+rien : la déclaration est reposée au moment où la chaîne d'héritage l'atteint, quel que soit le
+nombre de niveaux.
+
+**Effet** : `super(options)`, `super()` à vide et l'absence de constructeur donnent tous huit AudioParam.
+L'utilisateur n'a plus de contrainte sur la forme de son constructeur ; `super(options)` reste la
+forme recommandée parce que c'est elle qui expose `options.processorOptions` au code.
+
+Si `globalThis.AudioWorkletProcessor` n'est pas inscriptible, le repli est le seul wrapper : la
+déclaration passe alors par les options et redevient dépendante de `super(options)`.
 
 `rate` étant figé dans le blob, il fait partie de la clé du registre : le même code en `a-rate` et
-en `k-rate` donne deux processeurs distincts.
+en `k-rate` donne deux processeurs distincts. Idem pour les plages de `p1..p8` (voir §5.5).
 
 **Dispo dans le worklet** : `AudioWorkletProcessor`, `sampleRate`, `currentTime`, `currentFrame`,
 `awParam`, et les globals habituels.
@@ -253,22 +294,42 @@ statique (blocs de filtres, tables, mixages) sans passer par des AudioParams.
 ```js
 // Traitement maison : lisez le DSP dans ce textarea.
 // p1..p8 sont des AudioParams modulables depuis le graphe (rate : a-rate par défaut).
-// awParam(parameters.pN, i) lit un paramètre a-rate ou k-rate indifféremment.
+// awParam(parameters.pN, i) lit un paramètre a-rate ou k-rate indifféremment,
+// où `parameters` est le 3e argument de process() (jamais le global
+// "parameters", qui n'existe pas ; ni this.parameters, peu fiable).
 // options.processorOptions est le JSON du champ "options" du panneau.
-class Passthrough extends AudioWorkletProcessor {
-  process(inputs, outputs) {
+//
+// Code de départ : bypass avec un gain sur p1 (0 = silence, 1 = direct, >1 = gain).
+class BypassGain extends AudioWorkletProcessor {
+  constructor(options) {
+    super(options) // obligatoire : c'est par là que p1..p8 sont déclarés
+  }
+
+  process(inputs, outputs, parameters) {
     const inp = inputs[0] || []
     const out = outputs[0] || []
+    const params = parameters ?? this.parameters
+    const p1 = params.p1
     for (let ch = 0; ch < out.length; ch++) {
       const src = inp[ch] ?? inp[0]
-      if (src) out[ch].set(src)
-      else out[ch].fill(0)
+      const dst = out[ch]
+      if (!src || src.length === 0) {
+        dst.fill(0)
+        continue
+      }
+      for (let i = 0; i < dst.length; i++) {
+        dst[i] = p1 ? src[i] * awParam(p1, i) : src[i]
+      }
     }
     return true
   }
 }
-registerProcessor("audioworklet", Passthrough)
+registerProcessor("audioworklet", BypassGain)
 ```
+
+`options` par défaut : `{"ranges":{"p1":[0,100]},"params":{}}` — la plage de `p1` est donc
+bornée à `0..100` (l'AudioParam, pas le knob : le catalogue expose `p1` en `0..100` avec un
+défaut de `1`, les `p2..p8` restant en `−10..+10`).
 
 ### 5.4 Modulation — réponse à la question posée
 
@@ -292,7 +353,35 @@ Limite assumée : les 8 ports sont fixes et nommés. Un `p4` câblé alors que l
 `parameters.p4` ne coûte rien ; symétriquement un worklet qui a besoin de 12 paramètres ne peut pas
 les avoir → le contournement est d'agrandir la liste en `p1..pN`.
 
-### 5.5 Persistance
+### 5.5 Plages de valeur de `p1..p8`
+
+**Le piège à ne pas rater.** Un AudioParam est borné par le navigateur : `minValue`/`maxValue` ne
+sont pas décoratifs, toute valeur hors intervalle est **silencieusement ramenée** dedans. Avec une
+plage figée à `−10..+10`, la modulation est techniquement fonctionnelle mais lexicalement
+inexprimante :
+
+- profondeur de bits (`1..16`), fréquence de coupure en Hz, durée en ms : impossibles ;
+- un `constant` à `12000` branché sur `p2` se retrouve **épinglé à 10 en permanence** — la
+  modulation « ne sert à rien », alors qu'elle est correctement câblée.
+
+D'où des plages déclarables par paramètre dans le JSON `options` :
+
+```json
+{ "params": {}, "ranges": { "p1": [1, 16], "p2": [100, 20000] } }
+```
+
+- `[min, max]` → plage explicite ; un nombre → plage symétrique `[-n, n]` ;
+- paramètre absent → `−10..+10` (défaut symétrique, adapté à la modulation additive) ;
+- `ranges` est une **directive moteur**, retirée des `processorOptions` avant l'envoi au processor ;
+- les plages étant figées dans le descripteur, elles entrent dans la **clé du registre** : les
+  modifier recompile le code (une fois, au prochain chargement) ;
+- le moteur borne aussi la valeur initiale et la **base de modulation** dans la plage, sans quoi la
+  base mémorisée garderait une valeur que l'AudioParam ne peut pas rendre (une modulation
+  « relative » partirait de zéro) ;
+- le panneau fait suivre les sliders `p1..p8` sur la plage déclarée, et affiche un rappel sous le
+  champ `options`.
+
+### 5.6 Persistance
 
 `code` est une chaîne dans `module.params` ⇒ il est **sauvegardé / chargé / exporté tel quel** par
 `PatchManager`, `SynthPatchManager` et `audioTransfer.js`, sans format nouveau. Le hash est
@@ -349,38 +438,41 @@ Points d'attention :
 ### 6.2 `usePatchVoice.js` — instanciation
 
 ```js
-const PARAM_NAMES = ["p1","p2","p3","p4","p5","p6","p7","p8"]
+import { WORKLET_PARAM_NAMES, clampParamValue } from "./useAudioWorklet.js"
 
-function createWorkletNode(ctx, name, p, now) {
-  let opts
-  try { opts = JSON.parse(p.options ?? "{}") ?? {} }
-  catch (e) { console.warn("[audioworklet] options JSON invalide :", e?.message); opts = {} }
+function createWorkletNode(ctx, name, p) {
+  let parsed = {}
+  try { parsed = JSON.parse(p.options ?? "{}") ?? {} }
+  catch (e) { console.warn("[audioworklet] options JSON invalide :", e?.message) }
+  // `ranges` est une directive moteur (figée dans le descripteur), pas une
+  // configuration du DSP : on ne la transmet pas au processor.
+  const { ranges: _ignored, ...processorOptions } = parsed
+
   return new AudioWorkletNode(ctx, name, {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     outputChannelCount: [p.channels === 2 ? 2 : 1],
-    parameterDescriptors: PARAM_NAMES.map(n => ({
-      name: n, defaultValue: 0, minValue: -10, maxValue: 10,
-      automationRate: p.rate === "k-rate" ? "k-rate" : "a-rate",
-    })),
-    processorOptions: opts,
+    // PAS de parameterDescriptors ici : clé inconnue d'AudioWorkletNodeOptions,
+    // ignorée, et node.parameters resterait vide (cf. §5.3).
+    processorOptions,
   })
 }
 
 // dans instantiateModule()
 case "audioworklet": {
-  const src = p.code ?? getWorkletDefaults().code
-  const rec = peekWorklet(ctx, src)
-  const node = rec?.status === "ok" ? safeCreate() : null
-  if (!node) return { node: makePassthrough(ctx, now), params: {}, bases: {} }
+  const rec = peekWorklet(ctx, p.code, { rate: p.rate, options: p.options })
+  if (!rec || rec.status !== "ok") return { node: makePassthrough(ctx, now), params: {}, bases: {} }
+  const node = safeCreate() ?? { /* repli */ }
   const params = {}, bases = {}
-  for (const n of PARAM_NAMES) {
+  for (const n of WORKLET_PARAM_NAMES) {
     const ap = node.parameters.get(n)
-    const v = p[n] ?? 0
+    if (!ap) { missing++; continue }        // jamais de throw : le son passe
+    // bornée dans la plage déclarée, comme le fera le navigateur
+    const v = clampParamValue(rec.ranges, n, p[n] ?? 0)
     ap.setValueAtTime(v, now)
     params[n] = ap; bases[n] = v
   }
-  return { node, params, bases, worklet: { name: rec.name, hash: rec.hash } }
+  return { node, params, bases, worklet: { name: rec.name } }
 }
 ```
 
@@ -451,7 +543,7 @@ disparaît.**
 | Erreur de syntaxe JS | `addModule` rejette | `status:"error"` + message ; `console.warn` ; **repli pass-through** (le son continue de passer) |
 | `registerProcessor` absent du code | l'épilogue injecté lève au chargement | `addModule` rejette → idem |
 | `const registerProcessor` déclaré par l'utilisateur | `SyntaxError` (collision) | `addModule` rejette → idem |
-| `p1..p8` absents (constructeur avec `super()` sans options) | `node.parameters.get(n)` → `undefined` | ignorés + `console.warn` ; le son passe, les params sont inertes |
+| `p1..p8` absents (processor compilé par une version antérieure du moteur) | `node.parameters.get(n)` → `undefined` | ignorés + `console.warn` nommant le processor ; le son passe, les params sont inertes ; rechargement de page requis |
 | `options` JSON invalide | `JSON.parse` en `try/catch` | `{}` + `console.warn`, le module fonctionne |
 | `addModule` bloqué par la CSP | `SecurityError` | remonté tel quel + repli pass-through |
 | Code non encore compilé au build | `peekWorklet` → `null` | repli pass-through + `console.warn` |
@@ -473,12 +565,15 @@ erreur de code est un `console.warn` — l'utilisateur voit que le code n'a pas 
    été compilé dans le contexte. Le cas courant est couvert : un super-module contenant un
    AudioWorklet passe par le voice/main patch qui le contient.
 4. **8 paramètres maximum** par module.
-5. **Le code s'exécute** : un patch importé d'une source tierce déclare un processor. Mention
+5. **Plage `−10..+10` par défaut**,modifiable par paramètre via `options.ranges` (§5.5) : une
+   modulation « brute » reste additive et lisible, mais tout ce qui sort de l'unité (Hz, ms, bits)
+   exige une plage déclarée.
+6. **Le code s'exécute** : un patch importé d'une source tierce déclare un processor. Mention
    dans le README.
-6. **CSP `blob:`** requise (voir §7).
-7. Le code compilé **n'est jamais déchargé** du contexte : la mémoire croît très lentement avec le
+7. **CSP `blob:`** requise (voir §7).
+8. Le code compilé **n'est jamais déchargé** du contexte : la mémoire croît très lentement avec le
    nombre de versions écrites.
-8. Une entrée, une sortie (le nombre de **canaux** de sortie est réglable 1 ou 2).
+9. Une entrée, une sortie (le nombre de **canaux** de sortie est réglable 1 ou 2).
 
 ---
 
@@ -509,15 +604,21 @@ Scénarios :
 4. Un 2ᵉ appel avec le même code et le même `rate` réutilise le processor (un seul `addModule`).
 5. Code invalide → `status:"error"`, message non vide, **aucune** exception propagée. Idem sans
    aucun `registerProcessor` (l'épilogue injecté lève).
-6. `instantiateModule` avec un code non compilé → repli `GainNode`, entrée non nulle.
-7. `instantiateModule` avec un code compilé → vrai nœud, `params.p1..p8` pointent sur des
+6. Plages (`options.ranges`) : formes `[min, max]` et symétrique, JSON invalide et plage
+   incohérente ignorées, `clampParamValue` borne correctement. Un même code compilé avec et sans
+   `ranges` donne deux processeurs distincts, et `peekWorklet` retrouve le bon selon `options`.
+7. Moteur : valeur initiale et base bornées dans la plage déclarée, `ranges` retiré des
+   `processorOptions`.
+8. `instantiateModule` avec un code non compilé → repli `GainNode`, entrée non nulle.
+9. `instantiateModule` avec un code compilé → vrai nœud, `params.p1..p8` pointent sur des
    AudioParams, `bases.p1..p8` initialisés, `outputChannelCount` correct, et **aucun**
    `parameterDescriptors` dans les options du nœud.
-8. Constructeur explicite avec `super(options)` → descripteurs conservés. Constructeur avec
-   `super()` → descripteurs perdus, mais **aucune exception** et le son passe toujours.
-9. `rebuildMainPatch()` : le code est enregistré **avant** la construction du graphe ; trois rebuilds
-   en rafale ne s'entrelacent pas.
-10. Rétrocompatibilité : `buildGraph` et les autres types de modules ne sont pas affectés
+10. Les trois formes de constructeur — `constructor(options) { super(options) }`, `constructor() {
+    super() }`, et pas de constructeur du tout — donnent **toutes** les huit AudioParam, sans
+    exception.
+11. `rebuildMainPatch()` : le code est enregistré **avant** la construction du graphe ; trois rebuilds
+    en rafale ne s'entrelacent pas.
+12. Rétrocompatibilité : `buildGraph` et les autres types de modules ne sont pas affectés
     (les 3 smoke tests existants doivent passer **sans modification**).
 
 ---
@@ -527,7 +628,7 @@ Scénarios :
 | # | Question | Recommandation |
 |---|---|---|
 | D1 | Nombre de ports de modulation | **8** (`p1..p8`) — suffisant pour un Leslie ou un effet utilitaire, insuffisant pour un DSP très paramétré |
-| D2 | Plage des paramètres | **−10..10**, pas 0.001 — large pour du gain/détune/accordage, borné pour éviter les valeurs folles dans le DSP |
+| D2 | Plage des paramètres | **`−10..10` par défaut, redéfinissable par paramètre** via `options.ranges` (voir §5.5) — `−10..10` seul rendait la modulation inexprimante en Hz / ms / bits, le navigateur bornant silencieusement tout dépassement |
 | D3 | Modulation par `MessagePort` (B) | **plus tard** — A + C couvrent l'essentiel |
 | D4 | `a-rate` par défaut | **oui** (cohérent avec `rate:"a-rate"` des autres ports) ; `k-rate` sélectionnable car moins verbeux |
 | D5 | Nouvelle catégorie de palette | **`code` → « Code »** plutôt que ranger ça dans « Effects » |

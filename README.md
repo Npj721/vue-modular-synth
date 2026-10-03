@@ -176,8 +176,9 @@ utiliser le même nom lisible). N'importe quelle valeur fonctionne, y compris ca
 
 ```js
 class Tremolo extends AudioWorkletProcessor {
-  // NE PAS écrire `super()` seul : les descripteurs de p1..p8 sont injectés par
-  // le moteur dans les options du constructeur (voir plus bas).
+  // `super(options)` n'est pas obligatoire pour p1..p8 (le moteur les déclare
+  // via le getter statique parameterDescriptors), mais c'est la seule façon de
+  // lire `options.processorOptions` — donc de la configuration du panneau.
   constructor(options) {
     super(options)
     this.rate = options.processorOptions?.params?.rate ?? 5
@@ -200,8 +201,9 @@ class Tremolo extends AudioWorkletProcessor {
 registerProcessor("tremolo", Tremolo)
 ```
 
-Le plus simple est de **ne pas déclarer de constructeur** : le constructeur implicite d'une classe
-dérivée transmet tout à `super()` et les paramètres sont disponibles automatiquement.
+Le plus simple est de **ne pas déclarer de constructeur** : p1..p8 sont déclarés par le moteur
+indépendamment de la forme du constructeur (et le constructeur implicite d'une classe dérivée
+transmettant tout à `super()`, `options.processorOptions` reste lisible).
 
 Disposez en plus du standard :
 
@@ -211,12 +213,38 @@ Disposez en plus du standard :
 | `p1`…`p8` | paramètres modulables : une enveloppe, un `gain`, une `constant` se câblent dessus comme sur n'importe quel autre module |
 | `options.processorOptions` | contenu JSON du champ `options` du panneau (configuration statique : coefficients, mixages…) |
 
-> **Si vous déclarez un constructeur, écrivez `super(options)`.** `p1`…`p8` sont déclarés par le
-> processor via `super({ parameterDescriptors })` — Web Audio ne connaît cette option que sur
-> `AudioWorkletProcessor`, et un `super()` sans argument efface la déclaration. Le cas le plus
-> fréquent est le constructeur absent ; un `super()` à vide n'y fait pas de mal. Si les paramètres
-> sont absents malgré tout, un avertissement le dit dans la console et le son passe quand même, les
-> paramètres restent simplement inertes.
+> **Le constructeur n'a plus d'importance pour `p1`…`p8`.** Les descripteurs sont déclarés par le
+> préambule injecté, au plus profond de la chaîne d'héritage : `super(options)`, `super()` à vide,
+> ou pas de constructeur du tout, tout fonctionne. `super(options)` reste la forme recommandée
+> parce que c'est elle qui donne accès à `options.processorOptions` dans le constructeur.
+>
+> Si le worklet se plaint de paramètres absents alors que votre code est correct, c'est qu'il a été
+> compilé par une version antérieure du moteur : un processor enregistré vit jusqu'à la fermeture
+> de l'`AudioContext` et n'a aucun moyen d'être déchargé. Rechargez la page.
+
+#### Plage de valeur de `p1`…`p8`
+
+Un AudioParam est **borné par le navigateur** : tout ce qui sort de `[minValue, maxValue]` est
+silencieusement ramené dans l'intervalle. La plage par défaut est `−10`…`+10`, ce qui suffit pour une
+modulation additive (une enveloppe `0..1` se lit telle quelle) mais pas pour exprimer une
+profondeur de bits, une fréquence en Hz ou une durée en ms.
+
+Le champ `options` accepte une clé `ranges` pour redéfinir la plage de chaque paramètre :
+
+```json
+{ "params": {}, "ranges": { "p1": [1, 16], "p2": [100, 20000] } }
+```
+
+| Forme | Plage obtenue |
+|---|---|
+| `"p1": [1, 16]` | `1` … `16` |
+| `"p1": 0.5` | `-0.5` … `+0.5` (raccourci symétrique) |
+| absent | `−10` … `+10` |
+
+Les plages sont figées dans le descripteur, donc dans le code compilé : **les modifier recompile le
+worklet** (une fois, au prochain chargement du patch — pas à chaque frappe). Les champs `p1`…`p8`
+du panneau suivent automatiquement la plage déclarée, et `ranges` n'est pas transmis au DSP
+(uniquement votre clé `params` l'est, via `processorOptions`).
 
 #### Quand le code est compilé
 
@@ -236,8 +264,8 @@ n'importe quel autre paramètre.
 - **Le code s'exécute** : un patch `.json` importé d'une source tierce déclare et exécute un
   processor.
 - **8 paramètres maximum** par module.
-- **`rate` figé à la compilation** : il est écrit dans le blob, donc changer `rate` recompile le
-  code (a-rate et k-rate sont deux processeurs distincts).
+- **`rate` et `ranges` sont figés à la compilation** : ils sont écrits dans le blob, donc les changer
+  recompile le code (a-rate et k-rate, ou deux jeux de plages, sont des processeurs distincts).
 - Un code invalide (erreur de syntaxe, aucun `registerProcessor`) ou un navigateur sans AudioWorklet
   ne casse jamais le graphe : le module laisse passer le signal inchangé et l'avertissement va dans
   la console du navigateur.

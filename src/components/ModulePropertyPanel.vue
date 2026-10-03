@@ -1,11 +1,12 @@
 <script setup>
-import { reactive, ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { reactive, ref, watch, nextTick, onBeforeUnmount, computed } from 'vue'
 import { useModuleCatalog } from '../composables/useModuleCatalog'
 import {
   getWavetableBundle,
   subscribeWavetableFrame,
   getWavetableFrameState,
 } from '../composables/usePatchVoice'
+import { parseRanges, WORKLET_PARAM_NAMES } from '../composables/useAudioWorklet'
 import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
 import SampleWaveformEditor from './SampleWaveformEditor.vue'
@@ -150,6 +151,36 @@ const { getModuleByType } = useModuleCatalog()
 // catalogue, alors que JSON.stringify traverse le proxy sans problème.
 const deepClone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)))
 
+/* =========================================================
+ * PLAGES DE p1..p8 (module AudioWorklet)
+ *
+ * Le descripteur du catalogue annonce -10..+10, mais un AudioParam est borné
+ * par le navigateur : impossible d'y faire entrer une profondeur de bits
+ * (1..16) ou une fréquence en Hz. Le module accepte donc des plages par
+ * paramètre dans le JSON `options` (`ranges`), et le panneau fait suivre les
+ * sliders p1..p8 pour que le champ reflète la plage réellement compilée.
+ * ========================================================= */
+
+const workletRanges = computed(() => parseRanges(params.options))
+
+const baseParamDef = (key) => {
+  const def = props.module ? getModuleByType(props.module.type) : null
+  return def?.params?.[key] ?? null
+}
+
+const applyWorkletRanges = () => {
+  for (const n of WORKLET_PARAM_NAMES) {
+    const base = baseParamDef(n)
+    if (!base) continue
+    const r = workletRanges.value[n]
+    // COPIE du descripteur : paramDefs ne doit jamais référencer l'objet du
+    // catalogue (singleton partagé par tous les modules).
+    paramDefs[n] = r ? { ...base, min: r.minValue, max: r.maxValue } : { ...base }
+  }
+}
+
+watch(() => params.options, applyWorkletRanges)
+
 // Quand module sélectionné change
 watch(
   () => props.module,
@@ -190,6 +221,10 @@ watch(
         scheduleJsonValidation(key)
       }
     })
+
+    // les `options` viennent d'être copiées dans params : on peut donc
+    // borner les sliders p1..p8 sur les plages qui viennent d'être déclarées
+    applyWorkletRanges()
   },
   { immediate: true }
 )
@@ -755,6 +790,10 @@ onBeforeUnmount(() => {
           <button class="json-button" @click="openJsonModal(key)">
             Charger / éditer le JSON…
           </button>
+          <span class="hint hint-block" v-if="key === 'options'">
+            <code>{ "ranges": { "p1": [1, 16] } }</code> — plage de valeur de p1
+            (−10..+10 par défaut). Recompile le code au prochain chargement.
+          </span>
           <span
             v-if="jsonStatusView(key).pending || jsonStatusView(key).message"
             class="json-status"
@@ -1039,6 +1078,17 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 4px;
   width: 100%;
+}
+
+.hint-block {
+  font-size: 10px;
+  line-height: 1.35;
+  color: #8a8f98;
+}
+
+.hint-block code {
+  font-family: monospace;
+  color: #b9bec7;
 }
 
 .json-status {
