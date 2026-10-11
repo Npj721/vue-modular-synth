@@ -9,6 +9,7 @@ import {
   DEFAULT_PARAM_RANGE,
   WORKLET_PARAM_NAMES,
 } from "./useAudioWorklet.js"
+import { normalizeCurve, sampleCurve } from "./envelopeCurves.js"
 
 /* =========================================================
  * Utils
@@ -709,6 +710,11 @@ function holdParam(param, now) {
  *   valeur d'arrivée. C'est la moitié des évènements d'une boucle qu'on
  *   économise, sans aucun changement de comportement.
  *
+ * Courbe : "linear" et "exponential" utilisent les rampes NATIVES Web Audio
+ *   (2 évènements par stage). Les autres formes (scurve/arc/log) sont rendues
+ *   par UN setValueCurveAtTime échantillonné : un seul évènement, au lieu des
+ *   dizaines de stages qu'un tracé de courbe générait auparavant.
+ *
  * Retourne { time, value } = l'état du paramètre à la fin du cycle, à
  * réinjecter comme `hold` du cycle suivant. */
 function scheduleCycle(param, stages, currentValue, velocity = 1, base = 1, t0, hold = null) {
@@ -716,26 +722,32 @@ function scheduleCycle(param, stages, currentValue, velocity = 1, base = 1, t0, 
   let last = hold
 
   for (const stage of stages) {
+    const curve = normalizeCurve(stage.curve)
     let from = stage.from === "current" ? currentValue : stage.from * base
     let to = stage.to * velocity * base
 
-    if (stage.curve === "exponential") {
+    const dur = stage.duration
+    const end = t + dur
+
+    if (curve === "exponential") {
       from = Math.max(EPS, from)
       to = Math.max(EPS, to)
-    }
-
-    if (!last || last.time !== t || last.value !== from) {
-      param.setValueAtTime(from, t)
-    }
-
-    t += stage.duration
-
-    if (stage.curve === "exponential") {
-      param.exponentialRampToValueAtTime(to, t)
+      if (!last || last.time !== t || last.value !== from) {
+        param.setValueAtTime(from, t)
+      }
+      param.exponentialRampToValueAtTime(to, end)
+    } else if (curve === "linear") {
+      if (!last || last.time !== t || last.value !== from) {
+        param.setValueAtTime(from, t)
+      }
+      param.linearRampToValueAtTime(to, end)
     } else {
-      param.linearRampToValueAtTime(to, t)
+      // Courbe non native : la valeur de départ est portée par curve[0], donc
+      // aucun setValueAtTime n'est nécessaire sur la frontière.
+      param.setValueCurveAtTime(sampleCurve(curve, from, to), t, Math.max(EPS, dur))
     }
 
+    t = end
     last = { time: t, value: to }
   }
 

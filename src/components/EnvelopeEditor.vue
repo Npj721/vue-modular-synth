@@ -1,4 +1,6 @@
 <script setup>
+import { ENVELOPE_CURVES } from "../composables/envelopeCurves"
+
 const props = defineProps({
   stages: {
     type: Object,
@@ -129,8 +131,7 @@ const removeStage = (phase, index) => {
                 @change="e =>
                   updateStage('press', i, { curve: e.target.value })"
               >
-                <option value="linear">linear</option>
-                <option value="exponential">exponential</option>
+                <option v-for="c in ENVELOPE_CURVES" :key="c" :value="c">{{ c }}</option>
               </select>
             </td>
 
@@ -222,8 +223,7 @@ const removeStage = (phase, index) => {
                 @change="e =>
                   updateStage('release', i, { curve: e.target.value })"
               >
-                <option value="linear">linear</option>
-                <option value="exponential">exponential</option>
+                <option v-for="c in ENVELOPE_CURVES" :key="c" :value="c">{{ c }}</option>
               </select>
             </td>
 

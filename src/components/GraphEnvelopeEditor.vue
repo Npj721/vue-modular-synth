@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, watch, onMounted, onBeforeUnmount } from "vue"
 import { kvPut, kvDelete, kvKeys, kvEntries } from "../composables/useIndexedDb"
+import { ENVELOPE_CURVES, normalizeCurve, curveValue } from "../composables/envelopeCurves"
 
 /* =========================================================
  * Composant : éditeur d'enveloppe graphique (canvas)
@@ -11,7 +12,9 @@ import { kvPut, kvDelete, kvKeys, kvEntries } from "../composables/useIndexedDb"
  *   - from     = valeur Y du point i
  *   - to       = valeur Y du point i+1
  *   - duration = différence X entre les deux points
- *   - curve    = courbe du segment menant au point i+1
+ *   - curve    = courbe du segment menant au point i+1, parmi
+ *                linear | exponential | scurve | arc | log
+ *                (ajoutée par les outils de tracé, ou éditée au tableau)
  *
  * Notion de "current" : le premier point d'une phase peut porter
  * l'indicateur fromCurrent (repris du modèle stages, où l'on a par
@@ -38,6 +41,12 @@ const emit = defineEmits(["update"])
 const PAD = 40
 const M = Math
 const TOOL_LABELS = { line: "Ligne", scurve: "S-curve", arc: "Arc", exp: "Exp", log: "Log" }
+
+/* Outil de tracé -> courbe du modèle. "exp" utilise la rampe exponentielle
+ * NATIVE de Web Audio ; les autres formes non natives sont rendues via
+ * setValueCurveAtTime côté moteur audio. */
+const TOOL_TO_CURVE = { line: "linear", scurve: "scurve", arc: "arc", exp: "exponential", log: "log" }
+const toolToCurve = (tool) => TOOL_TO_CURVE[tool] || "linear"
 
 const yFormat = (v) => +v.toFixed(4) + props.unit
 const clamp = (v, lo, hi) => M.max(lo, M.min(hi, v))
@@ -119,7 +128,7 @@ function pointsToStages(pts, forceStartCurrent) {
       from,
       to: round(b.v),
       duration,
-      curve: b.curve === "exponential" ? "exponential" : "linear",
+      curve: normalizeCurve(b.curve),
     })
   }
   return out
@@ -350,7 +359,10 @@ function onMouseDown(e, p) {
   }
 
   if (toolMode) {
-    toolStart = screenToData(sx, sy, p)
+    const idx = hitTest(sx, sy, p)
+    toolStart = idx !== null
+      ? { t: pts[idx].t, v: pts[idx].v }
+      : screenToData(sx, sy, p)
     return
   }
 
@@ -397,7 +409,12 @@ function onMouseMove(e, p) {
 function onMouseUp(e, p) {
   if (toolMode && toolStart) {
     const { sx, sy } = canvasCoords(e, p)
-    applyCurveTo(p, screenToData(sx, sy, p))
+    const pts = phasePoints(p)
+    const idx = hitTest(sx, sy, p)
+    const end = idx !== null
+      ? { t: pts[idx].t, v: pts[idx].v }
+      : screenToData(sx, sy, p)
+    applyCurveTo(p, end)
     toolStart = null
     toolMode = null
     ghostData = null
@@ -412,29 +429,27 @@ function onMouseUp(e, p) {
 }
 
 /* ------------------------------------------------------------------
- * Courbes (outils) : génération de multiples segments
+ * Courbes (outils)
+ *
+ * Un outil ne génère plus 20 stages échantillonnés : il transforme la région
+ * tracée en UN SEUL stage portant le type de courbe. Le rendu (dessin ET son)
+ * est ensuite produit par le même `curveValue` (voir envelopeCurves.js).
  * ------------------------------------------------------------------ */
+
+/* Aperçu fantôme pendant le glisser : échantillonnage purement visuel. */
 function genCurve(a, b, mode) {
   if (!a || !b) return []
-  const n = 20
+  const n = 40
   const ta = M.min(a.t, b.t)
   const tb = M.max(a.t, b.t)
   const va = a.t < b.t ? a.v : b.v
   const vb = a.t < b.t ? b.v : a.v
-  const dx = tb - ta || 0.0001
+  const curve = toolToCurve(mode)
+  const dx = tb - ta
   const pts = []
   for (let i = 0; i <= n; i++) {
     const f = i / n
-    let v
-    switch (mode) {
-      case "line": v = va + (vb - va) * f; break
-      case "scurve": v = va + (vb - va) * (1 - M.cos(M.PI * f)) / 2; break
-      case "arc": v = va + (vb - va) * M.sin(M.PI * f / 2); break
-      case "exp": v = va + (vb - va) * (M.pow(M.E, 4 * f) - 1) / (M.pow(M.E, 4) - 1); break
-      case "log": v = va + (vb - va) * M.log(1 + 4 * f) / M.log(5); break
-      default: v = va + (vb - va) * f; break
-    }
-    pts.push({ t: ta + dx * f, v })
+    pts.push({ t: ta + dx * f, v: curveValue(curve, va, vb, f) })
   }
   return pts
 }
@@ -444,13 +459,32 @@ function applyCurveTo(p, end) {
   const pts = phasePoints(p)
   const ta = M.min(toolStart.t, end.t)
   const tb = M.max(toolStart.t, end.t)
-  const gen = genCurve(toolStart, end, toolMode)
+  if (tb - ta < 1e-6) return
+
+  const va = toolStart.t <= end.t ? toolStart.v : end.v
+  const vb = toolStart.t <= end.t ? end.v : toolStart.v
+  const curve = toolToCurve(toolMode)
+
+  // supprime les points strictement intérieurs : la région devient UN stage
   for (let i = pts.length - 1; i >= 0; i--) {
-    if (pts[i].t > ta && pts[i].t < tb) pts.splice(i, 1)
+    if (pts[i].t > ta + 1e-9 && pts[i].t < tb - 1e-9) pts.splice(i, 1)
   }
-  for (const pt of gen) {
-    pts.push({ t: pt.t, v: pt.v, current: false, curve: toolMode === "exp" ? "exponential" : "linear" })
+
+  // point de départ : on réutilise le point existant (valeur conservée)
+  let a = pts.find(pt => M.abs(pt.t - ta) < 1e-9)
+  if (!a) {
+    a = { t: ta, v: va, current: false, curve: undefined }
+    pts.push(a)
   }
+
+  // point d'arrivée : porte la courbe du segment entrant
+  const b = pts.find(pt => M.abs(pt.t - tb) < 1e-9)
+  if (b) {
+    b.curve = curve
+  } else {
+    pts.push({ t: tb, v: vb, current: false, curve })
+  }
+
   normalizePoints(pts)
 }
 
@@ -587,6 +621,35 @@ function deletePreset() {
 /* ------------------------------------------------------------------
  * Dessin
  * ------------------------------------------------------------------ */
+
+/* Construit le chemin écran en suivant les courbes réelles des stages :
+ * une seule droite pour "linear", 24 échantillons pour les autres formes.
+ * Le dessin se superpose donc EXACTEMENT à ce que joue le moteur audio. */
+function tracePath(p, pts) {
+  const out = []
+  for (let i = 0; i < pts.length; i++) {
+    const b = pts[i]
+    if (i === 0) {
+      out.push(dataToScreen(b.t, b.v, p))
+      continue
+    }
+    const a = pts[i - 1]
+    const curve = normalizeCurve(b.curve)
+    if (curve === "linear") {
+      out.push(dataToScreen(b.t, b.v, p))
+    } else {
+      const steps = 24
+      for (let s = 1; s <= steps; s++) {
+        const f = s / steps
+        const t = a.t + (b.t - a.t) * f
+        const v = curveValue(curve, a.v, b.v, f)
+        out.push(dataToScreen(t, v, p))
+      }
+    }
+  }
+  return out
+}
+
 function draw() {
   drawPhase("press")
   drawPhase("release")
@@ -634,13 +697,12 @@ function drawPhase(p) {
   const pts = phasePoints(p)
   if (!pts.length) return
 
+  const path = tracePath(p, pts)
+
   ctx.fillStyle = fill
   ctx.beginPath()
   ctx.moveTo(PAD, zeroY)
-  for (const pt of pts) {
-    const s = dataToScreen(pt.t, pt.v, p)
-    ctx.lineTo(s.x, s.y)
-  }
+  for (const s of path) ctx.lineTo(s.x, s.y)
   ctx.lineTo(PAD + pw, zeroY)
   ctx.closePath()
   ctx.fill()
@@ -648,9 +710,8 @@ function drawPhase(p) {
   ctx.strokeStyle = color
   ctx.lineWidth = 2
   ctx.beginPath()
-  for (let i = 0; i < pts.length; i++) {
-    const s = dataToScreen(pts[i].t, pts[i].v, p)
-    i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y)
+  for (let i = 0; i < path.length; i++) {
+    i ? ctx.lineTo(path[i].x, path[i].y) : ctx.moveTo(path[i].x, path[i].y)
   }
   ctx.stroke()
 
@@ -862,9 +923,8 @@ onBeforeUnmount(() => {
                 />
               </td>
               <td>
-                <select :value="st.curve" @change="setStageField(cfg.key, i, 'curve', $event.target.value)">
-                  <option value="linear">linear</option>
-                  <option value="exponential">exponential</option>
+                <select :value="normalizeCurve(st.curve)" @change="setStageField(cfg.key, i, 'curve', $event.target.value)">
+                  <option v-for="c in ENVELOPE_CURVES" :key="c" :value="c">{{ c }}</option>
                 </select>
               </td>
               <td>
