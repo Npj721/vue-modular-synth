@@ -178,12 +178,18 @@ PRELUDE  +  <code utilisateur>  +  EPILOGUE
 **PRELUDE** (avant le code utilisateur) :
 
 ```js
-const awParam = (v, i = 0) => (ArrayBuffer.isView(v) ? v[i] : v);
+const awParam = (v, i = 0) =>
+  ArrayBuffer.isView(v) ? (v.length > 1 ? v[i] : v[0]) : v;
 ```
 
-`awParam(this.parameters.p1, i)` retourne `this.parameters.p1` si le paramètre est en `k-rate` (un
-`Number`), ou `this.parameters.p1[i]` s'il est en `a-rate` (un `Float32Array`). Sans ce helper
-l'utilisateur devrait deviner le mode et écrire deux branches.
+Dans `process()`, un AudioParam est **toujours** un `Float32Array`, jamais un `Number`. Sa longueur
+vaut **1 ou 128** : 128 si le paramètre varie pendant le quantum de rendu, 1 s'il est constant sur
+tout le bloc. Le cas « longueur 1 » n'est pas réservé au `k-rate` : un paramètre `a-rate` **non
+modulé**, ou modulé plus lentement qu'un bloc (128 samples ≈ 2,7 ms — un LFO à 4 Hz tombe la plupart
+du temps dans ce cas), est servi comme un tableau d'une seule valeur. Lire `arr[i]` sans tester la
+longueur renvoie donc `undefined` pour i > 0, puis `NaN` dans le DSP (silence/gling), sans la moindre
+erreur. `awParam(arr, i)` renvoie `arr[0]` quand le tableau est constant et `arr[i]` sinon :
+l'utilisateur n'écrit aucune branche.
 
 > On lit la map via le **3ᵉ argument de `process()`**, jamais via le global `parameters` (qui n'est
 > pas exposé → `ReferenceError`) ni `this.parameters` (non fiable selon les navigateurs → `undefined`).
@@ -294,8 +300,10 @@ statique (blocs de filtres, tables, mixages) sans passer par des AudioParams.
 ```js
 // Traitement maison : lisez le DSP dans ce textarea.
 // p1..p8 sont des AudioParams modulables depuis le graphe (rate : a-rate par défaut).
-// awParam(parameters.pN, i) lit un paramètre a-rate ou k-rate indifféremment,
-// où `parameters` est le 3e argument de process() (jamais le global
+// awParam(parameters.pN, i) lit un paramètre modulable quel que soit son mode :
+// le tableau a 128 valeurs s'il bouge pendant le bloc, une seule s'il est
+// constant (a-rate non modulé ou k-rate) — le helper gère les deux.
+// `parameters` est le 3e argument de process() (jamais le global
 // "parameters", qui n'existe pas ; ni this.parameters, peu fiable).
 // options.processorOptions est le JSON du champ "options" du panneau.
 //

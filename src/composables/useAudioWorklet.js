@@ -49,8 +49,10 @@ const DEFAULT_WORKLET_CODE = `// Traitement maison : le DSP se lit/écrit dans c
 //              dans le 3e argument de process() (parameters), qui est la seule
 //              forme garantie par la spec — le global "parameters" n'existe
 //              pas, et this.parameters n'est pas fiable selon les navigateurs :
-//              awParam(parameters.p1, i) lit le sample i, que le paramètre soit
-//              a-rate (Float32Array) ou k-rate (nombre).
+//              awParam(parameters.p1, i) lit le sample i. Attention, le tableau
+//              n'a que 128 valeurs si le paramètre bouge ; sinon il en a UNE
+//              (valeur constante du bloc, a-rate comme k-rate) — c'est
+//              awParam, justement, qui gère les deux cas.
 //   sampleRate fréquence d'échantillonnage
 //   currentTime / currentFrame horloge du contexte
 //   options.processorOptions contenu JSON du champ "options" du panneau
@@ -243,9 +245,15 @@ export function clampParamValue(ranges, name, value) {
  *       aussi : le constructeur implicite d'une classe dérivée transmet tous
  *       les arguments à `super()`.
  *
- * 3. `awParam` : un AudioParam a-rate est un Float32Array (une valeur par
- *    sample), un k-rate est un simple nombre. Sans ce helper l'utilisateur
- *    devrait écrire deux branches selon le mode.
+ * 3. `awParam` : dans `process()`, un AudioParam est TOUJOURS un Float32Array,
+ *    mais sa longueur vaut 1 ou 128. Elle vaut 1 quand le paramètre est
+ *    constant sur le quantum de rendu — systématiquement pour un k-rate, et
+ *    aussi pour un a-rate quand aucun évènement ne tombe dans le bloc (cas le
+ *    plus courant d'un paramètre non modulé, ou modulé lentement : un LFO à
+ *    4 Hz ne change pas à chaque bloc de 128 samples). Lire `arr[i]` sans
+ *    vérifier la longueur renvoie alors `undefined` pour i > 0, donc NaN dans
+ *    le DSP. `awParam(arr, i)` renvoie `arr[0]` si le tableau est constant,
+ *    `arr[i]` sinon : l'utilisateur n'a aucune branche à écrire.
  */
 
 function buildPrelude(name, rate, ranges) {
@@ -296,7 +304,8 @@ class __awProcessor extends __awNativeProcessor {
 // lui-même le getter statique).
 try { globalThis.AudioWorkletProcessor = __awProcessor; } catch (e) {}
 let __awRegistered = false;
-const awParam = (v, i = 0) => (ArrayBuffer.isView(v) ? v[i] : v);
+const awParam = (v, i = 0) =>
+  ArrayBuffer.isView(v) ? (v.length > 1 ? v[i] : v[0]) : v;
 const registerProcessor = (nom, Classe) => {
   __awRegistered = true;
   __awNativeRegister(${JSON.stringify(name)}, class extends Classe {

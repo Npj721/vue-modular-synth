@@ -209,7 +209,7 @@ Disposez en plus du standard :
 
 | Symbole | Rôle |
 |---|---|
-| `awParam(parameters.pN, i)` | lit un AudioParam `a-rate` (`Float32Array`) ou `k-rate` (`Number`) indifféremment — helper injecté par le moteur |
+| `awParam(parameters.pN, i)` | lit un AudioParam quelle que soit la forme du tableau reçu : 128 valeurs s'il varie pendant le bloc, **une seule** s'il est constant (a-rate non modulé, ou k-rate). Évite le `NaN` qu'un `arr[i]` sur un tableau de longueur 1 provoquerait — helper injecté par le moteur |
 | `p1`…`p8` | paramètres modulables : une enveloppe, un `gain`, une `constant` se câblent dessus comme sur n'importe quel autre module |
 | `options.processorOptions` | contenu JSON du champ `options` du panneau (configuration statique : coefficients, mixages…) |
 

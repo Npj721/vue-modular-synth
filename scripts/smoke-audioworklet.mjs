@@ -357,6 +357,52 @@ registerProcessor("bitcrusher", Bitcrusher)
 }
 
 {
+  // RÉGRESSION awParam : dans process(), un AudioParam est un Float32Array de
+  // longueur 1 OU 128. Un paramètre constant sur le quantum de rendu (a-rate
+  // non modulé, k-rate, ou modulé plus lentement qu'un bloc — un LFO à 4 Hz ne
+  // change pas à chaque bloc de 128 samples) arrive en longueur 1. Lire arr[i]
+  // sans tester la longueur renvoyait undefined -> NaN en sortie : c'est le
+  // symptôme « les valeurs passées au worklet ne sont pas correctes ».
+  const gainCode = `class GainParam extends AudioWorkletProcessor {
+  process(inputs, outputs, parameters) {
+    const inp = inputs[0] || []
+    const out = outputs[0] || []
+    const src = inp[0]
+    const dst = out[0]
+    if (!src || !dst) return true
+    for (let i = 0; i < dst.length; i++) {
+      dst[i] = awParam(parameters.p1, i) * src[i]
+    }
+    return true
+  }
+}
+registerProcessor("gain-param", GainParam)
+`;
+  const rec = await ensureWorklet(ctxA, gainCode);
+  check("awParam : DSP de test compilé", rec.status === "ok");
+  const Klass = globalThis.__stubProcessors.get(ctxA).get(rec.name);
+  const proc = new Klass({});
+  const inp = new Float32Array([1, 0.5, -1, 0.25]);
+  const run = (p1) => {
+    const out = new Float32Array(inp.length);
+    proc.process([[inp]], [[out]], { p1 });
+    return out;
+  };
+  const expected = [0.5, 0.25, -0.5, 0.125];
+  const close = (a) => a.every((v, i) => Math.abs(v - expected[i]) < 1e-6);
+  // Tableau allongé (> 1) : indexé par sample.
+  check("awParam : tableau par sample (a-rate) correct",
+    close(run(Float32Array.from({ length: inp.length }, () => 0.5))));
+  // Tableau d'UNE valeur (paramètre constant) : valeur répétée, jamais NaN.
+  const cst = run(new Float32Array([0.5]));
+  check("awParam : longueur 1 -> valeur constante, pas de NaN",
+    [...cst].every((v) => Number.isFinite(v)) && close(cst),
+    `(sortie ${Array.from(cst).join(",")})`);
+  // k-rate : le tableau est exactement de longueur 1, même chemin.
+  check("awParam : k-rate (longueur 1) idem", close(run(new Float32Array([0.5]))));
+}
+
+{
   // idempotence : un 2e appel pour le même code ne recompile pas
   const before = globalThis.__stubAddModuleCalls.length;
   const rec = await ensureWorklet(ctxA, validCode);
@@ -445,8 +491,10 @@ registerProcessor("bitcrusher", Bitcrusher)
   check("paramètre code de type code", def.params.code.type === "code");
   check("défaut du code == code par défaut du composable",
     def.params.code.default === getWorkletDefaults().code);
-  check("8 paramètres numériques -10..10",
-    ["p1", "p8"].every((n) => def.params[n].min === -10 && def.params[n].max === 10));
+  check("p1 borné 0..100 (suit options.ranges par défaut)",
+    def.params.p1.min === 0 && def.params.p1.max === 100);
+  check("p2..p8 en -10..10 (plage par défaut)",
+    ["p2", "p8"].every((n) => def.params[n].min === -10 && def.params[n].max === 10));
 }
 
 /* =========================================================
