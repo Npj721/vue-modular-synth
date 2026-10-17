@@ -269,6 +269,10 @@ n'importe quel autre paramètre.
 - Un code invalide (erreur de syntaxe, aucun `registerProcessor`) ou un navigateur sans AudioWorklet
   ne casse jamais le graphe : le module laisse passer le signal inchangé et l'avertissement va dans
   la console du navigateur.
+- **`process()` qui renvoie `true` ne fuit pas** : le moteur signale explicitement l'arrêt à chaque
+  worklet quand la voix est démontée (et à chaque reconstruction du main patch), ce qui fait
+  renvoyer `false` au `process()` du module et permet au navigateur de récupérer le processor.
+  Renvoyer `false` soi-même quand le module est au repos reste plus propre, mais n'est pas requis.
 
 ---
 

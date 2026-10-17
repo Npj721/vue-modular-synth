@@ -83,6 +83,18 @@ const safeDisconnect = (node) => {
   try { node.disconnect() } catch {}
 }
 
+/* Demande à un AudioWorkletNode de s'arrêter.
+ *
+ * Un AudioWorkletProcessor dont `process()` renvoie `true` force le navigateur à
+ * le garder ACTIF, même déconnecté et sans référence (cf. MDN). La
+ * déconnexion seule ne suffit donc pas : le préambule injecté (useAudioWorklet)
+ * écoute ce message et fait alors renvoyer `false` à `process()`, ce qui permet
+ * au navigateur de récupérer le node. Sans cet arrêt explicite, chaque voix
+ * laisse un processor tourner indéfiniment et le CPU sature à la longue. */
+const stopWorklet = (node) => {
+  try { node?.port?.postMessage({ __awStop: true }) } catch {}
+}
+
 /* Repli du module `audioworklet` : un simple GainNode à gain 1.
  *
  * Un AudioWorklet ne peut pas toujours être construit au moment où le graphe
@@ -868,6 +880,7 @@ export function usePatchVoice(patch) {
   let mainNodes = null
   let mainInputNode = null
   let mainStarted = [] // nœuds à cycle de vie global (oscs, constants...)
+  let mainWorklets = [] // AudioWorkletNode du mainPatch (à signaler à l'arrêt)
   let mainEnvs = [] // enveloppes du mainPatch (boucles à ravitailler à débrancher)
   let mainRunning = false
 
@@ -1440,6 +1453,7 @@ export function usePatchVoice(patch) {
           )
         }
 
+        o.worklets?.push(node)
         return { node, params, bases, worklet: { name: rec.name } }
       }
 
@@ -1509,6 +1523,7 @@ export function usePatchVoice(patch) {
       deferStart: o.deferStart,
       started: o.started,
       activeEnvs: o.activeEnvs,
+      worklets: o.worklets,
       boundaryIn,
       boundaryOut,
       stopOverride: o.stopOverride,
@@ -1720,6 +1735,7 @@ export function usePatchVoice(patch) {
       deferStart: opts.deferStart ?? false,
       started: opts.started ?? [],
       activeEnvs: opts.activeEnvs ?? [],
+      worklets: opts.worklets ?? [],
       boundaryIn: opts.boundaryIn ?? null,
       boundaryOut: opts.boundaryOut ?? null,
       stopOverride: opts.stopOverride ?? new Map(),
@@ -1753,6 +1769,7 @@ export function usePatchVoice(patch) {
     const ctx = audioCtx.value
 
     const started = []
+    const worklets = []
 
     mainEnvs = []
     const { nodes } = buildGraph(ctx, normalizeGraph(getPatch()?.mainPatch), {
@@ -1760,10 +1777,12 @@ export function usePatchVoice(patch) {
       deferStart: true, // démarrés explicitement dans startMainPatch
       started,
       activeEnvs: mainEnvs,
+      worklets,
     })
 
     mainNodes = nodes
     mainStarted = started
+    mainWorklets = worklets
 
     // le module "input" devient le point d'entrée global des voix
     mainInputNode = null
@@ -1794,12 +1813,20 @@ export function usePatchVoice(patch) {
     mainStarted = []
   }
 
-  function disconnectEntry(entry) {
+  function disconnectEntry(entry, keepNode = null) {
     if (!entry) return
-    // la sortie globale (ctx.destination) et l'analyser sont PERMANENTS :
-    // on ne les déconnecte jamais (sinon plus rien ne sort des haut-parleurs).
+    // la sortie globale (ctx.destination), l'analyser et le nœud de destination
+    // de la voix (l'entrée du patch principal) sont PARTAGÉS : on ne les
+    // déconnecte jamais (sinon plus rien ne sort des haut-parleurs, ou tous les
+    // autres voix/canaux du patch principal se retrouvent coupés).
     const dest = audioCtx.value?.destination
-    if (entry.node !== dest && entry.node !== masterAnalyser) safeDisconnect(entry.node)
+    if (
+      entry.node !== dest &&
+      entry.node !== masterAnalyser &&
+      entry.node !== keepNode
+    ) {
+      safeDisconnect(entry.node)
+    }
     entry.inputsByPort?.forEach((g) => safeDisconnect(g))
     entry.outputsByPort?.forEach((g) => safeDisconnect(g))
   }
@@ -1816,6 +1843,11 @@ export function usePatchVoice(patch) {
       env.loop = null
     }
     mainEnvs = []
+
+    // signaler l'arrêt aux worklets AVANT de les déconnecter : un processor qui
+    // renvoie true force le navigateur à le garder actif même déconnecté.
+    for (const w of mainWorklets) stopWorklet(w)
+    mainWorklets = []
 
     if (!mainNodes) return
     for (const entry of mainNodes.values()) {
@@ -1898,6 +1930,7 @@ export function usePatchVoice(patch) {
     const activeEnvs = []
     const stopOverride = new Map()
     const voiceStopHooks = []
+    const worklets = []
 
     const { nodes } = buildGraph(ctx, normalizeGraph(getPatch()?.voicePatch), {
       note,
@@ -1907,7 +1940,10 @@ export function usePatchVoice(patch) {
       activeEnvs,
       stopOverride,
       voiceStopHooks,
+      worklets,
     })
+
+    let disposed = false
 
     return {
       nodes,
@@ -1940,6 +1976,11 @@ export function usePatchVoice(patch) {
 
         const tail = hasAmpEnv ? maxRelease + 0.05 : 0.05
 
+        // Instant où le graphe de la voix n'a plus rien à produire : on ne le
+        // déconnecte pas avant, sinon la queue de release (et un éventuel
+        // crossfade de wavetable) serait coupée net.
+        let teardownAt = now + tail
+
         for (const s of started) {
           // un module peut imposer un instant d'extinction minimal (ex:
           // wavetableS : terminer le crossfade en cours avant de couper).
@@ -1952,8 +1993,28 @@ export function usePatchVoice(patch) {
           const stopAt = stopFn
             ? Math.max(now, stopFn(), releaseDeadline)
             : Math.max(releaseDeadline, s.startAt ?? now)
+          teardownAt = Math.max(teardownAt, stopAt)
           // ne jamais stopper un osc décalé AVANT son démarrage prévu
           safeStop(s.node, stopAt)
+        }
+
+        // Un AudioNode reste vivant tant qu'il est câblé : sans déconnexion,
+        // chaque note laisse derrière elle son graphe entier branché sur la
+        // sortie. On déconnecte APRÈS la release, une fois la voix silencieuse.
+        //
+        // On signale EN PLUS l'arrêt à chaque AudioWorkletNode : déconnecter ne
+        // suffit pas, un process() qui renvoie true force le navigateur à garder
+        // le processor actif (cf. MDN). Sans ce signal, les processors
+        // s'accumulent à chaque note et le son devient parasité puis se coupe.
+        if (!disposed) {
+          disposed = true
+          const delayMs = Math.max(0, (teardownAt - now) * 1000) + 50
+          setTimeout(() => {
+            for (const w of worklets) stopWorklet(w)
+            for (const entry of nodes.values()) {
+              disconnectEntry(entry, destinationNode)
+            }
+          }, delayMs)
         }
       },
     }

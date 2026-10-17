@@ -254,6 +254,15 @@ export function clampParamValue(ranges, name, value) {
  *    vérifier la longueur renvoie alors `undefined` pour i > 0, donc NaN dans
  *    le DSP. `awParam(arr, i)` renvoie `arr[0]` si le tableau est constant,
  *    `arr[i]` sinon : l'utilisateur n'a aucune branche à écrire.
+ *
+ * 4. Signal d'arrêt : le wrapper enregistré écoute le port (`addEventListener`
+ *    + `port.start()`, sinon le port ne dispatche rien) et, sur
+ *    `{ __awStop: true }`, fait renvoyer `false` à `process()`. Un processor qui
+ *    renvoie `true` est maintenu ACTIF par le navigateur même déconnecté (cf.
+ *    MDN) : sans ce signal, chaque voix laisserait son processor tourner
+ *    indéfiniment et le CPU saturerait à la longue (voir stopWorklet dans
+ *    usePatchVoice.js). L'enveloppe de `process` est posée APRÈS `super()` pour
+ *    couvrir aussi bien une méthode de prototype qu'un champ d'instance.
  */
 
 function buildPrelude(name, rate, ranges) {
@@ -317,6 +326,34 @@ const registerProcessor = (nom, Classe) => {
       });
       __awPending = __awDescriptors;
       try { super(merged); } finally { __awPending = null; }
+      // Signal d'arrêt : le moteur le poste sur le port quand la voix est
+      // démontée (voir stopWorklet dans usePatchVoice.js). Indispensable : un
+      // process() qui renvoie true force le navigateur à garder le node ACTIF
+      // même déconnecté (cf. MDN). Sans ce message, chaque note laisserait un
+      // processor tourner indéfiniment -> le CPU sature après quelques minutes.
+      try {
+        this.port.addEventListener("message", (e) => {
+          if (e && e.data && e.data.__awStop) this.__awStopped = true;
+        });
+        // PIÈGE MessagePort : addEventListener seul NE SUFFIT PAS. Un port ne
+        // dispatche les messages que si onmessage est posé OU si start() est
+        // appelé ; sinon l'écouteur reste muet à jamais et le signal d'arrêt
+        // n'arrive jamais -> le processor ne s'arrête pas (fuite à chaque note).
+        // Vérifié dans Chromium : sans start(), gotStop=0 et le node continue de
+        // tourner ; avec start(), le node s'arrête.
+        this.port.start();
+      } catch (e) {}
+      // Enveloppe process() : dès l'arrêt demandé on renvoie false, ce qui
+      // autorise le navigateur à récupérer le node. La fonction de l'utilisateur
+      // est capturée APRÈS super() : cela couvre aussi bien une méthode de
+      // prototype qu'un champ d'instance (qui masquerait une méthode de classe).
+      const __awUserProcess = this.process;
+      if (typeof __awUserProcess === "function") {
+        this.process = (inputs, outputs, parameters) => {
+          if (this.__awStopped) return false;
+          return __awUserProcess.call(this, inputs, outputs, parameters);
+        };
+      }
     }
   });
 };

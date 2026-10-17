@@ -68,12 +68,50 @@ class StubAudioWorkletNode extends StubNode {
     // WeakMap du stub est indexée sur l'objet brut.
     const Klass = globalThis.__stubProcessors.get(toRaw(ctx)).get(name);
     if (!Klass) throw new Error(`NotSupportedError: "${name}" non enregistré`);
+    // Port processus <-> nœud : le préambule pose un écouteur de message sur
+    // this.port (arrêt), et le moteur poste sur node.port. On relie les deux
+    // bouts pour exercer réellement le signal d'arrêt.
+    const procPort = {
+      _listeners: [],
+      _started: false,
+      _onmessage: null,
+      addEventListener(type, cb) {
+        if (type === "message") this._listeners.push(cb);
+      },
+      // Un vrai MessagePort ne dispatche QUE si onmessage est posé ou si
+      // start() est appelé : on modélise ce piège pour que le test échoue si
+      // le préambule oublie start().
+      set onmessage(cb) {
+        this._onmessage = cb;
+        this._started = true;
+      },
+      get onmessage() {
+        return this._onmessage;
+      },
+      start() {
+        this._started = true;
+      },
+      _deliver(data) {
+        if (!this._started) return;
+        if (this._onmessage) this._onmessage({ data });
+        for (const cb of this._listeners) cb({ data });
+      },
+    };
     const proc = new Klass({
       numberOfInputs: options?.numberOfInputs ?? 1,
       numberOfOutputs: options?.numberOfOutputs ?? 1,
       outputChannelCount: options?.outputChannelCount ?? [1],
       processorOptions: options?.processorOptions ?? {},
+      __awPort: procPort,
     });
+    this._proc = proc;
+    this.port = {
+      postMessage: (msg) => {
+        this.__posts = this.__posts ?? [];
+        this.__posts.push(msg);
+        procPort._deliver(msg);
+      },
+    };
     this.descriptors = proc.__parameterDescriptors ?? [];
     for (const d of this.descriptors) this._params.set(d.name, new StubParam(d.defaultValue));
     globalThis.__stubWorkletNodes.push(this);
@@ -110,6 +148,7 @@ class StubContext {
           constructor(options) {
             this.__parameterDescriptors = options?.parameterDescriptors;
             this.__options = options;
+            this.port = options?.__awPort ?? { addEventListener() {} };
           }
         };
         const fakeGlobal = {
@@ -400,6 +439,36 @@ registerProcessor("gain-param", GainParam)
     `(sortie ${Array.from(cst).join(",")})`);
   // k-rate : le tableau est exactement de longueur 1, même chemin.
   check("awParam : k-rate (longueur 1) idem", close(run(new Float32Array([0.5]))));
+}
+
+{
+  // Le signal d'arrêt doit marcher même si le DSP définit process comme CHAMP
+  // D'INSTANCE (et non méthode de prototype) : l'enveloppe du préambule
+  // capture this.process APRÈS super(), donc elle couvre les deux formes.
+  const fieldCode = `class FieldProc extends AudioWorkletProcessor {
+  process = (inputs, outputs, parameters) => true
+}
+registerProcessor("field-proc", FieldProc)
+`;
+  const rec = await ensureWorklet(ctxA, fieldCode);
+  const Klass = globalThis.__stubProcessors.get(ctxA).get(rec.name);
+  const listeners = [];
+  let started = false;
+  const port = {
+    addEventListener: (t, cb) => {
+      if (t === "message") listeners.push(cb);
+    },
+    start() {
+      started = true;
+    },
+  };
+  const proc = new Klass({ __awPort: port });
+  check("arrêt : process (champ d'instance) actif avant le signal",
+    proc.process([], [], {}) === true);
+  check("arrêt : start() a bien été appelé sur le port", started === true);
+  for (const cb of listeners) cb({ data: { __awStop: true } });
+  check("arrêt : process (champ d'instance) renvoie false après le signal",
+    proc.process([], [], {}) === false);
 }
 
 {
@@ -713,6 +782,59 @@ registerProcessor("ctor", Ctor)
   const node = globalThis.__stubWorkletNodes[globalThis.__stubWorkletNodes.length - 1];
   check("voix : le worklet est construit en AudioWorkletNode", node && node.__type === "audioworklet");
   synth.noteOff(60);
+}
+
+{
+  // RÉGRESSION fuite : le graphe d'une voix est reconstruit à chaque note et
+  // câblé sur la sortie. Sans déconnexion au noteOff, chaque AudioWorkletNode
+  // (dont `process` renvoie toujours `true`) reste branché et vivant : les
+  // nœuds s'accumulent à chaque note, le CPU sature et le son devient parasité
+  // puis se coupe après quelques minutes de jeu. On vérifie donc que la voix
+  // est déconnectée une fois la release passée — et que l'entrée du patch
+  // principal (nœud PARTAGÉ) ne l'est surtout pas, sinon toutes les autres
+  // voix du patch seraient coupées.
+  const p = patch();
+  p.mainPatch.modules.unshift({ id: "in", type: "input", params: {} });
+  p.mainPatch.connections.push({
+    from: { id: "in", port: "out:out" },
+    to: { id: "out", port: "in:in" },
+  });
+  p.voicePatch = {
+    modules: [
+      { id: "v", type: "voice", params: { type: "sawtooth" } },
+      { id: "awv", type: "audioworklet", params: { code: validCode } },
+      { id: "g", type: "gain", params: { gain: 0.5 } },
+      { id: "dest", type: "destination", params: {} },
+    ],
+    connections: [
+      { from: { id: "v", port: "out:out" }, to: { id: "awv", port: "in:in" } },
+      { from: { id: "awv", port: "out:out" }, to: { id: "g", port: "in:in" } },
+      { from: { id: "g", port: "out:out" }, to: { id: "dest", port: "in:in" } },
+    ],
+  };
+  const synth = usePatchVoice(() => p);
+  await synth.init();
+  await synth.noteOn(60);
+  const raw = toRaw(synth.getContext());
+  const awNode = globalThis.__stubWorkletNodes[globalThis.__stubWorkletNodes.length - 1];
+  const gainNode = raw.created.filter((n) => n.__type === "gain").pop();
+  const mainInput = raw.created.find((n) => n.__type === "gain");
+  check("fuite : worklet branché pendant la note", awNode.disconnected !== true);
+  check("fuite : le processor tourne pendant la note",
+    awNode._proc.process([], [], {}) === true);
+  synth.noteOff(60);
+  await new Promise((r) => setTimeout(r, 250));
+  check("fuite : worklet déconnecté après la release", awNode.disconnected === true);
+  check("fuite : gain de la voix déconnecté après la release", gainNode.disconnected === true);
+  check("fuite : l'entrée du patch principal n'est PAS déconnectée",
+    mainInput.disconnected !== true);
+  // LE point décisif : déconnecter ne suffit pas. Un process() qui renvoie true
+  // force le navigateur à garder le node actif. Le moteur doit donc poster le
+  // signal d'arrêt, et le processor renvoyer false ensuite.
+  check("fuite : le signal d'arrêt est posté au worklet",
+    (awNode.__posts ?? []).some((m) => m && m.__awStop === true));
+  check("fuite : process() renvoie false après le signal d'arrêt",
+    awNode._proc.process([], [], {}) === false);
 }
 
 /* =========================================================

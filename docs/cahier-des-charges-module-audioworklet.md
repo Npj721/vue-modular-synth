@@ -258,6 +258,22 @@ __awNativeRegister(name, class extends Classe {
     });
     __awPending = __awDescriptors;   // pour la base injectée ci-dessus
     try { super(merged); } finally { __awPending = null; }
+
+    // Signal d'arrêt (voir §6.4) : le moteur le poste quand la voix est
+    // démontée. On enveloppe process() APRÈS super() pour couvrir aussi bien une
+    // méthode de prototype qu'un champ d'instance.
+    this.port.addEventListener("message", (e) => {
+      if (e?.data?.__awStop) this.__awStopped = true;
+    });
+    // PIÈGE MessagePort : addEventListener seul ne dispatche RIEN tant que
+    // onmessage n'est pas posé ou que start() n'est pas appelé. Sans ce
+    // start(), le signal d'arrêt n'arrive jamais et le processor fuit.
+    this.port.start();
+    const userProcess = this.process;
+    if (typeof userProcess === "function") {
+      this.process = (inputs, outputs, parameters) =>
+        this.__awStopped ? false : userProcess.call(this, inputs, outputs, parameters);
+    }
   }
 });
 ```
@@ -526,6 +542,21 @@ le repli pass-through.
 Pas de `buildGraph` à modifier, pas de `rewireModuleEdges`, pas de bookkeeping d'arêtes, pas de
 `patchType` à propager, pas de façade UI → moteur. **Tout le plumbing de mise à jour à chaud
 disparaît.**
+
+**Démontage de la voix.** Le graphe d'une voix est câblé sur la sortie dès le `noteOn()` ; il faut
+donc le **déconnecter** au `noteOff()`, sinon chaque note laisse derrière elle ses `AudioNode`
+branchés. La déconnexion est **différée après la queue de release** (`createVoice().stop()`), sinon
+la release serait coupée net. Le nœud de destination (l'entrée du patch principal) est **partagé** et
+explicitement épargné (`disconnectEntry(entry, keepNode)`).
+
+Mais **déconnecter ne suffit pas** pour un `AudioWorkletNode` : tant que `process()` renvoie `true`,
+le navigateur est *forcé* de garder le processor actif, même sans connexion ni référence (cf. MDN,
+`AudioWorkletProcessor.process`). Chaque note laisserait donc un processor tourner indéfiniment et le
+CPU saturerait après quelques minutes de jeu (son parasité puis coupé). Le moteur **poste donc un
+signal d'arrêt** (`node.port.postMessage({ __awStop: true })`, helper `stopWorklet`) sur chaque
+worklet de la voix ; le préambule (§5.3) fait alors renvoyer `false` à `process()`, ce qui permet au
+navigateur de récupérer le node. Idem pour les worklets du mainPatch à chaque
+`rebuildMainPatch()` (teardown).
 
 ### 6.5 Fichiers touchés
 
