@@ -7,6 +7,7 @@ import {
   getWavetableFrameState,
 } from '../composables/usePatchVoice'
 import { parseRanges, WORKLET_PARAM_NAMES } from '../composables/useAudioWorklet'
+import { useWorkletPresets } from '../composables/useWorkletPresets'
 import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
 import SampleWaveformEditor from './SampleWaveformEditor.vue'
@@ -21,6 +22,11 @@ const emit = defineEmits(['param-changed', 'label-changed'])
 const params = reactive({})
 const paramDefs = reactive({})
 const label = ref("")
+
+// Presets AudioWorklet (cf. bloc "PRESETS" plus bas) — déclarés ici car le
+// watch de changement de module (immediate) les réinitialise pendant le setup.
+const presetName = ref("")
+const presetStatus = ref("")
 
 // Validation JSON différée : re-parser un gros JSON (wavetable / wavetableS)
 // à chaque frappe bloquerait la saisie → résultat calculé ~350 ms après le
@@ -193,6 +199,7 @@ watch(
     Object.keys(jsonTimers).forEach(k => clearTimeout(jsonTimers[k]))
     resetCodeDraft()
     closeJsonModal()
+    presetStatus.value = ""
 
     if (!mod) return
 
@@ -234,6 +241,81 @@ const emitChange = (key, value) => {
   params[key] = value
   if (paramDefs[key]?.type === "json") scheduleJsonValidation(key)
   emit('param-changed', { key, value })
+}
+
+/* =========================================================
+ * PRESETS AUDIOWORKLETT (module AudioWorklet)
+ *
+ * Sauvegarde de la config COMPLÈTE du module (code, rate, channels,
+ * options JSON, valeurs p1..p8) sous un nom dans IndexedDB, pour la
+ * réutiliser plus tard — y compris dans un autre module d'un autre
+ * patch. Le chargement écrase la config courante du module sélectionné.
+ * ========================================================= */
+
+const {
+  names: workletPresetNames,
+  get: getWorkletPreset,
+  save: saveWorkletPreset,
+  remove: removeWorkletPreset,
+} = useWorkletPresets()
+
+const workletPresetList = computed(() =>
+  workletPresetNames().map((name) => ({
+    name,
+    savedAt: getWorkletPreset(name)?.savedAt ?? 0,
+  }))
+)
+
+const formatPresetDate = (ts) =>
+  ts ? new Date(ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : ""
+
+// Capturer la config courante, brouillons de code non commis compris
+const snapshotWorkletParams = () => {
+  // le textarea est un draft : on committe tout ce qui est en attente
+  // pour que le snapshot reflète bien ce qui est affiché à l'écran
+  Object.keys(codeDrafts).forEach((k) => commitCode(k))
+  return deepClone(props.module?.params || {})
+}
+
+const saveCurrentWorkletPreset = () => {
+  const name = presetName.value.trim()
+  if (!name) {
+    presetStatus.value = "donnez un nom au preset"
+    return
+  }
+  saveWorkletPreset(name, snapshotWorkletParams())
+  presetName.value = ""
+  presetStatus.value = `preset « ${name} » sauvegardé`
+}
+
+// Écraser la config courante par le preset choisi
+const applyWorkletPreset = (name) => {
+  const preset = getWorkletPreset(name)
+  if (!preset || !props.module) return
+  if (!window.confirm(`Charger le preset « ${name} » ? La config courante de ce module sera écrasée.`)) return
+
+  const saved = preset.params || {}
+  const defs = paramDefs
+
+  Object.keys(defs).forEach((key) => {
+    if (!(key in saved)) return
+    const value = deepClone(saved[key])
+    // le textarea affiche le draft en priorité : on le remplace pour que
+    // le code chargé soit visible immédiatement
+    if (defs[key].type === "code") {
+      clearTimeout(codeTimers[key])
+      codeTimers[key] = undefined
+      codeDrafts[key] = value
+    }
+    emitChange(key, value)
+  })
+  presetStatus.value = `preset « ${name} » chargé`
+}
+
+const deleteWorkletPreset = (name) => {
+  if (!window.confirm(`Supprimer le preset « ${name} » ?`)) return
+  removeWorkletPreset(name)
+  presetStatus.value = `preset « ${name} » supprimé`
 }
 
 const emitLabel = () => {
@@ -872,6 +954,36 @@ onBeforeUnmount(() => {
       />
     </div>
 
+    <!-- Presets AudioWorklet : sauvegarde / rechargement de la config
+         complète (code, rate, channels, options, p1..p8) sous un nom,
+         persistée en IndexedDB (cf. useWorkletPresets) -->
+    <div v-if="module.type === 'audioworklet'" class="worklet-presets">
+      <h4>Presets</h4>
+      <div class="worklet-preset-save">
+        <input
+          v-model="presetName"
+          type="text"
+          placeholder="Nom du preset (ex: FM bell)"
+          @keydown.enter="saveCurrentWorkletPreset"
+        />
+        <button type="button" @click="saveCurrentWorkletPreset">Sauver la config</button>
+      </div>
+      <ul v-if="workletPresetList.length" class="worklet-preset-list">
+        <li v-for="p in workletPresetList" :key="p.name">
+          <span class="worklet-preset-name" :title="p.name">{{ p.name }}</span>
+          <span class="worklet-preset-date">{{ formatPresetDate(p.savedAt) }}</span>
+          <button type="button" @click="applyWorkletPreset(p.name)">Charger</button>
+          <button
+            type="button"
+            class="worklet-preset-delete"
+            title="Supprimer"
+            @click="deleteWorkletPreset(p.name)">✕</button>
+        </li>
+      </ul>
+      <span v-else class="hint">aucun preset sauvegardé pour l'instant</span>
+      <span v-if="presetStatus" class="hint worklet-preset-status">{{ presetStatus }}</span>
+    </div>
+
     <!-- Modale d'édition du JSON des wavetables : seul endroit où le gros
          textarea est rendu (donc uniquement quand on en a besoin). Le
          Teleport envoie le contenu sur <body>, la position DOM n'a aucune
@@ -1235,6 +1347,100 @@ onBeforeUnmount(() => {
   border-top: 1px dashed #ddd;
 }
 
+.worklet-presets {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed #ddd;
+}
+
+.worklet-presets h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #555;
+}
+
+.worklet-preset-save {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.worklet-preset-save input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.worklet-preset-save button {
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid #c9c9c9;
+  border-radius: 3px;
+  background: #fff;
+  white-space: nowrap;
+}
+
+.worklet-preset-save button:hover {
+  background: #f1f1f1;
+}
+
+.worklet-preset-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.worklet-preset-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.worklet-preset-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worklet-preset-date {
+  font-size: 10px;
+  color: #999;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.worklet-preset-list button {
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border: 1px solid #c9c9c9;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.worklet-preset-list button:hover {
+  background: #f1f1f1;
+}
+
+.worklet-preset-delete {
+  color: #c0392b;
+}
+
+.worklet-preset-status {
+  display: block;
+  margin-top: 6px;
+  color: #2c6e4f;
+}
 .sample-region-editor h4 {
   margin: 0 0 8px;
   font-size: 12px;
