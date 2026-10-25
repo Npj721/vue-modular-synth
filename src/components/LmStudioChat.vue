@@ -1,6 +1,6 @@
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from "vue";
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useLmStudioAPI } from "../composables/useLmStudioAPI";
 import { useLmStudioSettings } from "../composables/useLmStudioSettings";
 import { useModuleCatalog } from "../composables/useModuleCatalog";
@@ -17,6 +17,7 @@ const {
   refreshModels,
   loadModel,
   chat,
+  cancelChat,
   setBaseUrl,
   resetConversation,
 } = useLmStudioAPI({ baseUrl: settings.baseUrl });
@@ -583,6 +584,17 @@ function startNewConversation() {
   messages.value = [];
 }
 
+/** Interrompt la génération en cours ; la réponse partielle est conservée. */
+function cancelResponse() {
+  cancelChat();
+}
+
+// Fermer le panneau IA pendant une génération ne doit pas laisser le flux
+// ouvert : on annule la requête lorsque le composant est démonté.
+onBeforeUnmount(() => {
+  cancelChat();
+});
+
 async function sendMessage() {
   const question = input.value.trim();
 
@@ -650,6 +662,16 @@ async function askModel(question) {
     // d'extraire l'objet JSON et de charger le synthé proposé.
     emit("patch-received", messages.value[answerIndex].content);
   } catch (err) {
+    if (err.name === "AbortError") {
+      const partial = messages.value[answerIndex].content;
+
+      messages.value[answerIndex].content = partial
+        ? `${partial}\n\nGénération annulée.`
+        : "Génération annulée.";
+
+      return;
+    }
+
     messages.value[answerIndex].content += `\n\nErreur : ${err.message}`;
   } finally {
     await scrollToBottom();
@@ -934,10 +956,21 @@ async function scrollToBottom() {
       />
 
       <button
-        type="submit"
-        :disabled="!isModelLoaded || !input.trim() || chatting"
+        v-if="chatting"
+        type="button"
+        class="cancel-button"
+        aria-label="Annuler la génération"
+        @click="cancelResponse"
       >
-        {{ chatting ? "Réponse…" : "Envoyer" }}
+        Annuler
+      </button>
+
+      <button
+        v-else
+        type="submit"
+        :disabled="!isModelLoaded || !input.trim()"
+      >
+        Envoyer
       </button>
     </form>
   </section>
@@ -1183,6 +1216,14 @@ button:disabled {
   border-radius: 8px;
   color: inherit;
   background: white;
+}
+
+.cancel-button {
+  background: #dc2626;
+}
+
+.cancel-button:hover {
+  background: #b91c1c;
 }
 
 @media (max-width: 500px) {

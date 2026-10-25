@@ -109,6 +109,16 @@ export function useLmStudioAPI(options = {}) {
     lastResponse.value = null;
   }
 
+  // Contrôleur de la requête de chat en cours, utilisé par cancelChat().
+  let activeChatController = null;
+
+  /** Interrompt la génération en cours (bouton « Annuler »). */
+  function cancelChat() {
+    if (activeChatController) {
+      activeChatController.abort();
+    }
+  }
+
   /**
    * Change l'URL du serveur LM Studio à chaud. La conversation en cours est
    * réinitialisée : son response_id appartient à l'ancien serveur.
@@ -131,6 +141,9 @@ export function useLmStudioAPI(options = {}) {
     chatting.value = true;
     error.value = null;
 
+    const controller = new AbortController();
+    activeChatController = controller;
+
     const { contextLength, temperature, maxTokens } = options;
 
     try {
@@ -139,6 +152,7 @@ export function useLmStudioAPI(options = {}) {
         headers: {
           "Content-Type": "application/json",
         },
+        signal: controller.signal,
         body: JSON.stringify({
           model,
           input: message,
@@ -238,9 +252,18 @@ export function useLmStudioAPI(options = {}) {
 
       return fullText;
     } catch (err) {
-      error.value = err.message;
+      // Une annulation volontaire n'est pas une erreur à afficher.
+      if (err.name === "AbortError") {
+        error.value = null;
+      } else {
+        error.value = err.message;
+      }
+
       throw err;
     } finally {
+      if (activeChatController === controller) {
+        activeChatController = null;
+      }
       chatting.value = false;
     }
   }
@@ -259,6 +282,7 @@ export function useLmStudioAPI(options = {}) {
     loadModel,
     unloadModel,
     chat,
+    cancelChat,
     conversationId,
     resetConversation,
   };
