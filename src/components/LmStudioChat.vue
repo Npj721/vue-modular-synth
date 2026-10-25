@@ -13,7 +13,6 @@ const {
   refreshModels,
   loadModel,
   chat,
-  conversationId,
   resetConversation,
 } = useLmStudioAPI();
 
@@ -25,6 +24,11 @@ const messages = ref([]);
 const chatContainer = ref(null);
 
 const emit = defineEmits(["patch-received"]);
+
+// Nombre de tentatives de correction automatique pour une même demande
+// utilisateur : évite une boucle infinie si le modèle n'arrive pas à corriger.
+const MAX_CORRECTION_ATTEMPTS = 3;
+let correctionAttempts = 0;
 
 const props = defineProps({
   // Patch actuellement ouvert dans l'éditeur : envoyé au modèle comme
@@ -514,12 +518,22 @@ async function sendMessage() {
 
   if (!question || !isModelLoaded.value || chatting.value) return;
 
+  // Nouvelle demande manuelle : on réarme le compteur de corrections.
+  correctionAttempts = 0;
+  input.value = "";
+
+  await askModel(question);
+}
+
+/**
+ * Envoie une demande au modèle, l'affiche dans le fil puis émet la réponse
+ * complète pour que le parent tente de charger le patch proposé.
+ */
+async function askModel(question) {
   messages.value.push({
     role: "user",
     content: question,
   });
-
-  input.value = "";
 
   const answerIndex =
     messages.value.push({
@@ -566,6 +580,43 @@ async function sendMessage() {
     await scrollToBottom();
   }
 }
+
+/**
+ * Appelée par le parent lorsque l'importation du patch a échoué : les
+ * erreurs sont renvoyées au modèle dans un nouveau message afin qu'il
+ * corrige sa proposition. Limitée à MAX_CORRECTION_ATTEMPTS par demande.
+ */
+async function requestCorrection(errors = []) {
+  const details = errors.filter(Boolean);
+
+  if (!details.length || !isModelLoaded.value || chatting.value) return;
+
+  if (correctionAttempts >= MAX_CORRECTION_ATTEMPTS) {
+    error.value = `Le patch n'a pas pu être importé après ${MAX_CORRECTION_ATTEMPTS} tentatives de correction. Corrige-le manuellement ou reformule la demande.`;
+    await scrollToBottom();
+    return;
+  }
+
+  correctionAttempts += 1;
+
+  const message = [
+    "⚠️ Le patch que tu viens de proposer n'a pas pu être importé dans l'éditeur.",
+    "",
+    "Erreurs détectées :",
+    ...details.map((detail) => `- ${detail}`),
+    "",
+    "Corrige le patch pour résoudre ces erreurs, puis renvoie le patch complet et valide au format JSON attendu.",
+  ].join("\n");
+
+  await askModel(message);
+}
+
+/** Réinitialise le compteur après un import réussi. */
+function resetCorrectionAttempts() {
+  correctionAttempts = 0;
+}
+
+defineExpose({ requestCorrection, resetCorrectionAttempts });
 
 async function scrollToBottom() {
   await nextTick();

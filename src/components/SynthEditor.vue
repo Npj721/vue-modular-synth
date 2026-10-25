@@ -7,7 +7,9 @@ import SynthPatchManager from "./SynthPatchManager.vue";
 import LmStudioChat from "./LmStudioChat.vue";
 
 import { useDockState } from "../composables/useDockState";
+import { useModuleCatalog } from "../composables/useModuleCatalog";
 const { showVisualizer, showKeyboard } = useDockState()
+const { getCatalog } = useModuleCatalog()
 
 const currentPatch = ref("voice")
 const patchManagerOpen = ref(false)
@@ -15,6 +17,7 @@ const aiOpen = ref(false)
 
 const voiceEditor = ref(null)
 const mainEditor = ref(null)
+const chatRef = ref(null)
 
 const voicePatch = reactive({
   modules: [],
@@ -90,22 +93,155 @@ const extractJsonObject = (text) => {
   return null
 }
 
+/* =========================
+ * Validation du patch proposé par l'IA avant import.
+ * Retourne une liste de messages d'erreur lisibles par le modèle :
+ * ces messages lui sont renvoyés pour qu'il corrige sa proposition.
+ * ========================= */
+const validateSynthPatch = (synthPatch) => {
+  const errors = []
+  const catalog = getCatalog()
+
+  if (!synthPatch || typeof synthPatch !== "object" || Array.isArray(synthPatch)) {
+    return ["La réponse ne contient pas un objet patch JSON valide."]
+  }
+
+  const graphs = [
+    ["voicePatch", synthPatch.voicePatch],
+    ["mainPatch", synthPatch.mainPatch],
+  ]
+
+  for (const [graphName, graph] of graphs) {
+    if (!graph || typeof graph !== "object" || Array.isArray(graph)) {
+      errors.push(`${graphName} est absent ou n'est pas un objet.`)
+      continue
+    }
+
+    const modules = Array.isArray(graph.modules) ? graph.modules : null
+    const connections = Array.isArray(graph.connections) ? graph.connections : null
+
+    if (!modules) errors.push(`${graphName}.modules doit être un tableau.`)
+    if (!connections) errors.push(`${graphName}.connections doit être un tableau.`)
+    if (!modules || !connections) continue
+
+    const moduleIds = new Set()
+
+    for (const [index, module] of modules.entries()) {
+      const where = `${graphName}.modules[${index}]`
+
+      if (!module || typeof module !== "object") {
+        errors.push(`${where} n'est pas un objet.`)
+        continue
+      }
+
+      if (typeof module.id !== "string" || !module.id) {
+        errors.push(`${where}.id doit être une chaîne non vide.`)
+      } else if (moduleIds.has(module.id)) {
+        errors.push(`${where}.id "${module.id}" est dupliqué dans ${graphName}.`)
+      } else {
+        moduleIds.add(module.id)
+      }
+
+      if (typeof module.type !== "string" || !catalog[module.type]) {
+        errors.push(`${where}.type "${module.type}" n'existe pas dans le catalogue.`)
+      }
+
+      if (
+        !module.position ||
+        !Number.isFinite(module.position.x) ||
+        !Number.isFinite(module.position.y)
+      ) {
+        errors.push(`${where}.position doit contenir des coordonnées x et y numériques.`)
+      }
+
+      if (
+        module.params !== undefined &&
+        (!module.params || typeof module.params !== "object" || Array.isArray(module.params))
+      ) {
+        errors.push(`${where}.params doit être un objet.`)
+      }
+    }
+
+    for (const [index, connection] of connections.entries()) {
+      const where = `${graphName}.connections[${index}]`
+
+      if (!connection || typeof connection !== "object") {
+        errors.push(`${where} n'est pas un objet.`)
+        continue
+      }
+
+      const endpoints = [
+        ["from", connection.from, "outputs", "out"],
+        ["to", connection.to, "inputs", "in"],
+      ]
+
+      for (const [side, endpoint, portCollection, portPrefix] of endpoints) {
+        if (!endpoint || typeof endpoint !== "object") {
+          errors.push(`${where}.${side} est absent.`)
+          continue
+        }
+
+        if (typeof endpoint.id !== "string" || !endpoint.id) {
+          errors.push(`${where}.${side}.id est absent.`)
+          continue
+        }
+
+        const module = modules.find((m) => m?.id === endpoint.id)
+        if (!module) {
+          errors.push(
+            `${where}.${side}.id "${endpoint.id}" ne correspond à aucun module de ${graphName}.`
+          )
+          continue
+        }
+
+        const definition = catalog[module.type]
+        if (!definition) continue
+
+        if (typeof endpoint.port !== "string" || !endpoint.port) {
+          errors.push(`${where}.${side}.port est absent.`)
+          continue
+        }
+
+        const ports = definition.ports?.[portCollection] ?? []
+        if (!ports.some((port) => endpoint.port === `${portPrefix}:${port.id}`)) {
+          const available = ports.map((port) => `${portPrefix}:${port.id}`).join(", ")
+          errors.push(
+            `${where}.${side}.port "${endpoint.port}" n'existe pas sur le module "${endpoint.id}" (${module.type}). Ports valides : ${available || "aucun"}.`
+          )
+        }
+      }
+    }
+  }
+
+  return errors
+}
+
+/**
+ * Tente de charger le patch proposé par l'IA. En cas d'échec, les erreurs
+ * sont renvoyées au modèle via LmStudioChat pour qu'il corrige sa réponse.
+ */
 const handleAiPatchReceived = (answer) => {
   const synthPatch = extractJsonObject(answer)
 
   // Réponse purement conversationnelle : rien à charger.
   if (!synthPatch) return
 
-  if (!synthPatch.voicePatch && !synthPatch.mainPatch) {
-    Swal.fire({
-      icon: "warning",
-      title: "Patch illisible",
-      text: "La réponse du modèle ne contient pas de patch JSON exploitable.",
-    })
+  const errors = validateSynthPatch(synthPatch)
+
+  if (!errors.length) {
+    try {
+      handleSynthPatchLoaded(synthPatch)
+    } catch (err) {
+      errors.push(`Erreur pendant l'importation du patch : ${err.message}`)
+    }
+  }
+
+  if (errors.length) {
+    chatRef.value?.requestCorrection(errors)
     return
   }
 
-  handleSynthPatchLoaded(synthPatch)
+  chatRef.value?.resetCorrectionAttempts()
   currentPatch.value = "voice"
   Swal.fire({
     toast: true,
@@ -203,6 +339,7 @@ const emit = defineEmits(["update:patch"])
         <button class="ai-close" type="button" aria-label="Fermer l'assistant" @click="aiOpen = false">✕</button>
       </div>
       <LmStudioChat
+        ref="chatRef"
         class="ai-chat"
         :voice-patch="voicePatch"
         :main-patch="mainPatch"
