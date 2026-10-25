@@ -97,7 +97,7 @@ export function useLmStudioAPI(options = {}) {
     lastResponse.value = null;
   }
 
-  async function chat(model, message, onDelta = () => {}) {
+  async function chat(model, message, onDelta = () => {}, systemPrompt = "") {
     chatting.value = true;
     error.value = null;
 
@@ -114,7 +114,7 @@ export function useLmStudioAPI(options = {}) {
           store: true,
           ...(conversationId.value
             ? { previous_response_id: conversationId.value }
-            : {}),
+            : { system_prompt: systemPrompt }),
         }),
       });
 
