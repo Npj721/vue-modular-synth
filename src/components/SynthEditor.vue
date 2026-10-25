@@ -73,24 +73,117 @@ const handleSynthPatchLoaded = (synthPatch) => {
 }
 
 /* =========================
- * Chargement d'un patch proposé par l'IA.
+ * Extraction et diagnostic du JSON proposé par l'IA.
  * Le modèle encadre parfois le JSON de texte ou de Markdown : on repère
  * la première accolade ouvrante, puis on tente les accolades fermantes
  * de la dernière vers la première pour retrouver l'objet complet.
+ * Si aucune tentative n'aboutit, on conserve l'erreur de syntaxe et sa
+ * position pour pouvoir la transmettre au modèle.
  * ========================= */
-const extractJsonObject = (text) => {
-  if (typeof text !== "string") return null
-  const start = text.indexOf("{")
-  if (start === -1) return null
+const parseJsonResponse = (text) => {
+  if (typeof text !== "string") {
+    return { patch: null, syntaxError: null }
+  }
 
+  const start = text.indexOf("{")
+  if (start === -1) {
+    return { patch: null, syntaxError: null }
+  }
+
+  // Candidats du plus large au plus court : le dernier } ferme en principe
+  // l'objet, les précédents permettent d'ignorer un éventuel texte résiduel.
+  const candidates = []
   for (let end = text.lastIndexOf("}"); end > start; end = text.lastIndexOf("}", end - 1)) {
+    candidates.push(text.slice(start, end + 1))
+  }
+  if (!candidates.length) candidates.push(text.slice(start))
+
+  let firstError = null
+
+  for (const candidate of candidates) {
     try {
-      return JSON.parse(text.slice(start, end + 1))
-    } catch {
-      // accolade trop précoce (JSON imbriqué) : on essaie la précédente
+      return { patch: JSON.parse(candidate), syntaxError: null }
+    } catch (error) {
+      // On garde l'erreur du candidat le plus large : c'est celle qui décrit
+      // le mieux le problème de syntaxe du patch complet.
+      if (!firstError) firstError = { error, candidate }
     }
   }
+
+  return { patch: null, syntaxError: firstError }
+}
+
+/** Vrai si le texte ressemble à une tentative de patch, pas à du texte libre. */
+const looksLikePatchAttempt = (text) =>
+  typeof text === "string" &&
+  /"?(voicePatch|mainPatch|modules|connections|version)"?\s*:/i.test(text)
+
+/** Position (0-based) de l'erreur selon le navigateur / moteur JS. */
+const getJsonErrorPosition = (message, candidate) => {
+  const positionMatch = message.match(/position\s+(\d+)/i)
+  if (positionMatch) return Number(positionMatch[1])
+
+  const lineColumnMatch =
+    message.match(/\(line\s+(\d+)\s+column\s+(\d+)\)/i) ||
+    message.match(/line\s+(\d+)\s+column\s+(\d+)/i)
+
+  if (lineColumnMatch) {
+    const line = Number(lineColumnMatch[1])
+    const column = Number(lineColumnMatch[2])
+    const prefix = candidate
+      .split("\n")
+      .slice(0, Math.max(0, line - 1))
+      .join("\n")
+    return prefix.length + (line > 1 ? 1 : 0) + Math.max(0, column - 1)
+  }
+
+  if (/end of (json )?input/i.test(message)) return candidate.length
+
   return null
+}
+
+const getLineColumn = (text, position) => {
+  if (!Number.isFinite(position)) return { line: null, column: null }
+
+  const before = text.slice(0, position)
+  return {
+    line: before.split("\n").length,
+    column: position - before.lastIndexOf("\n"),
+  }
+}
+
+/**
+ * Extrait de quelques caractères autour de l'erreur. Le marqueur ⟦ICI⟧
+ * évite tout problème d'alignement avec les retours à la ligne.
+ */
+const buildJsonErrorSnippet = (text, position, radius = 80) => {
+  if (!Number.isFinite(position)) {
+    return text.length > radius * 3 ? `${text.slice(0, radius * 3)}…` : text
+  }
+
+  const from = Math.max(0, position - radius)
+  const to = Math.min(text.length, position + radius)
+  const before = text.slice(from, position)
+  const after = text.slice(position, to)
+  const prefix = from > 0 ? "…" : ""
+  const suffix = to < text.length ? "…" : ""
+
+  return `${prefix}${before}⟦ICI⟧${after}${suffix}`
+}
+
+/** Message d'erreur de syntaxe lisible par le modèle, avec localisation. */
+const formatJsonSyntaxError = ({ error, candidate }) => {
+  const message = String(error?.message || "JSON invalide")
+  const position = getJsonErrorPosition(message, candidate)
+  const { line, column } = getLineColumn(candidate, position)
+  const location =
+    line !== null ? `ligne ${line}, colonne ${column}` : "position indéterminée"
+
+  return [
+    `Erreur de syntaxe JSON (${location}) : ${message}`,
+    "Extrait autour de l'emplacement de l'erreur (⟦ICI⟧) :",
+    buildJsonErrorSnippet(candidate, position),
+  ].join("\n")
 }
 
 /* =========================
@@ -221,10 +314,19 @@ const validateSynthPatch = (synthPatch) => {
  * sont renvoyées au modèle via LmStudioChat pour qu'il corrige sa réponse.
  */
 const handleAiPatchReceived = (answer) => {
-  const synthPatch = extractJsonObject(answer)
+  const { patch: synthPatch, syntaxError } = parseJsonResponse(answer)
 
-  // Réponse purement conversationnelle : rien à charger.
-  if (!synthPatch) return
+  // Aucun JSON exploitable. Si le texte ressemble malgré tout à une tentative
+  // de patch, on transmet l'erreur de syntaxe au modèle pour qu'il la corrige.
+  if (!synthPatch) {
+    if (syntaxError && looksLikePatchAttempt(answer)) {
+      chatRef.value?.requestCorrection([
+        formatJsonSyntaxError(syntaxError),
+        "Renvoie un objet JSON syntaxiquement valide, sans texte ni balise Markdown autour.",
+      ])
+    }
+    return
+  }
 
   const errors = validateSynthPatch(synthPatch)
 

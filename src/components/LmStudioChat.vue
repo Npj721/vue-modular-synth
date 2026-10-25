@@ -27,7 +27,7 @@ const emit = defineEmits(["patch-received"]);
 
 // Nombre de tentatives de correction automatique pour une même demande
 // utilisateur : évite une boucle infinie si le modèle n'arrive pas à corriger.
-const MAX_CORRECTION_ATTEMPTS = 3;
+const MAX_CORRECTION_ATTEMPTS = 15;
 let correctionAttempts = 0;
 
 const props = defineProps({
@@ -603,7 +603,7 @@ async function requestCorrection(errors = []) {
     "⚠️ Le patch que tu viens de proposer n'a pas pu être importé dans l'éditeur.",
     "",
     "Erreurs détectées :",
-    ...details.map((detail) => `- ${detail}`),
+    ...details.map((detail) => `- ${String(detail).replace(/\n/g, "\n  ")}`),
     "",
     "Corrige le patch pour résoudre ces erreurs, puis renvoie le patch complet et valide au format JSON attendu.",
   ].join("\n");
