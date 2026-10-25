@@ -4,12 +4,14 @@ import Swal from "sweetalert2"
 import PatchEditor from "./PatchEditor.vue";
 import SuperModuleEditor from "./SuperModuleEditor.vue";
 import SynthPatchManager from "./SynthPatchManager.vue";
+import LmStudioChat from "./LmStudioChat.vue";
 
 import { useDockState } from "../composables/useDockState";
 const { showVisualizer, showKeyboard } = useDockState()
 
 const currentPatch = ref("voice")
 const patchManagerOpen = ref(false)
+const aiOpen = ref(false)
 
 const voiceEditor = ref(null)
 const mainEditor = ref(null)
@@ -136,10 +138,24 @@ const emit = defineEmits(["update:patch"])
           :disabled="currentPatch === 'super'"
           @click="showKeyboard = !showKeyboard"
         >{{ showKeyboard ? "◀ Keyboard" : "▶ Keyboard" }}</button>
+
+        <button
+          class="button toggle-manager"
+          :class="{ actif: aiOpen }"
+          @click="aiOpen = !aiOpen"
+        >{{ aiOpen ? "◀ IA" : "▶ IA" }}</button>
     </div>
     <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" :manager-open="patchManagerOpen" v-show="currentPatch === 'voice'"></PatchEditor>
     <PatchEditor ref="mainEditor" v-model:patch="mainPatch" :manager-open="patchManagerOpen" v-show="currentPatch === 'main'"></PatchEditor>
     <SuperModuleEditor v-show="currentPatch === 'super'"></SuperModuleEditor>
+
+    <aside v-if="aiOpen" class="ai-panel">
+      <div class="ai-panel-header">
+        <span>Assistant IA</span>
+        <button class="ai-close" type="button" aria-label="Fermer l'assistant" @click="aiOpen = false">✕</button>
+      </div>
+      <LmStudioChat class="ai-chat" />
+    </aside>
 </div>
 </template>
 
@@ -180,6 +196,10 @@ h1{
   margin-left: 12px;
 }
 
+.button.toggle-manager.actif {
+  background: #00c9a7;
+}
+
 .button.clear:disabled {
   background: #aaa;
   cursor: not-allowed;
@@ -191,5 +211,51 @@ h1{
   border-top:1px solid rgba(255,255,255, .1);
   padding-top:2px;
   padding-bottom:2px;
+}
+
+/* =========================
+ * Panneau Assistant IA (LmStudioChat)
+ * Superposé à droite pour ne pas réduire la surface du patch.
+ * ========================= */
+.ai-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: var(--dock-height, 0px);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100vw);
+  background: #fff;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.35);
+}
+
+.ai-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 16px;
+  background: #12332b;
+  color: #fff;
+  font-weight: bold;
+}
+
+.ai-close {
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ai-panel .ai-chat {
+  flex: 1;
+  height: auto;
+  max-width: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  min-height: 0;
 }
 </style>
