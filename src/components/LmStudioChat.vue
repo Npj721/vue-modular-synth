@@ -24,6 +24,8 @@ const input = ref("");
 const messages = ref([]);
 const chatContainer = ref(null);
 
+const emit = defineEmits(["patch-received"]);
+
 const currentModel = computed(() =>
   availableModels.value.find((model) => model.key === selectedModel.value)
 );
@@ -443,6 +445,10 @@ async function sendMessage() {
         "input"
       ])
     );
+
+    // Réponse complète reçue : on la transmet au parent, qui se charge
+    // d'extraire l'objet JSON et de charger le synthé proposé.
+    emit("patch-received", messages.value[answerIndex].content);
   } catch (err) {
     messages.value[answerIndex].content += `\n\nErreur : ${err.message}`;
   } finally {

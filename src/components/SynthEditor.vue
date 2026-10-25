@@ -69,6 +69,54 @@ const handleSynthPatchLoaded = (synthPatch) => {
   //}
 }
 
+/* =========================
+ * Chargement d'un patch proposé par l'IA.
+ * Le modèle encadre parfois le JSON de texte ou de Markdown : on repère
+ * la première accolade ouvrante, puis on tente les accolades fermantes
+ * de la dernière vers la première pour retrouver l'objet complet.
+ * ========================= */
+const extractJsonObject = (text) => {
+  if (typeof text !== "string") return null
+  const start = text.indexOf("{")
+  if (start === -1) return null
+
+  for (let end = text.lastIndexOf("}"); end > start; end = text.lastIndexOf("}", end - 1)) {
+    try {
+      return JSON.parse(text.slice(start, end + 1))
+    } catch {
+      // accolade trop précoce (JSON imbriqué) : on essaie la précédente
+    }
+  }
+  return null
+}
+
+const handleAiPatchReceived = (answer) => {
+  const synthPatch = extractJsonObject(answer)
+
+  // Réponse purement conversationnelle : rien à charger.
+  if (!synthPatch) return
+
+  if (!synthPatch.voicePatch && !synthPatch.mainPatch) {
+    Swal.fire({
+      icon: "warning",
+      title: "Patch illisible",
+      text: "La réponse du modèle ne contient pas de patch JSON exploitable.",
+    })
+    return
+  }
+
+  handleSynthPatchLoaded(synthPatch)
+  currentPatch.value = "voice"
+  Swal.fire({
+    toast: true,
+    position: "bottom-end",
+    icon: "success",
+    title: `Patch « ${synthPatch.name || "IA"} » chargé`,
+    timer: 2500,
+    showConfirmButton: false,
+  })
+}
+
 const props = defineProps({
   patch: {
     type: Object,
@@ -154,7 +202,7 @@ const emit = defineEmits(["update:patch"])
         <span>Assistant IA</span>
         <button class="ai-close" type="button" aria-label="Fermer l'assistant" @click="aiOpen = false">✕</button>
       </div>
-      <LmStudioChat class="ai-chat" />
+      <LmStudioChat class="ai-chat" @patch-received="handleAiPatchReceived" />
     </aside>
 </div>
 </template>
