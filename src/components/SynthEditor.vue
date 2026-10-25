@@ -202,7 +202,12 @@ const emit = defineEmits(["update:patch"])
         <span>Assistant IA</span>
         <button class="ai-close" type="button" aria-label="Fermer l'assistant" @click="aiOpen = false">✕</button>
       </div>
-      <LmStudioChat class="ai-chat" @patch-received="handleAiPatchReceived" />
+      <LmStudioChat
+        class="ai-chat"
+        :voice-patch="voicePatch"
+        :main-patch="mainPatch"
+        @patch-received="handleAiPatchReceived"
+      />
     </aside>
 </div>
 </template>

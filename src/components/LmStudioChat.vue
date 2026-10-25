@@ -26,6 +26,13 @@ const chatContainer = ref(null);
 
 const emit = defineEmits(["patch-received"]);
 
+const props = defineProps({
+  // Patch actuellement ouvert dans l'éditeur : envoyé au modèle comme
+  // contexte afin qu'il propose des modifications plutôt qu'un nouveau patch.
+  voicePatch: { type: Object, default: () => ({ modules: [], connections: [] }) },
+  mainPatch: { type: Object, default: () => ({ modules: [], connections: [] }) },
+});
+
 const currentModel = computed(() =>
   availableModels.value.find((model) => model.key === selectedModel.value)
 );
@@ -81,6 +88,102 @@ function buildCompactModuleCatalog(types = null) {
       params,
     };
   });
+}
+
+/**
+ * Réduit un graphe du patch courant à ses propriétés utiles au modèle
+ * (id, type, params, position, label + connexions), sans les métadonnées
+ * internes de l'éditeur.
+ */
+function compactGraph(graph) {
+  const cloneParams = (params) => {
+    try {
+      return JSON.parse(JSON.stringify(params ?? {}));
+    } catch {
+      return {};
+    }
+  };
+
+  return {
+    modules: (graph?.modules ?? []).map((module) => ({
+      id: module.id,
+      type: module.type,
+      ...(module.label ? { label: module.label } : {}),
+      ...(module.position
+        ? { position: { x: module.position.x, y: module.position.y } }
+        : {}),
+      params: cloneParams(module.params),
+    })),
+    connections: (graph?.connections ?? []).map((connection) => ({
+      from: {
+        id: connection.from?.id,
+        magnet: connection.from?.magnet ?? "circle",
+        port: connection.from?.port,
+      },
+      to: {
+        id: connection.to?.id,
+        magnet: connection.to?.magnet ?? "circle",
+        port: connection.to?.port,
+      },
+    })),
+  };
+}
+
+/**
+ * Décrit le patch en cours d'édition. Ce bloc est ajouté à chaque message
+ * utilisateur (et non au seul prompt système) afin que le modèle dispose
+ * toujours de l'état réel du patch, y compris après plusieurs échanges.
+ * Retourne une chaîne vide si les deux graphes sont vides.
+ */
+function buildCurrentPatchContext() {
+  const voicePatch = compactGraph(props.voicePatch);
+  const mainPatch = compactGraph(props.mainPatch);
+
+  if (!voicePatch.modules.length && !mainPatch.modules.length) return "";
+
+  const currentPatch = {
+    version: 1,
+    name: "patch en cours d'édition",
+    voicePatch,
+    mainPatch,
+  };
+
+  return [
+    "==================================================",
+    "PATCH EN COURS D'ÉDITION — MODIFICATION ATTENDUE",
+    "==================================================",
+    "",
+    "Le patch ci-dessous est celui qui est actuellement ouvert dans l'éditeur :",
+    JSON.stringify(currentPatch),
+    "",
+    "La demande exprimée ci-dessus porte sur CE patch existant : l'utilisateur ne demande pas un nouveau patch, mais une modification de celui-ci.",
+    "- conserve les modules, paramètres, labels et connexions existants qui ne sont pas concernés par la demande ;",
+    "- ajoute, retire ou modifie uniquement ce qui est nécessaire pour satisfaire la demande ;",
+    "- réutilise les identifiants existants et donne des identifiants uniques aux nouveaux modules ;",
+    "- renvoie toujours le patch COMPLET et mis à jour (voicePatch ET mainPatch), jamais un diff ni un fragment ;",
+    "- place les nouveaux modules sur des positions (x, y) libres, sans chevaucher les modules existants.",
+    "",
+    "Exemples de demandes de modification :",
+    '- « ajoute une enveloppe percussive sur le gain » : conserve le gain existant, ajoute un module envelope (attaque courte, décroissance rapide) et relie sa sortie à l\'entrée de modulation de paramètre "gain" du gain existant.',
+    '- « ajoute un tremolo sur le voice » : ajoute un module osc (LFO, fréquence basse) et un module gain, relie osc -> gain, puis relie la sortie du gain à l\'entrée de modulation "detune" du voice existant ; règle le gain du LFO pour une modulation audible.',
+    "",
+    "Si un graphe du patch fourni est vide, tu peux y construire le chemin nécessaire en respectant les règles précédentes.",
+    "Si l'utilisateur demande explicitement un patch entièrement nouveau, ignore ce patch de référence et repars d'une structure vierge.",
+  ].join("\n");
+}
+
+/**
+ * Types de modules déjà présents dans le patch courant : ils doivent
+ * figurer dans le catalogue transmis au modèle, même s'ils ne font pas
+ * partie de la liste initiale.
+ */
+function collectCurrentPatchTypes() {
+  return [
+    ...(props.voicePatch?.modules ?? []),
+    ...(props.mainPatch?.modules ?? []),
+  ]
+    .map((module) => module?.type)
+    .filter(Boolean);
 }
 
 function buildSynthSystemPrompt(types = null) {
@@ -426,10 +529,17 @@ async function sendMessage() {
 
   await scrollToBottom();
 
+  // Le patch courant accompagne chaque demande : le modèle voit ainsi
+  // toujours l'état réel de l'éditeur, même après plusieurs échanges.
+  const currentPatchContext = buildCurrentPatchContext();
+  const modelInput = currentPatchContext
+    ? `${question}\n\n${currentPatchContext}`
+    : question;
+
   try {
     await chat(
       selectedModel.value,
-      question,
+      modelInput,
       (chunk) => {
         messages.value[answerIndex].content += chunk;
         scrollToBottom();
@@ -442,7 +552,8 @@ async function sendMessage() {
         "compressor",
         "envelope",
         "destination",
-        "input"
+        "input",
+        ...collectCurrentPatchTypes(),
       ])
     );
 
