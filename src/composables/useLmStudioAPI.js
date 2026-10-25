@@ -121,9 +121,17 @@ export function useLmStudioAPI(options = {}) {
     resetConversation();
   }
 
-  async function chat(model, message, onDelta = () => {}, systemPrompt = "") {
+  async function chat(
+    model,
+    message,
+    onDelta = () => {},
+    systemPrompt = "",
+    options = {},
+  ) {
     chatting.value = true;
     error.value = null;
+
+    const { contextLength, temperature, maxTokens } = options;
 
     try {
       const response = await fetch(`${baseUrl.value}/api/v1/chat`, {
@@ -136,6 +144,15 @@ export function useLmStudioAPI(options = {}) {
           input: message,
           stream: true,
           store: true,
+          ...(Number.isFinite(contextLength) && contextLength > 0
+            ? { context_length: contextLength }
+            : {}),
+          ...(Number.isFinite(temperature) ? { temperature } : {}),
+          // Une valeur négative (dont -1) signifie "sans limite" : on omet
+          // simplement le champ pour laisser LM Studio générer librement.
+          ...(Number.isFinite(maxTokens) && maxTokens >= 0
+            ? { max_output_tokens: maxTokens }
+            : {}),
           ...(conversationId.value
             ? { previous_response_id: conversationId.value }
             : { system_prompt: systemPrompt }),

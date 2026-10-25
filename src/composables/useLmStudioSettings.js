@@ -1,9 +1,10 @@
 // composables/useLmStudioSettings.js
 //
 // Configuration persistante du chat LM Studio : URL du serveur, modèle
-// proposé par défaut et nombre maximal de corrections automatiques.
-// Les valeurs sont conservées dans le localStorage et partagées par tous
-// les composants qui utilisent ce composable.
+// proposé par défaut, corrections automatiques et paramètres d'inférence
+// (contexte, température, tokens de sortie). Les valeurs sont conservées
+// dans le localStorage et partagées par tous les composants qui utilisent
+// ce composable.
 
 import { reactive, watch } from "vue";
 import { DEFAULT_BASE_URL, normalizeBaseUrl } from "./useLmStudioAPI.js";
@@ -12,17 +13,46 @@ const STORAGE_KEY = "modular-synth:lm-studio-settings";
 
 export const DEFAULT_MODEL = "google/gemma-4-e4b";
 export const DEFAULT_MAX_CORRECTION_ATTEMPTS = 15;
+export const DEFAULT_CONTEXT_LENGTH = 32000;
+export const DEFAULT_TEMPERATURE = 0.4;
+// -1 signifie "aucune limite" : le champ n'est pas envoyé à l'API.
+export const DEFAULT_MAX_TOKENS = -1;
 
 export const LM_STUDIO_DEFAULTS = Object.freeze({
   baseUrl: DEFAULT_BASE_URL,
   maxCorrectionAttempts: DEFAULT_MAX_CORRECTION_ATTEMPTS,
   defaultModel: DEFAULT_MODEL,
+  contextLength: DEFAULT_CONTEXT_LENGTH,
+  temperature: DEFAULT_TEMPERATURE,
+  maxTokens: DEFAULT_MAX_TOKENS,
 });
+
+function toInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toNumber(value, fallback) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 function sanitize(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
 
-  const attempts = Number.parseInt(source.maxCorrectionAttempts, 10);
+  const attempts = toInteger(
+    source.maxCorrectionAttempts,
+    LM_STUDIO_DEFAULTS.maxCorrectionAttempts,
+  );
+  const contextLength = toInteger(
+    source.contextLength,
+    LM_STUDIO_DEFAULTS.contextLength,
+  );
+  const temperature = toNumber(
+    source.temperature,
+    LM_STUDIO_DEFAULTS.temperature,
+  );
+  const maxTokens = toInteger(source.maxTokens, LM_STUDIO_DEFAULTS.maxTokens);
 
   const baseUrl =
     typeof source.baseUrl === "string" && source.baseUrl.trim()
@@ -36,10 +66,16 @@ function sanitize(raw) {
 
   return {
     baseUrl,
-    maxCorrectionAttempts: Number.isFinite(attempts)
-      ? Math.max(0, attempts)
-      : LM_STUDIO_DEFAULTS.maxCorrectionAttempts,
+    maxCorrectionAttempts: Math.max(0, attempts),
     defaultModel,
+    contextLength:
+      contextLength > 0
+        ? contextLength
+        : LM_STUDIO_DEFAULTS.contextLength,
+    // LM Studio attend une température dans l'intervalle [0, 1].
+    temperature: Math.min(1, Math.max(0, temperature)),
+    maxTokens:
+      maxTokens >= -1 ? maxTokens : LM_STUDIO_DEFAULTS.maxTokens,
   };
 }
 

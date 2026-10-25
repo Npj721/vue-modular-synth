@@ -533,14 +533,14 @@ async function saveSettings() {
   if (chatting.value || loading.value) return;
 
   const previousBaseUrl = settings.baseUrl;
-  const attempts = Number.parseInt(settingsDraft.maxCorrectionAttempts, 10);
 
   updateSettings({
     baseUrl: settingsDraft.baseUrl,
     defaultModel: settingsDraft.defaultModel,
-    maxCorrectionAttempts: Number.isFinite(attempts)
-      ? attempts
-      : defaultSettings.maxCorrectionAttempts,
+    maxCorrectionAttempts: settingsDraft.maxCorrectionAttempts,
+    contextLength: settingsDraft.contextLength,
+    temperature: settingsDraft.temperature,
+    maxTokens: settingsDraft.maxTokens,
   });
 
   // Reprend les valeurs normalisées (URL sans slash final, valeurs par défaut).
@@ -638,7 +638,12 @@ async function askModel(question) {
         "destination",
         "input",
         ...collectCurrentPatchTypes(),
-      ])
+      ]),
+      {
+        contextLength: settings.contextLength,
+        temperature: settings.temperature,
+        maxTokens: settings.maxTokens,
+      }
     );
 
     // Réponse complète reçue : on la transmet au parent, qui se charge
@@ -806,6 +811,41 @@ async function scrollToBottom() {
         />
       </label>
 
+      <label class="settings-field">
+        <span>Taille du contexte (context_length)</span>
+        <input
+          v-model.number="settingsDraft.contextLength"
+          type="number"
+          min="1"
+          step="1"
+          @input="settingsSaved = false"
+        />
+      </label>
+
+      <label class="settings-field">
+        <span>Température (temperature)</span>
+        <input
+          v-model.number="settingsDraft.temperature"
+          type="number"
+          min="0"
+          max="1"
+          step="0.05"
+          @input="settingsSaved = false"
+        />
+      </label>
+
+      <label class="settings-field">
+        <span>Max tokens (max_output_tokens)</span>
+        <input
+          v-model.number="settingsDraft.maxTokens"
+          type="number"
+          min="-1"
+          step="1"
+          @input="settingsSaved = false"
+        />
+        <small class="settings-field-hint">−1 = sans limite</small>
+      </label>
+
       <div class="settings-actions">
         <button
           type="button"
@@ -836,8 +876,9 @@ async function scrollToBottom() {
         Configuration enregistrée dans le localStorage.
       </p>
       <p class="settings-hint">
-        Modifie l'URL du serveur, le modèle proposé à l'ouverture et la limite
-        de corrections automatiques.
+        Modifie l'URL du serveur, le modèle proposé à l'ouverture, les
+        corrections automatiques et les paramètres d'inférence. Une valeur
+        « Max tokens » de −1 retire la limite de génération.
       </p>
     </section>
 
@@ -955,6 +996,8 @@ async function scrollToBottom() {
   flex-direction: column;
   gap: 10px;
   padding: 14px 16px;
+  max-height: 55%;
+  overflow-y: auto;
   border-bottom: 1px solid #e5e7eb;
   background: #f3f4f6;
 }
@@ -979,6 +1022,11 @@ async function scrollToBottom() {
   border-radius: 6px;
   background: #fff;
   color: #1f2937;
+}
+
+.settings-field-hint {
+  font-size: 0.75rem;
+  color: #6b7280;
 }
 
 .settings-actions {
