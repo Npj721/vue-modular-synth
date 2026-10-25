@@ -1,8 +1,12 @@
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from "vue";
+import { ref, reactive, computed, onMounted, nextTick } from "vue";
 import { useLmStudioAPI } from "../composables/useLmStudioAPI";
+import { useLmStudioSettings } from "../composables/useLmStudioSettings";
 import { useModuleCatalog } from "../composables/useModuleCatalog";
+
+const { settings, defaults: defaultSettings, updateSettings } =
+  useLmStudioSettings();
 
 const {
   availableModels,
@@ -13,8 +17,9 @@ const {
   refreshModels,
   loadModel,
   chat,
+  setBaseUrl,
   resetConversation,
-} = useLmStudioAPI();
+} = useLmStudioAPI({ baseUrl: settings.baseUrl });
 
 const { getCatalog } = useModuleCatalog();
 
@@ -23,11 +28,13 @@ const input = ref("");
 const messages = ref([]);
 const chatContainer = ref(null);
 
+const settingsOpen = ref(false);
+const settingsDraft = reactive({ ...settings });
+const settingsSaved = ref(false);
+
 const emit = defineEmits(["patch-received"]);
 
-// Nombre de tentatives de correction automatique pour une même demande
-// utilisateur : évite une boucle infinie si le modèle n'arrive pas à corriger.
-const MAX_CORRECTION_ATTEMPTS = 15;
+// Compteur par demande utilisateur (max fixé par la configuration).
 let correctionAttempts = 0;
 
 const props = defineProps({
@@ -486,14 +493,77 @@ function buildSynthSystemPrompt(types = null) {
 onMounted(async () => {
   try {
     await refreshModels();
-
-    if (availableModels.value.length) {
-      selectedModel.value = "google/gemma-4-e4b";
-    }
+    applyDefaultModel();
   } catch (err) {
     console.error("Impossible de récupérer les modèles :", err);
   }
 });
+
+/** Sélectionne le modèle défini dans la configuration, s'il est disponible. */
+function applyDefaultModel() {
+  const preferred = settings.defaultModel;
+
+  if (
+    preferred &&
+    availableModels.value.some((model) => model.key === preferred)
+  ) {
+    selectedModel.value = preferred;
+  }
+}
+
+function toggleSettings() {
+  if (!settingsOpen.value) {
+    Object.assign(settingsDraft, settings);
+    settingsSaved.value = false;
+  }
+  settingsOpen.value = !settingsOpen.value;
+}
+
+function restoreDefaultSettings() {
+  Object.assign(settingsDraft, defaultSettings);
+  settingsSaved.value = false;
+}
+
+/**
+ * Applique puis persiste la configuration (localStorage via le composable).
+ * Un changement d'URL de base réinitialise la conversation et recharge les
+ * modèles depuis le nouveau serveur.
+ */
+async function saveSettings() {
+  if (chatting.value || loading.value) return;
+
+  const previousBaseUrl = settings.baseUrl;
+  const attempts = Number.parseInt(settingsDraft.maxCorrectionAttempts, 10);
+
+  updateSettings({
+    baseUrl: settingsDraft.baseUrl,
+    defaultModel: settingsDraft.defaultModel,
+    maxCorrectionAttempts: Number.isFinite(attempts)
+      ? attempts
+      : defaultSettings.maxCorrectionAttempts,
+  });
+
+  // Reprend les valeurs normalisées (URL sans slash final, valeurs par défaut).
+  Object.assign(settingsDraft, settings);
+  settingsSaved.value = true;
+
+  const baseUrlChanged = settings.baseUrl !== previousBaseUrl;
+
+  if (baseUrlChanged) {
+    setBaseUrl(settings.baseUrl);
+    selectedModel.value = "";
+    startNewConversation();
+  }
+
+  try {
+    await refreshModels();
+    // Le modèle par défaut est appliqué au premier chargement ou après un
+    // changement de serveur ; sinon on conserve le modèle déjà choisi.
+    if (baseUrlChanged || !selectedModel.value) applyDefaultModel();
+  } catch (err) {
+    console.error("Impossible de recharger les modèles après configuration :", err);
+  }
+}
 
 async function handleLoadModel() {
   if (!selectedModel.value || loading.value) return;
@@ -584,15 +654,17 @@ async function askModel(question) {
 /**
  * Appelée par le parent lorsque l'importation du patch a échoué : les
  * erreurs sont renvoyées au modèle dans un nouveau message afin qu'il
- * corrige sa proposition. Limitée à MAX_CORRECTION_ATTEMPTS par demande.
+ * corrige sa proposition. Limite : settings.maxCorrectionAttempts.
  */
 async function requestCorrection(errors = []) {
   const details = errors.filter(Boolean);
 
   if (!details.length || !isModelLoaded.value || chatting.value) return;
 
-  if (correctionAttempts >= MAX_CORRECTION_ATTEMPTS) {
-    error.value = `Le patch n'a pas pu être importé après ${MAX_CORRECTION_ATTEMPTS} tentatives de correction. Corrige-le manuellement ou reformule la demande.`;
+  const maxAttempts = settings.maxCorrectionAttempts;
+
+  if (correctionAttempts >= maxAttempts) {
+    error.value = `Le patch n'a pas pu être importé après ${maxAttempts} tentative(s) de correction. Corrige-le manuellement ou reformule la demande.`;
     await scrollToBottom();
     return;
   }
@@ -630,7 +702,20 @@ async function scrollToBottom() {
 <template>
   <section class="lm-chat">
     <header class="chat-header">
-      <h2>Chat LM Studio</h2>
+      <div class="chat-title-row">
+        <h2>Chat LM Studio</h2>
+
+        <button
+          type="button"
+          class="settings-toggle"
+          :class="{ actif: settingsOpen }"
+          aria-label="Configuration du chat"
+          title="Configuration"
+          @click="toggleSettings"
+        >
+          ⚙
+        </button>
+      </div>
 
       <div class="model-controls">
         <select
@@ -675,6 +760,86 @@ async function scrollToBottom() {
         Nouvelle conversation
       </button>
     </header>
+
+    <section v-if="settingsOpen" class="settings-panel">
+      <h3>Configuration</h3>
+
+      <label class="settings-field">
+        <span>URL de base (DEFAULT_BASE_URL)</span>
+        <input
+          v-model="settingsDraft.baseUrl"
+          type="url"
+          placeholder="http://127.0.0.1:1234"
+          @input="settingsSaved = false"
+        />
+      </label>
+
+      <label class="settings-field">
+        <span>Modèle par défaut (DEFAULT_MODEL)</span>
+        <input
+          v-model="settingsDraft.defaultModel"
+          type="text"
+          list="lm-studio-models"
+          placeholder="google/gemma-4-e4b"
+          @input="settingsSaved = false"
+        />
+        <datalist id="lm-studio-models">
+          <option
+            v-for="model in availableModels"
+            :key="model.key"
+            :value="model.key"
+          >
+            {{ model.display_name || model.key }}
+          </option>
+        </datalist>
+      </label>
+
+      <label class="settings-field">
+        <span>Tentatives de correction max (MAX_CORRECTION_ATTEMPTS)</span>
+        <input
+          v-model.number="settingsDraft.maxCorrectionAttempts"
+          type="number"
+          min="0"
+          max="50"
+          step="1"
+          @input="settingsSaved = false"
+        />
+      </label>
+
+      <div class="settings-actions">
+        <button
+          type="button"
+          :disabled="chatting || loading"
+          @click="saveSettings"
+        >
+          Enregistrer
+        </button>
+
+        <button
+          type="button"
+          class="secondary"
+          @click="restoreDefaultSettings"
+        >
+          Valeurs par défaut
+        </button>
+
+        <button
+          type="button"
+          class="secondary"
+          @click="settingsOpen = false"
+        >
+          Fermer
+        </button>
+      </div>
+
+      <p v-if="settingsSaved" class="settings-saved">
+        Configuration enregistrée dans le localStorage.
+      </p>
+      <p class="settings-hint">
+        Modifie l'URL du serveur, le modèle proposé à l'ouverture et la limite
+        de corrections automatiques.
+      </p>
+    </section>
 
     <p v-if="error" class="error-message">
       {{ error }}
@@ -762,6 +927,82 @@ async function scrollToBottom() {
   font-size: 1.2rem;
 }
 
+.chat-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.chat-title-row h2 {
+  margin: 0;
+}
+
+.settings-toggle {
+  padding: 5px 10px;
+  font-size: 1.15rem;
+  line-height: 1;
+  background: #4b5563;
+}
+
+.settings-toggle.actif {
+  background: #00a884;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f3f4f6;
+}
+
+.settings-panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.settings-field input {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2937;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-actions .secondary {
+  background: #6b7280;
+}
+
+.settings-saved {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #15803d;
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
 .model-controls {
   display: flex;
   align-items: center;
@@ -771,7 +1012,8 @@ async function scrollToBottom() {
 
 select,
 button,
-textarea {
+textarea,
+input {
   font: inherit;
 }
 

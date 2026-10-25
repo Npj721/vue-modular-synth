@@ -2,8 +2,20 @@ import { ref, computed } from "vue";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:1234";
 
+export function normalizeBaseUrl(url) {
+  let value = String(url || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
+
+  // Tolère une URL saisie sans schéma (ex. "127.0.0.1:1234").
+  if (value && !/^https?:\/\//i.test(value)) value = `http://${value}`;
+
+  return value;
+}
+
+export { DEFAULT_BASE_URL };
+
 export function useLmStudioAPI(options = {}) {
-  const baseUrl = (options.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
+  // URL modifiable à chaud depuis le panneau de configuration.
+  const baseUrl = ref(normalizeBaseUrl(options.baseUrl));
 
   const models = ref([]);
   const loading = ref(false);
@@ -25,7 +37,7 @@ export function useLmStudioAPI(options = {}) {
   );
 
   async function request(path, body) {
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetch(`${baseUrl.value}${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -97,12 +109,24 @@ export function useLmStudioAPI(options = {}) {
     lastResponse.value = null;
   }
 
+  /**
+   * Change l'URL du serveur LM Studio à chaud. La conversation en cours est
+   * réinitialisée : son response_id appartient à l'ancien serveur.
+   */
+  function setBaseUrl(url) {
+    baseUrl.value = normalizeBaseUrl(url);
+    // La liste des modèles appartient à l'ancien serveur : on l'oublie.
+    models.value = [];
+    error.value = null;
+    resetConversation();
+  }
+
   async function chat(model, message, onDelta = () => {}, systemPrompt = "") {
     chatting.value = true;
     error.value = null;
 
     try {
-      const response = await fetch(`${baseUrl}/api/v1/chat`, {
+      const response = await fetch(`${baseUrl.value}/api/v1/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -212,6 +236,8 @@ export function useLmStudioAPI(options = {}) {
     chatting,
     error,
     lastResponse,
+    baseUrl,
+    setBaseUrl,
     refreshModels,
     loadModel,
     unloadModel,
