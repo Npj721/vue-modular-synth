@@ -379,7 +379,7 @@ onMounted(async () => {
     await refreshModels();
 
     if (availableModels.value.length) {
-      selectedModel.value = "deephermes-3-llama-3-8b-preview";
+      selectedModel.value = "google/gemma-4-e4b";
     }
   } catch (err) {
     console.error("Impossible de récupérer les modèles :", err);
