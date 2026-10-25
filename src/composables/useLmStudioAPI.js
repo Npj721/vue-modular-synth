@@ -1,6 +1,6 @@
 import { ref, computed } from "vue";
 
-const DEFAULT_BASE_URL = "http://172.30.160.1:1234";
+const DEFAULT_BASE_URL = "http://127.0.0.1:1234";
 
 export function useLmStudioAPI(options = {}) {
   const baseUrl = (options.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
