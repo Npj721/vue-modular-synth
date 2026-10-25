@@ -376,24 +376,6 @@ function buildSynthSystemPrompt(types = null) {
 
 onMounted(async () => {
   try {
-
-    const sp = buildSynthSystemPrompt([
-        "voice",
-        "osc",
-        "gain",
-        "filter_lowpass",
-        "filter_highpass",
-        "filter_bandpass",
-        "filter_notch",
-        "filter_peaking",
-        "filter_lowshelf",
-        "filter_highshelf",
-        "compressor",
-        "stereoPanner",
-        "envelope",
-        "destination",
-        "input"
-      ]);console.log(sp);
     await refreshModels();
 
     if (availableModels.value.length) {
