@@ -25,6 +25,9 @@ const {
 const { getCatalog } = useModuleCatalog();
 
 const selectedModel = ref("");
+const modelFilter = ref("");
+const modelSortKey = ref("name");
+const modelSortDir = ref("asc");
 const input = ref("");
 const messages = ref([]);
 const chatContainer = ref(null);
@@ -52,6 +55,95 @@ const currentModel = computed(() =>
 const isModelLoaded = computed(() =>
   loadedModels.value.some((model) => model.key === selectedModel.value)
 );
+
+/** Taille du fichier modèle, fournie par LM Studio via `size_bytes`. */
+function getModelSizeBytes(model) {
+  const bytes = Number(model?.size_bytes);
+  return Number.isFinite(bytes) && bytes > 0 ? bytes : -1;
+}
+
+function formatModelSize(sizeBytes) {
+  const bytes = Number(sizeBytes);
+
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "—";
+  }
+
+  const gb = bytes / 1024 / 1024 / 1024;
+  if (gb >= 100) return `${Math.round(gb)} GB`;
+  if (gb >= 10) return `${gb.toFixed(1)} GB`;
+  return `${gb.toFixed(2)} GB`;
+}
+
+function toggleModelSort(key) {
+  if (modelSortKey.value === key) {
+    modelSortDir.value = modelSortDir.value === "asc" ? "desc" : "asc";
+    return;
+  }
+
+  modelSortKey.value = key;
+  modelSortDir.value = key === "size" ? "desc" : "asc";
+}
+
+const filteredSortedModels = computed(() => {
+  const filter = modelFilter.value.trim().toLowerCase();
+  const direction = modelSortDir.value === "asc" ? 1 : -1;
+
+  const list = availableModels.value.filter((model) => {
+    if (!filter) return true;
+
+    const name = (model.display_name || model.key || "").toLowerCase();
+    const key = (model.key || "").toLowerCase();
+    return name.includes(filter) || key.includes(filter);
+  });
+
+  return [...list].sort((a, b) => {
+    if (modelSortKey.value === "size") {
+      const sizeA = getModelSizeBytes(a);
+      const sizeB = getModelSizeBytes(b);
+
+      if (sizeA === sizeB) {
+        return (
+          (a.display_name || a.key || "").localeCompare(
+            b.display_name || b.key || "",
+          ) * direction
+        );
+      }
+
+      return (sizeA - sizeB) * direction;
+    }
+
+    const nameA = (a.display_name || a.key || "").toLowerCase();
+    const nameB = (b.display_name || b.key || "").toLowerCase();
+
+    if (nameA === nameB) {
+      return (a.key || "").localeCompare(b.key || "") * direction;
+    }
+
+    return nameA.localeCompare(nameB) * direction;
+  });
+});
+
+function isModelLoadedByKey(modelKey) {
+  if (!modelKey) return false;
+  return loadedModels.value.some((model) => model.key === modelKey);
+}
+
+function selectModelFromTable(modelKey) {
+  if (!modelKey || loading.value || chatting.value) return;
+  if (selectedModel.value === modelKey) return;
+
+  selectedModel.value = modelKey;
+  startNewConversation();
+}
+
+async function selectAndLoadModel(modelKey) {
+  if (!modelKey || loading.value || chatting.value) return;
+
+  selectedModel.value = modelKey;
+  startNewConversation();
+  await handleLoadModel();
+}
 
 /**
  * Transforme le catalogue réel en description compacte pour le LLM :
@@ -538,38 +630,106 @@ async function scrollToBottom() {
         </button>
       </div>
 
-      <div class="model-controls">
-        <select
-          v-model="selectedModel"
-          :disabled="loading || chatting"
-          aria-label="Choisir un modèle"
-          @change="startNewConversation"
-        >
-          <option value="" disabled>Choisir un modèle</option>
+      <div class="model-manager">
+        <div class="model-filter-row">
+          <input
+            v-model="modelFilter"
+            type="search"
+            placeholder="Filtrer par nom de modèle..."
+            aria-label="Filtrer les modèles"
+            :disabled="loading || chatting"
+          />
+        </div>
 
-          <option
-            v-for="model in availableModels"
-            :key="model.key"
-            :value="model.key"
-          >
-            {{ model.display_name || model.key }}
-          </option>
-        </select>
-
-        <button
-          v-if="!isModelLoaded"
-          type="button"
-          :disabled="!selectedModel || loading"
-          @click="handleLoadModel"
-        >
-          {{ loading ? "Chargement…" : "Charger" }}
-        </button>
-
-        <span v-else class="model-status"> Modèle chargé </span>
+        <div class="model-table-wrapper">
+          <table class="model-table">
+            <thead>
+              <tr>
+                <th
+                  class="sortable"
+                  :class="{ active: modelSortKey === 'name' }"
+                  @click="toggleModelSort('name')"
+                  title="Trier par nom"
+                >
+                  Nom
+                  <span class="sort-indicator">{{
+                    modelSortKey === "name"
+                      ? modelSortDir === "asc"
+                        ? "↑"
+                        : "↓"
+                      : "↕"
+                  }}</span>
+                </th>
+                <th>Clé</th>
+                <th
+                  class="sortable numeric"
+                  :class="{ active: modelSortKey === 'size' }"
+                  @click="toggleModelSort('size')"
+                  title="Trier par taille"
+                >
+                  Taille (GB)
+                  <span class="sort-indicator">{{
+                    modelSortKey === "size"
+                      ? modelSortDir === "asc"
+                        ? "↑"
+                        : "↓"
+                      : "↕"
+                  }}</span>
+                </th>
+                <th>Statut</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="model in filteredSortedModels"
+                :key="model.key"
+                class="model-row"
+                :class="{
+                  selected: selectedModel === model.key,
+                  loaded: isModelLoadedByKey(model.key),
+                }"
+                @click="selectModelFromTable(model.key)"
+              >
+                <td class="model-name">
+                  {{ model.display_name || model.key }}
+                </td>
+                <td class="model-key">{{ model.key }}</td>
+                <td class="model-size numeric">
+                  {{ formatModelSize(model.size_bytes) }}
+                </td>
+                <td class="model-status-cell">
+                  <span v-if="isModelLoadedByKey(model.key)" class="badge loaded">Chargé</span>
+                  <span v-else class="badge available">Disponible</span>
+                </td>
+                <td class="model-actions">
+                  <button
+                    type="button"
+                    class="table-action"
+                    :disabled="loading || chatting || isModelLoadedByKey(model.key)"
+                    @click.stop="selectAndLoadModel(model.key)"
+                  >
+                    {{ isModelLoadedByKey(model.key) ? "Chargé" : loading && selectedModel === model.key ? "Chargement…" : "Charger" }}
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="!filteredSortedModels.length">
+                <td colspan="5" class="empty-row">
+                  {{
+                    availableModels.length
+                      ? "Aucun modèle ne correspond au filtre."
+                      : "Aucun modèle disponible."
+                  }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <p v-if="currentModel" class="model-info">
-        {{ currentModel.key }}
+      <p v-if="selectedModel" class="selected-model">
+        Sélection : {{ currentModel?.display_name || selectedModel }}
+        — {{ isModelLoaded ? "chargé" : "non chargé" }}
       </p>
 
       <button
@@ -878,28 +1038,177 @@ async function scrollToBottom() {
   color: #6b7280;
 }
 
-.model-controls {
+.model-manager {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
 }
 
-select,
+.model-filter-row input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  box-sizing: border-box;
+}
+
+.model-table-wrapper {
+  max-height: 230px;
+  overflow: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.model-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  table-layout: fixed;
+}
+
+.model-table th,
+.model-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.model-table th:nth-child(1) {
+  width: 27%;
+}
+
+.model-table th:nth-child(2) {
+  width: 33%;
+}
+
+.model-table th:nth-child(3) {
+  width: 12%;
+}
+
+.model-table th:nth-child(4) {
+  width: 12%;
+}
+
+.model-table th:nth-child(5) {
+  width: 16%;
+}
+
+.model-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #e5e7eb;
+  font-weight: 600;
+  color: #374151;
+}
+
+.model-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.model-table th.sortable:hover {
+  background: #d1d5db;
+}
+
+.model-table th.active {
+  color: #1d4ed8;
+}
+
+.sort-indicator {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+
+.model-row {
+  cursor: pointer;
+}
+
+.model-row:hover td {
+  background: #f9fafb;
+}
+
+.model-row.selected td {
+  background: #dbeafe;
+}
+
+.model-row.loaded .model-name {
+  font-weight: 600;
+}
+
+.model-name,
+.model-key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-key {
+  color: #6b7280;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-status-cell,
+.model-actions {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.badge.loaded {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.badge.available {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.table-action {
+  padding: 4px 8px;
+  font-size: 0.72rem;
+}
+
+.table-action:disabled {
+  background: #9ca3af;
+  opacity: 1;
+}
+
+.empty-row {
+  padding: 12px 8px;
+  text-align: center;
+  color: #6b7280;
+}
+
+.selected-model {
+  margin: 8px 0 0;
+  color: #6b7280;
+  font-size: 0.8rem;
+}
+
 button,
 textarea,
 input {
   font: inherit;
-}
-
-select {
-  flex: 1;
-  min-width: 180px;
-  padding: 9px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: white;
-  color: inherit;
 }
 
 button {
@@ -914,17 +1223,6 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.model-status {
-  color: #15803d;
-  font-size: 0.9rem;
-}
-
-.model-info {
-  margin: 8px 0 0;
-  color: #6b7280;
-  font-size: 0.8rem;
 }
 
 .error-message {
