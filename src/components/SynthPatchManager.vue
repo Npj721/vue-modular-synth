@@ -235,7 +235,7 @@ const importFile = async (e) => {
       {{ selected || "— Sélectionner synthéthiseur —" }}
     </button>
     <button class="spm-btn spm-nav" :disabled="!availableSynths.length" @click="cycleSynth(1)">▶</button>
-    <button v-if="selected" class="spm-btn" @click="exportFile">Exporter</button>
+    <button v-if="hasVoiceModules" class="spm-btn" @click="exportFile">Exporter</button>
     <button v-if="false" class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
     <button v-if="false" class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
     <div class="spm-midi-sep"></div>
