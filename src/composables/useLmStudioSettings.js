@@ -75,7 +75,9 @@ function sanitize(raw) {
     // LM Studio attend une température dans l'intervalle [0, 1].
     temperature: Math.min(1, Math.max(0, temperature)),
     maxTokens:
-      maxTokens >= -1 ? maxTokens : LM_STUDIO_DEFAULTS.maxTokens,
+      maxTokens === -1 || maxTokens > 0
+        ? maxTokens
+        : LM_STUDIO_DEFAULTS.maxTokens,
   };
 }
 

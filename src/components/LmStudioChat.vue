@@ -16,6 +16,7 @@ const {
   error,
   refreshModels,
   loadModel,
+  unloadModel,
   chat,
   cancelChat,
   setBaseUrl,
@@ -25,6 +26,11 @@ const {
 const { getCatalog } = useModuleCatalog();
 
 const selectedModel = ref("");
+// Id de l'instance renvoyée par /models/load. LM Studio peut créer plusieurs
+// instances pour une même clé de modèle ; on garde celle qu'on vient de charger.
+const activeInstanceId = ref("");
+// Modèle en cours de rechargement (déchargement puis chargement).
+const reloadingModel = ref("");
 const modelFilter = ref("");
 const modelSortKey = ref("name");
 const modelSortDir = ref("asc");
@@ -53,9 +59,26 @@ const currentModel = computed(() =>
 );
 
 /**
+ * Instance réellement chargée pour le modèle sélectionné. On privilégie
+ * l'instance créée par notre dernier chargement, puis la plus récente.
+ * Utiliser son id dans le chat évite que LM Studio choisisse une autre
+ * instance ou recharge le modèle.
+ */
+const currentLoadedInstance = computed(() => {
+  const instances = currentModel.value?.loaded_instances;
+
+  if (!Array.isArray(instances) || !instances.length) return null;
+
+  return (
+    instances.find((instance) => instance.id === activeInstanceId.value) ??
+    instances[instances.length - 1]
+  );
+});
+
+/**
  * Contexte effectif : on ne demande pas plus que la capacité maximale du
- * modèle. La même valeur doit être utilisée au chargement et dans le chat,
- * sinon LM Studio recharge le modèle pour appliquer la nouvelle taille.
+ * modèle. Il est appliqué au chargement ; le chat utilise ensuite l'instance
+ * chargée sans redemander de taille, pour ne pas provoquer de rechargement.
  */
 const effectiveContextLength = computed(() => {
   const configured = Number(settings.contextLength);
@@ -150,17 +173,19 @@ function isModelLoadedByKey(modelKey) {
 }
 
 function selectModelFromTable(modelKey) {
-  if (!modelKey || loading.value || chatting.value) return;
+  if (!modelKey || loading.value || chatting.value || reloadingModel.value) return;
   if (selectedModel.value === modelKey) return;
 
   selectedModel.value = modelKey;
+  activeInstanceId.value = "";
   startNewConversation();
 }
 
 async function selectAndLoadModel(modelKey) {
-  if (!modelKey || loading.value || chatting.value) return;
+  if (!modelKey || loading.value || chatting.value || reloadingModel.value) return;
 
   selectedModel.value = modelKey;
+  activeInstanceId.value = "";
   startNewConversation();
   await handleLoadModel();
 }
@@ -300,6 +325,20 @@ function buildCurrentPatchContext() {
 }
 
 /**
+ * Rappel compact ajouté à chaque message : il reste utile dans les
+ * conversations longues où un petit modèle perd le fil des contraintes.
+ */
+const TOPOLOGY_REMINDER = [
+  "RAPPEL STRUCTUREL POUR CE PATCH :",
+  "- Un patch est un graphe audio, pas une liste de modules.",
+  "- mainPatch : input -> ... -> destination.",
+  "- voicePatch : sources audio -> ... -> destination.",
+  "- Chaque sortie audio doit atteindre destination par des câbles audio ; un module non relié est silencieux.",
+  "- Une modulation (ex. vers in:gain) ne compte pas comme câble audio.",
+  "- Réponds uniquement en JSON strict, sans commentaire et sans virgule finale.",
+].join("\n");
+
+/**
  * Types déjà présents dans le patch courant. Ils sont transmis au catalogue
  * même lorsqu'ils en sont exclus par défaut (modules à ressource externe).
  */
@@ -318,6 +357,13 @@ function buildSynthSystemPrompt() {
   const instructions = [
     "Tu es un sound designer expert en synthèse modulaire. Tu produis des patches JSON complets pour un synthétiseur Web Audio.",
     "",
+    "PRINCIPE FONDAMENTAL — UN PATCH EST UN GRAPHE",
+    "- Un patch n'est pas une liste de modules : c'est un graphe orienté de modules reliés par des câbles.",
+    "- Une sortie audio ne produit du son que si elle atteint un module 'destination' par une chaîne de connexions audio.",
+    "- Un module ajouté mais non relié au chemin audio est silencieux et sera refusé.",
+    "- Une modulation ne transporte pas de son : elle pilote un paramètre d'un module audio.",
+    "- Construis le graphe depuis la sortie : place destination, remonte vers les sources, puis ajoute les modulations.",
+    "",
     "OBJECTIF",
     "- Réponds à la demande par une architecture adaptée au timbre recherché, pas par un template générique.",
     "- Utilise la variété du catalogue : couches de sources, filtres, effets, saturation, delay, panoramique et modulation.",
@@ -327,12 +373,15 @@ function buildSynthSystemPrompt() {
     "CATÉGORIES DU CATALOGUE",
     "source (génère le son), filter, effect, dynamics, routing, spatial, control (modulation), utility, super (module composite).",
     "",
-    "MODÈLE WEB AUDIO À RESPECTER",
-    "- voicePatch = graphe déclenché par note. Utilise 'voice' pour un son piloté par le clavier/MIDI. 'osc', 'wavetable', 'wavetableS' sont des sources libres (LFO, drone, couche).",
-    "- mainPatch = traitement global. Les voix sont automatiquement routées depuis voicePatch vers le module 'input' de mainPatch. mainPatch doit contenir un chemin continu vers 'destination'.",
-    "- Audio vs modulation : une connexion audio va d'une SORTIE audio vers une ENTRÉE audio. Une connexion de modulation va d'une SORTIE de rôle 'modulator' (envelope, constant, gain selon contexte) vers une ENTRÉE de paramètre (rôle 'modulatable') pour piloter un AudioParam.",
-    "- 'voice' n'est PAS 'osc'. Si la demande est un son « note/piano/lead/plucks » à jouer au clavier, privilégie 'voice'. N'utilise 'osc' que si explicitement demandé comme source libre ou LFO.",
-    "- Un module 'envelope' ou 'constant' produit une sortie 'modulator', jamais un signal audio à destination directe sauf s'il est explicitement connecté comme modulation.",
+    "TYPES DE CONNEXION",
+    "- Audio : sortie de kind 'audio' vers entrée de kind 'audio' (ex. out:out -> in:in). C'est le seul type qui fait avancer le son vers destination.",
+    "- Modulation : sortie de kind 'param' vers entrée de kind 'param' (ex. out:out -> in:gain). Cela ne compte jamais comme chemin audio.",
+    "- Les kinds et les ids de ports sont indiqués dans le catalogue. Ne devine jamais un port.",
+    "",
+    "RÔLE DES GRAPHES",
+    "- voicePatch = graphe déclenché par note. Utilise 'voice' pour un son joué au clavier/MIDI ; 'osc', 'wavetable' et 'wavetableS' sont des sources libres (LFO, drone, couche).",
+    "- mainPatch = traitement global. Les voix arrivent dans le module 'input'. Le chemin audio va de input à destination.",
+    "- Les deux graphes sont indépendants : aucune connexion ne traverse voicePatch et mainPatch.",
     "",
     "SCHÉMA JSON EXACT (À RESPECTER À LA LETTRE)",
     "{",
@@ -367,9 +416,14 @@ function buildSynthSystemPrompt() {
     "- from.id doit pointer vers un module existant du même graphe. from.port doit correspondre à un port présent dans definition.ports.outputs avec le préfixe 'out:'.",
     "- to.id doit pointer vers un module existant du même graphe. to.port doit correspondre à un port présent dans definition.ports.inputs avec le préfixe 'in:'.",
     "- Un port invalide (mauvais côté, port inexistant) fera échouer la validation et te sera renvoyé pour correction.",
+    "- voicePatch DOIT contenir un module 'destination' et un chemin audio continu jusqu'à destination in:in.",
+    "- mainPatch DOIT contenir un module 'input' et un module 'destination', avec un chemin audio continu de input out:out à destination in:in.",
+    "- Chaque module qui produit de l'audio doit pouvoir atteindre destination par des connexions AUDIO. Une connexion de modulation (par exemple vers in:gain) ne compte PAS comme chemin audio.",
+    "- Chaque module doit être connecté. Un module orphelin (aucune entrée ni sortie) est refusé.",
     "",
     "FORMAT DE SORTIE",
     "Retourne uniquement un objet JSON valide : aucun texte, aucun Markdown, aucune balise de code.",
+    "INTERDIT dans le JSON : commentaires (ligne ou bloc), virgules finales, texte avant ou après l'objet, Markdown, balises de code.",
     "{",
     '  "version": 1,',
     '  "name": "nom du son",',
@@ -386,19 +440,23 @@ function buildSynthSystemPrompt() {
     "- Les ports se lisent dans le catalogue : une sortie id out devient out:out ; une entrée id gain devient in:gain. Ne mets jamais le port dans l'id du module.",
     "- Les ids sont uniques dans chaque graphe. Aucune connexion ne traverse voicePatch et mainPatch.",
     "",
-    "STRUCTURE AUDIO",
-    "- voicePatch contient la synthèse : sources, filtres, gains, effets et modulations. Il doit avoir un module destination et un chemin audio qui y aboutit.",
-    "- mainPatch reçoit les voix via input. Il doit contenir input, compressor et destination, avec un chemin audio continu de input à destination. Des effets supplémentaires peuvent être insérés dans ce chemin.",
-    '- "voice" est la source pilotée par les notes. "osc" et "wavetable" sont des sources libres (LFO, drone, couche). Le paramètre type choisit la forme d\'onde : "sawtooth" est une valeur, jamais un type de module.',
-    '- Une modulation relie une sortie de rôle "modulator" à une entrée de paramètre, par exemple envelope out:out -> gain in:gain. Elle ne remplace pas le chemin audio.',
+    "STRUCTURE AUDIO OBLIGATOIRE",
+    "- voicePatch : source(s) audio -> traitement(s) audio -> destination in:in. Chaque sortie audio doit pouvoir atteindre destination.",
+    "- mainPatch : input out:out -> traitement(s) audio -> destination in:in. Les modules demandés (par exemple compressor) doivent être insérés dans ce chemin.",
+    "- Plusieurs sources audio peuvent converger vers destination : chaque branche audio doit atteindre destination. Une entrée marquée 'multiple' accepte plusieurs câbles.",
+    "- Une modulation se branche sur une entrée de paramètre d'un module audio du chemin (ex. gain in:gain). Elle ne remplace jamais un câble audio et ne va jamais vers destination.",
+    "- Envelope n'a aucune entrée audio : ne connecte jamais une sortie audio vers envelope. Pour moduler un gain, utilise envelope out:out -> gain in:gain.",
     '- Envelope : params.stages = { "loop": false, "press": [{ "from": 0, "to": 1, "duration": 0.01, "curve": "exponential" }], "release": [{ "from": "current", "to": 0, "duration": 0.2, "curve": "linear" }] }. Les segments press/release peuvent contenir from, to, duration et curve. modulation vaut "relative" ou "replace".',
+    "- Si l'utilisateur demande une enveloppe, un son percussif/plucky/court, ou un contrôle d'amplitude par note, le voicePatch DOIT contenir un module 'envelope' connecté à au moins un gain via in:gain. Si plusieurs gains doivent partager la même enveloppe, relie la même sortie envelope out:out à chaque gain in:gain.",
     "- Respecte les bornes numériques et les valeurs enum du catalogue. Ne laisse pas une sortie audio principale orpheline.",
     "",
     "VÉRIFICATION AVANT ENVOI",
     "- JSON syntaxiquement valide, ids uniques, positions numériques.",
     "- Tous les types, ports et paramètres existent dans le catalogue.",
     "- Chaque connexion référence un module du même graphe, avec le port du bon côté.",
-    "- voicePatch atteint destination ; mainPatch suit input -> compressor -> destination.",
+    "- voicePatch contient destination et TOUTES les sorties audio atteignent destination par des connexions audio.",
+    "- mainPatch contient input et destination, avec un chemin audio continu de input à destination ; les modules demandés sont dans ce chemin.",
+    "- Aucun module orphelin, aucune modulation utilisée à la place d'un câble audio.",
     "",
     "CATALOGUE — SEULE RÉFÉRENCE POUR LES TYPES, PORTS ET PARAMÈTRES",
     JSON.stringify(moduleCatalog),
@@ -424,6 +482,7 @@ function applyDefaultModel() {
     preferred &&
     availableModels.value.some((model) => model.key === preferred)
   ) {
+    if (selectedModel.value !== preferred) activeInstanceId.value = "";
     selectedModel.value = preferred;
   }
 }
@@ -447,7 +506,7 @@ function restoreDefaultSettings() {
  * modèles depuis le nouveau serveur.
  */
 async function saveSettings() {
-  if (chatting.value || loading.value) return;
+  if (chatting.value || loading.value || reloadingModel.value) return;
 
   const previousBaseUrl = settings.baseUrl;
 
@@ -469,6 +528,7 @@ async function saveSettings() {
   if (baseUrlChanged) {
     setBaseUrl(settings.baseUrl);
     selectedModel.value = "";
+    activeInstanceId.value = "";
     startNewConversation();
   }
 
@@ -487,14 +547,67 @@ async function handleLoadModel() {
 
   try {
     startNewConversation();
-    // Important : charger avec la même taille de contexte que celle envoyée
-    // dans la requête de chat. Sinon LM Studio recharge le modèle à la
-    // première question pour appliquer la nouvelle valeur.
-    await loadModel(selectedModel.value, {
+
+    // On relit l'état du serveur avant de charger : si le modèle est déjà
+    // chargé (par exemple après un rechargement manuel), on réutilise son
+    // instance au lieu d'en créer une seconde.
+    await refreshModels();
+
+    if (isModelLoaded.value) {
+      const instances = currentModel.value?.loaded_instances ?? [];
+      activeInstanceId.value = instances[instances.length - 1]?.id || "";
+      return;
+    }
+
+    // On applique la taille de contexte au chargement. Le chat ne la renvoie
+    // pas : il cible ensuite directement l'instance chargée.
+    const result = await loadModel(selectedModel.value, {
       context_length: effectiveContextLength.value,
     });
+    activeInstanceId.value = result?.instance_id || "";
   } catch (err) {
     console.error("Impossible de charger le modèle :", err);
+  }
+}
+
+/**
+ * Décharge toutes les instances d'un modèle puis le recharge proprement.
+ * Utile pour appliquer une nouvelle taille de contexte ou nettoyer des
+ * instances multiples créées par des chargements successifs.
+ */
+async function reloadModel(modelKey) {
+  if (
+    !modelKey ||
+    loading.value ||
+    chatting.value ||
+    reloadingModel.value
+  ) {
+    return;
+  }
+
+  selectedModel.value = modelKey;
+  activeInstanceId.value = "";
+  startNewConversation();
+  reloadingModel.value = modelKey;
+
+  try {
+    await refreshModels();
+
+    const model = availableModels.value.find((item) => item.key === modelKey);
+    const instances = model?.loaded_instances ?? [];
+
+    for (const instance of instances) {
+      await unloadModel(instance.id);
+    }
+
+    const result = await loadModel(modelKey, {
+      context_length: effectiveContextLength.value,
+    });
+    activeInstanceId.value = result?.instance_id || "";
+  } catch (err) {
+    console.error("Impossible de recharger le modèle :", err);
+  } finally {
+    reloadingModel.value = "";
   }
 }
 
@@ -519,7 +632,14 @@ onBeforeUnmount(() => {
 async function sendMessage() {
   const question = input.value.trim();
 
-  if (!question || !isModelLoaded.value || chatting.value) return;
+  if (
+    !question ||
+    !isModelLoaded.value ||
+    chatting.value ||
+    reloadingModel.value
+  ) {
+    return;
+  }
 
   // Nouvelle demande manuelle : on réarme le compteur de corrections.
   correctionAttempts = 0;
@@ -549,13 +669,28 @@ async function askModel(question) {
   // Le patch courant accompagne chaque demande : le modèle voit ainsi
   // toujours l'état réel de l'éditeur, même après plusieurs échanges.
   const currentPatchContext = buildCurrentPatchContext();
-  const modelInput = currentPatchContext
-    ? `${question}\n\n${currentPatchContext}`
-    : question;
+  const modelInput = [question, currentPatchContext, TOPOLOGY_REMINDER]
+    .filter(Boolean)
+    .join("\n\n");
 
   try {
+    // LM Studio peut décharger un modèle inactif (TTL) ou avoir plusieurs
+    // instances. On relit l'état réel avant chaque demande pour cibler une
+    // instance encore valide, sans renvoyer de context_length au chat.
+    await refreshModels();
+
+    if (!isModelLoaded.value) {
+      resetConversation();
+      const result = await loadModel(selectedModel.value, {
+        context_length: effectiveContextLength.value,
+      });
+      activeInstanceId.value = result?.instance_id || "";
+    }
+
+    const chatModel = currentLoadedInstance.value?.id || selectedModel.value;
+
     await chat(
-      selectedModel.value,
+      chatModel,
       modelInput,
       (chunk) => {
         messages.value[answerIndex].content += chunk;
@@ -563,11 +698,16 @@ async function askModel(question) {
       },
       buildSynthSystemPrompt(),
       {
-        contextLength: effectiveContextLength.value,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
       }
     );
+
+    if (!messages.value[answerIndex].content.trim()) {
+      messages.value[answerIndex].content =
+        "Réponse vide du modèle. Mets Max tokens à -1 (ou augmente-le), puis réessaie.";
+      return;
+    }
 
     // Réponse complète reçue : on la transmet au parent, qui se charge
     // d'extraire l'objet JSON et de charger le synthé proposé.
@@ -597,7 +737,14 @@ async function askModel(question) {
 async function requestCorrection(errors = []) {
   const details = errors.filter(Boolean);
 
-  if (!details.length || !isModelLoaded.value || chatting.value) return;
+  if (
+    !details.length ||
+    !isModelLoaded.value ||
+    chatting.value ||
+    reloadingModel.value
+  ) {
+    return;
+  }
 
   const maxAttempts = settings.maxCorrectionAttempts;
 
@@ -615,7 +762,12 @@ async function requestCorrection(errors = []) {
     "Erreurs détectées :",
     ...details.map((detail) => `- ${String(detail).replace(/\n/g, "\n  ")}`),
     "",
-    "Corrige le patch pour résoudre ces erreurs, puis renvoie le patch complet et valide au format JSON attendu.",
+    "Rappel des règles de routage obligatoires :",
+    "- voicePatch DOIT contenir destination et un chemin audio continu jusqu'à destination in:in. Chaque sortie audio doit atteindre destination par des câbles audio.",
+    "- mainPatch DOIT contenir input et destination, avec un chemin audio continu input -> destination. Les modules demandés (ex. compressor) doivent être insérés dans ce chemin.",
+    "- Une modulation comme envelope out:out -> gain in:gain ne compte PAS comme chemin audio. Envelope n'a aucune entrée audio.",
+    "",
+    "Corrige le patch pour résoudre ces erreurs, puis renvoie le patch complet et valide au format JSON strict (sans commentaire ni virgule finale).",
   ].join("\n");
 
   await askModel(message);
@@ -731,10 +883,20 @@ async function scrollToBottom() {
                   <button
                     type="button"
                     class="table-action"
-                    :disabled="loading || chatting || isModelLoadedByKey(model.key)"
-                    @click.stop="selectAndLoadModel(model.key)"
+                    :disabled="loading || chatting || Boolean(reloadingModel)"
+                    @click.stop="
+                      isModelLoadedByKey(model.key)
+                        ? reloadModel(model.key)
+                        : selectAndLoadModel(model.key)
+                    "
                   >
-                    {{ isModelLoadedByKey(model.key) ? "Chargé" : loading && selectedModel === model.key ? "Chargement…" : "Charger" }}
+                    {{ reloadingModel === model.key
+                      ? "Rechargement…"
+                      : isModelLoadedByKey(model.key)
+                        ? "Recharger"
+                        : loading && selectedModel === model.key
+                          ? "Chargement…"
+                          : "Charger" }}
                   </button>
                 </td>
               </tr>
@@ -822,7 +984,8 @@ async function scrollToBottom() {
           @input="settingsSaved = false"
         />
         <small class="settings-field-hint">
-          Utilisée au chargement du modèle et à chaque requête.
+          Appliquée au chargement. Utilise « Recharger » dans la liste après
+          modification.
         </small>
       </label>
 
@@ -847,7 +1010,9 @@ async function scrollToBottom() {
           step="1"
           @input="settingsSaved = false"
         />
-        <small class="settings-field-hint">−1 = sans limite</small>
+        <small class="settings-field-hint">
+          −1 = sans limite. Une valeur trop basse peut produire une réponse vide.
+        </small>
       </label>
 
       <div class="settings-actions">

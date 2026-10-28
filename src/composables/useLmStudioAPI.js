@@ -144,7 +144,7 @@ export function useLmStudioAPI(options = {}) {
     const controller = new AbortController();
     activeChatController = controller;
 
-    const { contextLength, temperature, maxTokens } = options;
+    const { temperature, maxTokens } = options;
 
     try {
       const response = await fetch(`${baseUrl.value}/api/v1/chat`, {
@@ -158,13 +158,14 @@ export function useLmStudioAPI(options = {}) {
           input: message,
           stream: true,
           store: true,
-          ...(Number.isFinite(contextLength) && contextLength > 0
-            ? { context_length: contextLength }
-            : {}),
+          // Pas de context_length ici : le contexte est fixé au chargement.
+          // Envoyer une autre taille ferait recharger le modèle par LM Studio.
           ...(Number.isFinite(temperature) ? { temperature } : {}),
           // Une valeur négative (dont -1) signifie "sans limite" : on omet
           // simplement le champ pour laisser LM Studio générer librement.
-          ...(Number.isFinite(maxTokens) && maxTokens >= 0
+          // On traite aussi 0 comme "sans limite" : l'envoyer produirait une
+          // réponse vide.
+          ...(Number.isFinite(maxTokens) && maxTokens > 0
             ? { max_output_tokens: maxTokens }
             : {}),
           ...(conversationId.value
@@ -191,6 +192,7 @@ export function useLmStudioAPI(options = {}) {
 
       let buffer = "";
       let fullText = "";
+      let reasoningText = "";
 
       function processEvent(block) {
         const dataLines = block
@@ -214,10 +216,44 @@ export function useLmStudioAPI(options = {}) {
           onDelta(chunk);
         }
 
+        if (event.type === "reasoning.delta") {
+          reasoningText += event.content || "";
+        }
+
         if (event.type === "chat.end") {
           lastResponse.value = event.result;
           conversationId.value =
             event.result?.response_id || conversationId.value;
+
+          // Certains modèles n'envoient aucun message.delta mais fournissent
+          // le texte final agrégé dans chat.end. On récupère ce texte pour
+          // éviter une bulle assistant vide.
+          const finalMessage = (event.result?.output ?? [])
+            .filter((item) => item?.type === "message")
+            .map((item) => item.content ?? "")
+            .join("");
+
+          if (
+            finalMessage &&
+            finalMessage !== fullText &&
+            finalMessage.startsWith(fullText)
+          ) {
+            const suffix = finalMessage.slice(fullText.length);
+            fullText = finalMessage;
+            if (suffix) onDelta(suffix);
+          }
+
+          if (!fullText.trim()) {
+            const stats = event.result?.stats ?? {};
+            const onlyReasoning =
+              reasoningText.trim().length > 0 ||
+              Number(stats.reasoning_output_tokens) > 0;
+
+            fullText = onlyReasoning
+              ? "Réponse vide : le modèle a produit uniquement du raisonnement. Mets Max tokens à -1 (ou augmente-le), ou choisis un modèle sans raisonnement forcé."
+              : "Réponse vide du modèle. Mets Max tokens à -1 (ou augmente-le), puis réessaie.";
+            onDelta(fullText);
+          }
         }
 
         if (event.type === "error") {

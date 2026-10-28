@@ -77,9 +77,117 @@ const handleSynthPatchLoaded = (synthPatch) => {
  * Le modèle encadre parfois le JSON de texte ou de Markdown : on repère
  * la première accolade ouvrante, puis on tente les accolades fermantes
  * de la dernière vers la première pour retrouver l'objet complet.
+ * On tolère aussi deux écarts fréquents des LLM (commentaires et virgules
+ * finales) en les retirant AVANT JSON.parse. Cela évite des allers-retours
+ * de correction pour un simple commentaire.
  * Si aucune tentative n'aboutit, on conserve l'erreur de syntaxe et sa
  * position pour pouvoir la transmettre au modèle.
  * ========================= */
+
+/** Retire les commentaires ligne (//) et bloc hors des chaînes JSON. */
+const stripJsonComments = (text) => {
+  let result = ""
+  let inString = false
+  let escaped = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+
+    if (inString) {
+      result += char
+      if (escaped) {
+        escaped = false
+      } else if (char === "\\") {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      result += char
+      continue
+    }
+
+    if (char === "/" && text[index + 1] === "/") {
+      result += " "
+      index += 2
+      while (
+        index < text.length &&
+        text[index] !== "\n" &&
+        text[index] !== "\r"
+      ) {
+        index += 1
+      }
+      if (index < text.length) result += text[index]
+      continue
+    }
+
+    if (char === "/" && text[index + 1] === "*") {
+      result += " "
+      index += 2
+      while (
+        index < text.length &&
+        !(text[index] === "*" && text[index + 1] === "/")
+      ) {
+        index += 1
+      }
+      index += 1
+      continue
+    }
+
+    result += char
+  }
+
+  return result
+}
+
+/** Retire les virgules qui précèdent directement } ou ] hors des chaînes. */
+const stripTrailingJsonCommas = (text) => {
+  let result = ""
+  let inString = false
+  let escaped = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+
+    if (inString) {
+      result += char
+      if (escaped) {
+        escaped = false
+      } else if (char === "\\") {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      result += char
+      continue
+    }
+
+    if (char === ",") {
+      let lookahead = index + 1
+      while (lookahead < text.length && /\s/.test(text[lookahead])) {
+        lookahead += 1
+      }
+      if (text[lookahead] === "}" || text[lookahead] === "]") continue
+    }
+
+    result += char
+  }
+
+  return result
+}
+
+const normalizeJsonCandidate = (text) =>
+  stripTrailingJsonCommas(stripJsonComments(text))
+
 const parseJsonResponse = (text) => {
   if (typeof text !== "string") {
     return { patch: null, syntaxError: null }
@@ -101,12 +209,14 @@ const parseJsonResponse = (text) => {
   let firstError = null
 
   for (const candidate of candidates) {
+    const normalized = normalizeJsonCandidate(candidate)
+
     try {
-      return { patch: JSON.parse(candidate), syntaxError: null }
+      return { patch: JSON.parse(normalized), syntaxError: null }
     } catch (error) {
       // On garde l'erreur du candidat le plus large : c'est celle qui décrit
       // le mieux le problème de syntaxe du patch complet.
-      if (!firstError) firstError = { error, candidate }
+      if (!firstError) firstError = { error, candidate: normalized }
     }
   }
 
@@ -303,6 +413,167 @@ const validateSynthPatch = (synthPatch) => {
           )
         }
       }
+    }
+
+    /* -------------------------
+     * Vérification de la topologie audio.
+     * Un patch peut avoir des ports valides mais rester totalement silencieux
+     * si rien n'atteint destination. On ne suit que les connexions audio :
+     * une modulation vers in:gain ne constitue pas un chemin audio.
+     * ------------------------- */
+
+    const graphModules = modules.filter(
+      (module) =>
+        module &&
+        typeof module === "object" &&
+        typeof module.id === "string" &&
+        module.id &&
+        typeof module.type === "string" &&
+        catalog[module.type]
+    )
+    const moduleMap = new Map(graphModules.map((module) => [module.id, module]))
+
+    const findPort = (side, endpoint) => {
+      const module = moduleMap.get(endpoint?.id)
+      if (!module) return null
+
+      const prefix = side === "from" ? "out:" : "in:"
+      if (
+        typeof endpoint.port !== "string" ||
+        !endpoint.port.startsWith(prefix)
+      ) {
+        return null
+      }
+
+      const definition = catalog[module.type]
+      const ports =
+        side === "from"
+          ? definition.ports?.outputs ?? []
+          : definition.ports?.inputs ?? []
+      const portId = endpoint.port.slice(prefix.length)
+
+      return ports.find((port) => port.id === portId) ?? null
+    }
+
+    const audioEdges = new Map()
+    for (const connection of connections) {
+      const fromPort = findPort("from", connection?.from)
+      const toPort = findPort("to", connection?.to)
+      if (fromPort?.kind !== "audio" || toPort?.kind !== "audio") continue
+
+      const fromId = connection.from.id
+      if (!audioEdges.has(fromId)) audioEdges.set(fromId, new Set())
+      audioEdges.get(fromId).add(connection.to.id)
+    }
+
+    const canReachWithAudio = (startIds, targetIds) => {
+      const targets = new Set(targetIds)
+      const visited = new Set()
+      const queue = [...startIds]
+
+      while (queue.length) {
+        const current = queue.shift()
+        if (targets.has(current)) return true
+        if (visited.has(current)) continue
+        visited.add(current)
+
+        for (const next of audioEdges.get(current) ?? []) {
+          if (!visited.has(next)) queue.push(next)
+        }
+      }
+
+      return false
+    }
+
+    const destinationIds = graphModules
+      .filter((module) => module.type === "destination")
+      .map((module) => module.id)
+    const inputIds = graphModules
+      .filter((module) => module.type === "input")
+      .map((module) => module.id)
+    const audioOutputModules = graphModules.filter((module) =>
+      (catalog[module.type]?.ports?.outputs ?? []).some(
+        (port) => port.kind === "audio"
+      )
+    )
+
+    if (graphName === "voicePatch" && !destinationIds.length) {
+      errors.push(
+        'voicePatch doit contenir un module "destination". Termine toujours la chaîne audio par destination in:in.'
+      )
+    }
+
+    if (graphName === "mainPatch") {
+      if (!inputIds.length) {
+        errors.push(
+          'mainPatch doit contenir un module "input" qui reçoit les voix du voicePatch.'
+        )
+      }
+      if (!destinationIds.length) {
+        errors.push(
+          'mainPatch doit contenir un module "destination". Termine toujours la chaîne audio par destination in:in.'
+        )
+      }
+    }
+
+    if (destinationIds.length) {
+      const destinationInputIds = new Set(destinationIds)
+      const hasDestinationInput = connections.some((connection) =>
+        destinationInputIds.has(connection?.to?.id)
+      )
+
+      if (!hasDestinationInput) {
+        errors.push(
+          `${graphName} : aucun câble n'arrive à "destination". Connecte une sortie audio à destination in:in.`
+        )
+      }
+
+      const unreachableAudioModules = []
+      for (const module of audioOutputModules) {
+        if (canReachWithAudio([module.id], destinationIds)) continue
+        if (graphName === "mainPatch" && module.type === "input") continue
+
+        unreachableAudioModules.push(`"${module.id}" (${module.type})`)
+      }
+
+      if (unreachableAudioModules.length) {
+        errors.push(
+          `${graphName} : ces modules produisent de l'audio mais n'atteignent pas "destination" par des connexions audio : ${unreachableAudioModules.join(", ")}. Ajoute les câbles audio manquants ; une modulation vers in:gain ne compte pas comme chemin audio.`
+        )
+      }
+
+      if (
+        graphName === "mainPatch" &&
+        inputIds.length &&
+        !canReachWithAudio(inputIds, destinationIds)
+      ) {
+        errors.push(
+          'mainPatch : aucun chemin audio continu ne relie "input" à "destination". Construis par exemple input out:out -> compressor in:in -> compressor out:out -> destination in:in.'
+        )
+      }
+    }
+
+    const connectedModuleIds = new Set()
+    for (const connection of connections) {
+      if (typeof connection?.from?.id === "string") {
+        connectedModuleIds.add(connection.from.id)
+      }
+      if (typeof connection?.to?.id === "string") {
+        connectedModuleIds.add(connection.to.id)
+      }
+    }
+
+    const audioOutputModuleIds = new Set(
+      audioOutputModules.map((module) => module.id)
+    )
+    for (const module of graphModules) {
+      if (connectedModuleIds.has(module.id)) continue
+      if (module.type === "destination" || module.type === "input") continue
+      if (audioOutputModuleIds.has(module.id)) continue
+
+      errors.push(
+        `${graphName} : le module "${module.id}" (${module.type}) n'est connecté à aucune entrée ni sortie.`
+      )
     }
   }
 
