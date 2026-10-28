@@ -679,6 +679,29 @@ const exportPatch = () => {
 }
 
 
+/**
+ * Complète les paramètres d'un module avec les valeurs par défaut du
+ * catalogue. Les patches générés par l'IA peuvent omettre les paramètres
+ * inchangés ; le moteur audio et l'interface doivent alors retrouver les
+ * mêmes valeurs qu'un module créé manuellement.
+ */
+const mergePatchParams = (type, params) => {
+  const def = getModuleByType(type)
+  const defaults = Object.fromEntries(
+    Object.entries(def?.params ?? {}).map(([key, descriptor]) => [
+      key,
+      descriptor.default,
+    ])
+  )
+
+  return {
+    // JSON clone plutôt que structuredClone : le catalogue est réactif et
+    // structuredClone refuse les proxies Vue.
+    ...JSON.parse(JSON.stringify(defaults)),
+    ...JSON.parse(JSON.stringify(params ?? {})),
+  }
+}
+
 const importPatch = (patch) => {
   clearGraph()
 
@@ -694,8 +717,8 @@ const importPatch = (patch) => {
     addModule(m.type, m.position.x, m.position.y, m.id, m.label)
 
     const module = modulesById.get(m.id)
-    if (module && m.params) {
-      module.params = structuredClone(m.params)
+    if (module) {
+      module.params = mergePatchParams(m.type, m.params)
     }
   })
 
@@ -735,9 +758,9 @@ const loadPatch = (patch) => {
     if (!shape) return
 
     const module = modulesById.get(m.id)
-    if (module && m.params) {
-      // réinjecter les paramètres depuis le patch
-      module.params = structuredClone(m.params)
+    if (module) {
+      // Les paramètres absents du patch reprennent leur valeur par défaut.
+      module.params = mergePatchParams(m.type, m.params)
     }
   })
 
