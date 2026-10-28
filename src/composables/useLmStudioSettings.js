@@ -12,11 +12,11 @@ import { DEFAULT_BASE_URL, normalizeBaseUrl } from "./useLmStudioAPI.js";
 const STORAGE_KEY = "modular-synth:lm-studio-settings";
 
 export const DEFAULT_MODEL = "google/gemma-4-e4b";
-export const DEFAULT_MAX_CORRECTION_ATTEMPTS = 15;
+export const DEFAULT_MAX_CORRECTION_ATTEMPTS = 3;
 export const DEFAULT_CONTEXT_LENGTH = 32000;
-export const DEFAULT_TEMPERATURE = 0.4;
+export const DEFAULT_TEMPERATURE = 0.7;
 // -1 signifie "aucune limite" : le champ n'est pas envoyé à l'API.
-export const DEFAULT_MAX_TOKENS = -1;
+export const DEFAULT_MAX_TOKENS = DEFAULT_CONTEXT_LENGTH / 4;
 
 export const LM_STUDIO_DEFAULTS = Object.freeze({
   baseUrl: DEFAULT_BASE_URL,
