@@ -52,6 +52,26 @@ const currentModel = computed(() =>
   availableModels.value.find((model) => model.key === selectedModel.value)
 );
 
+/**
+ * Contexte effectif : on ne demande pas plus que la capacité maximale du
+ * modèle. La même valeur doit être utilisée au chargement et dans le chat,
+ * sinon LM Studio recharge le modèle pour appliquer la nouvelle taille.
+ */
+const effectiveContextLength = computed(() => {
+  const configured = Number(settings.contextLength);
+  const modelMax = Number(currentModel.value?.max_context_length);
+
+  if (!Number.isFinite(configured) || configured <= 0) {
+    return settings.contextLength;
+  }
+
+  if (!Number.isFinite(modelMax) || modelMax <= 0) {
+    return configured;
+  }
+
+  return Math.min(configured, modelMax);
+});
+
 const isModelLoaded = computed(() =>
   loadedModels.value.some((model) => model.key === selectedModel.value)
 );
@@ -467,7 +487,12 @@ async function handleLoadModel() {
 
   try {
     startNewConversation();
-    await loadModel(selectedModel.value);
+    // Important : charger avec la même taille de contexte que celle envoyée
+    // dans la requête de chat. Sinon LM Studio recharge le modèle à la
+    // première question pour appliquer la nouvelle valeur.
+    await loadModel(selectedModel.value, {
+      context_length: effectiveContextLength.value,
+    });
   } catch (err) {
     console.error("Impossible de charger le modèle :", err);
   }
@@ -538,7 +563,7 @@ async function askModel(question) {
       },
       buildSynthSystemPrompt(),
       {
-        contextLength: settings.contextLength,
+        contextLength: effectiveContextLength.value,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
       }
@@ -796,6 +821,9 @@ async function scrollToBottom() {
           step="1"
           @input="settingsSaved = false"
         />
+        <small class="settings-field-hint">
+          Utilisée au chargement du modèle et à chaque requête.
+        </small>
       </label>
 
       <label class="settings-field">
