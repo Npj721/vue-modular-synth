@@ -57,13 +57,16 @@ class StubNode {
     this.__type = type;
     this.context = ctx;
     this.connections = [];
+    this.connectionDetails = [];
   }
-  connect(t) {
+  connect(t, outputIndex = 0, inputIndex = 0) {
     this.connections.push(t);
+    this.connectionDetails.push({ target: t, outputIndex, inputIndex });
     return t;
   }
   disconnect() {
     this.connections = [];
+    this.connectionDetails = [];
   }
   start(...args) {
     this.started = true;
@@ -88,7 +91,10 @@ class StubContext {
     this.created.push(this.destination);
   }
   get state() {
-    return "running";
+    // On reste "suspended" : le moteur ne crée alors ni l'oscillateur de
+    // keep-alive ni l'analyser maître, qui pollueraient les nœuds observés
+    // par les scénarios (le contexte réel, lui, est repris par le navigateur).
+    return "suspended";
   }
   async resume() {}
   createGain() {
@@ -347,14 +353,19 @@ saveFromGraph({
   const boundaryOut = gains.find((g) => g === innerGain?.connections[0]);
   check("gain.out -> boundaryOut", !!boundaryOut);
 
-  // chaîne externe : boundaryOut -> vdest (= mainInput) ; mainInput -> ctx.destination
+  // chaîne externe : boundaryOut -> vdest (= mainInput) ; mainInput -> analyser
   const mainInput = gains.find(
     (g) => boundaryOut && boundaryOut.connections.includes(g)
   );
+  const analyser = of(ctx, "analyser")[0];
   check("boundaryOut -> destination du voicePatch (mainInput)", !!mainInput);
   check(
-    "mainInput -> ctx.destination",
-    !!mainInput && mainInput.connections.includes(ctx.destination)
+    "mainInput -> analyser maître",
+    !!mainInput && !!analyser && mainInput.connections.includes(analyser)
+  );
+  check(
+    "analyser maître -> ctx.destination",
+    !!analyser && analyser.connections.includes(ctx.destination)
   );
 
   // enveloppe press : expRamp vers to * velocity * base = 1 * 1 * 0.8
@@ -468,8 +479,9 @@ saveFromGraph({
   );
 
   // la chaîne audio classique reste intacte
+  const analyser = of(ctx, "analyser")[0];
   const mainInputGain = ctx.created.find(
-    (n) => n.__type === "gain" && n.connections.includes(ctx.destination)
+    (n) => n.__type === "gain" && n.connections.includes(analyser)
   );
   check(
     "voice.out -> destination (mainInput)",
@@ -1334,6 +1346,100 @@ saveFromGraph({
   check(
     "loop : re-ancre au présent (cancel à t=12)",
     param.events.some((e) => e[0] === "cancel" && e[1] === 12)
+  );
+
+  synth.noteOff(60);
+}
+
+/* =========================================================
+ * Scénario 13 : ChannelSplitter / ChannelMerger
+ *
+ * Le catalogue expose des ports numériques ("out:0".."out:3" et
+ * "in:0".."in:3"). Le moteur doit transmettre ces index à connect() :
+ * sinon toutes les sorties du splitter sont lues sur la sortie 0 et toutes
+ * les entrées du merger sont ignorées.
+ * ========================================================= */
+{
+  const values = [0.11, 0.22, 0.33, 0.44];
+  const patch = {
+    mainPatch: {
+      modules: [
+        { id: "in13", type: "input", params: {}, position: {} },
+        { id: "out13", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "in13", port: "out:out" }, to: { id: "out13", port: "in:in" } },
+      ],
+    },
+    voicePatch: {
+      modules: [
+        { id: "v13", type: "voice", params: {}, position: {} },
+        { id: "sp13", type: "channelSplitter", params: {}, position: {} },
+        ...values.map((gain, i) => ({
+          id: `g13_${i}`,
+          type: "gain",
+          params: { gain },
+          position: {},
+        })),
+        { id: "mg13", type: "channelMerger", params: {}, position: {} },
+        { id: "d13", type: "destination", params: {}, position: {} },
+      ],
+      connections: [
+        { from: { id: "v13", port: "out:out" }, to: { id: "sp13", port: "in:in" } },
+        ...values.map((_, i) => ({
+          from: { id: "sp13", port: `out:${i}` },
+          to: { id: `g13_${i}`, port: "in:in" },
+        })),
+        ...values.map((_, i) => ({
+          from: { id: `g13_${i}`, port: "out:out" },
+          to: { id: "mg13", port: `in:${i}` },
+        })),
+        { from: { id: "mg13", port: "out:out" }, to: { id: "d13", port: "in:in" } },
+      ],
+    },
+  };
+
+  const synth = usePatchVoice(patch);
+  await synth.init();
+  await synth.noteOn(60);
+  const ctx = synth.getContext();
+
+  const splitter = of(ctx, "splitter")[0];
+  const merger = of(ctx, "merger")[0];
+  check("splitter/merger : nœuds créés", !!splitter && !!merger);
+
+  const gains = values.map((gain) =>
+    of(ctx, "gain").find((g) => approx(g.gain.value, gain))
+  );
+  check("splitter/merger : gains intermédiaires créés", gains.every(Boolean));
+
+  for (let i = 0; i < values.length; i++) {
+    const splitConn = splitter?.connectionDetails.find(
+      (c) => c.target === gains[i]
+    );
+    check(
+      `splitter : out:${i} -> sortie WebAudio ${i}`,
+      !!splitConn && splitConn.outputIndex === i
+    );
+
+    const mergeConn = gains[i]?.connectionDetails.find(
+      (c) => c.target === merger
+    );
+    check(
+      `merger : gain ${i} -> entrée WebAudio ${i}`,
+      !!mergeConn && mergeConn.outputIndex === 0 && mergeConn.inputIndex === i
+    );
+  }
+
+  const voiceDestination = merger?.connectionDetails[0]?.target;
+  const analyser = of(ctx, "analyser")[0];
+  check(
+    "merger : out -> destination de la voix",
+    !!voiceDestination &&
+      voiceDestination.__type === "gain" &&
+      !!analyser &&
+      voiceDestination.connections.includes(analyser) &&
+      analyser.connections.includes(ctx.destination)
   );
 
   synth.noteOff(60);

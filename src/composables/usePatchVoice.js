@@ -17,6 +17,17 @@ import { normalizeCurve, sampleCurve } from "./envelopeCurves.js"
 
 const EPS = 0.0001
 
+// ChannelSplitter/ChannelMerger exposent un port par canal (0..3). Les ports
+// du catalogue sont des chaînes ("0", "1", ...) : on les convertit en index
+// WebAudio pour câbler la bonne entrée/sortie du nœud.
+const CHANNEL_PORT_COUNT = 4
+function channelPortIndex(port) {
+  const index = Number.parseInt(port, 10)
+  return Number.isInteger(index) && index >= 0 && index < CHANNEL_PORT_COUNT
+    ? index
+    : 0
+}
+
 /* WORKLET_PARAM_NAMES (p1..p8) vient de useAudioWorklet.js, seul endroit où
  * ils sont déclarés : c'est lui qui les injecte comme descripteurs dans le
  * code compilé. Le DSP écrit par l'utilisateur les lit via `parameters.pN`. */
@@ -1285,13 +1296,25 @@ export function usePatchVoice(patch) {
       }
 
       case "channelSplitter": {
-        const s = ctx.createChannelSplitter(4)
-        return { node: s, params: {}, bases: {} }
+        const s = ctx.createChannelSplitter(CHANNEL_PORT_COUNT)
+        return {
+          node: s,
+          params: {},
+          bases: {},
+          // "out:0".."out:3" -> sortie 0..3 du splitter
+          outputPortIndex: channelPortIndex,
+        }
       }
 
       case "channelMerger": {
-        const m = ctx.createChannelMerger(4)
-        return { node: m, params: {}, bases: {} }
+        const m = ctx.createChannelMerger(CHANNEL_PORT_COUNT)
+        return {
+          node: m,
+          params: {},
+          bases: {},
+          // "in:0".."in:3" -> entrée 0..3 du merger
+          inputPortIndex: channelPortIndex,
+        }
       }
 
       case "panner": {
@@ -1588,6 +1611,7 @@ export function usePatchVoice(patch) {
 
     // --- cible : AudioNode ou AudioParam ---
     let target = null
+    let inputIndex = 0 // entrée WebAudio visée (ChannelMerger)
     let modParam = null // AudioParam à moduler (entrée audio de super-module)
     let inParam = null // AudioParam modulé par un port "in" (ex: constant.offset)
     let modTargets = null // AudioParams internes ciblés par un port super.in
@@ -1604,6 +1628,11 @@ export function usePatchVoice(patch) {
       } else {
         target = to.params?.[toPort] ?? null
       }
+    } else if (to.inputPortIndex) {
+      // ChannelMerger : chaque port "in:0".."in:3" est une entrée distincte
+      // du même AudioNode. Il faut donc préciser l'index à connect().
+      target = to.node
+      inputIndex = to.inputPortIndex(toPort)
     } else if (toPort === "in") {
       // certains modules (ex: waveshaper) ont un nœud d'entrée distinct
       // de leur nœud de sortie (pré-gain → node)
@@ -1666,8 +1695,13 @@ export function usePatchVoice(patch) {
 
     // --- câblage audio classique ---
     let src = from.node
+    let outputIndex = 0 // sortie WebAudio utilisée (ChannelSplitter)
     if (from.isSuper) {
       src = from.outputsByPort.get(fromPort) ?? from.node
+    } else if (from.outputPortIndex) {
+      // ChannelSplitter : chaque port "out:0".."out:3" est une sortie
+      // distincte du même AudioNode. Il faut préciser l'index à connect().
+      outputIndex = from.outputPortIndex(fromPort)
     }
     if (!src || !target) return
 
@@ -1678,7 +1712,16 @@ export function usePatchVoice(patch) {
       target = masterAnalyser
     }
 
-    try { src.connect(target) } catch {}
+    try {
+      if (to.inputPortIndex) {
+        src.connect(target, outputIndex, inputIndex)
+      } else if (from.outputPortIndex) {
+        // connect(AudioParam, outputIndex) n'accepte pas d'index d'entrée
+        src.connect(target, outputIndex)
+      } else {
+        src.connect(target)
+      }
+    } catch {}
   }
 
   /**
@@ -1700,8 +1743,9 @@ export function usePatchVoice(patch) {
       const to = nodes.get(c.to?.id)
       if (!from || !to || from.modulator) continue
       const [, toPort = "in"] = (c.to.port ?? "in:in").split(":")
-      // seul un flux audio entrant dans un module propage le delay
-      if (toPort !== "in") continue
+      // seul un flux audio entrant dans un module propage le delay. Les
+      // entrées numériques d'un ChannelMerger sont aussi des entrées audio.
+      if (toPort !== "in" && !to.inputPortIndex) continue
       edges.push([c.from.id, c.to.id])
     }
 

@@ -144,8 +144,8 @@ Tous les filtres exposent `frequency` (20…20 000 Hz, défaut 1 000) et `Q` (0.
 
 | Module | Description |
 |---|---|
-| **Splitter** | Sépare un signal en 4 canaux (Ch 0–3) |
-| **Merger** | Fusionne 4 canaux en un signal stéréo/mono |
+| **Splitter** | Sépare un signal multicanal en 4 sorties mono (Ch 0–3) |
+| **Merger** | Place 4 entrées mono sur 4 canaux distincts (ne mélange pas les sources) |
 
 ### Contrôle
 
