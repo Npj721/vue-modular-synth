@@ -1,40 +1,58 @@
 // composables/useWorkletPresets.js
-// Presets du module AudioWorklet : sauvegarde de la config complète
-// (code DSP, rate, channels, options JSON, valeurs p1..p8) sous un nom,
-// pour pouvoir la réutiliser plus tard dans un autre module / patch.
+// Presets de modules à code : sauvegarde de la config complète (code DSP /
+// courbe, options et paramètres) sous un nom, pour pouvoir la réutiliser plus
+// tard dans un autre module / patch.
 //
-// Même mécanique que usePatchStorage : un cache réactif unique partagé
-// entre tous les composants, persistance asynchrone en IndexedDB (via
-// useIndexedDb) — pas de localStorage (quota ~5 Mo, le code + les params
-// peuvent grossir).
+// Un store réactif est créé PAR NAMESPACE IndexedDB : les presets AudioWorklet
+// et WaveShaper restent séparés, mais partagent exactement la même mécanique.
+// Persistance asynchrone en IndexedDB (via useIndexedDb) — pas de localStorage
+// (quota ~5 Mo, le code + les params peuvent grossir).
 
 import { reactive } from "vue"
 import { kvPut, kvDelete, kvEntries } from "./useIndexedDb.js"
 
-const NS = "worklet-presets"
-
-const state = reactive({
-  entries: {},   // nom -> { params: {...}, savedAt }
-  loaded: null,
-})
+const WORKLET_NS = "worklet-presets"
+const WAVESHAPER_NS = "waveshaper-presets"
 
 const clone = (v) => JSON.parse(JSON.stringify(v ?? {}))
+const stores = new Map()
 
-async function init() {
-  try {
-    const entries = await kvEntries(NS)
-    for (const { key: name, value } of entries) {
-      state.entries[name] = value
+function createStore(namespace) {
+  const state = reactive({
+    entries: {},   // nom -> { params: {...}, savedAt }
+    loaded: null,
+  })
+
+  async function init() {
+    try {
+      const entries = await kvEntries(namespace)
+      for (const { key: name, value } of entries) {
+        // ne pas écraser une entrée créée pendant le chargement asynchrone
+        if (!(name in state.entries)) state.entries[name] = value
+      }
+    } catch (err) {
+      console.error(`useWorkletPresets/load (${namespace}) :`, err)
     }
-  } catch (err) {
-    console.error("useWorkletPresets/load :", err)
   }
+
+  // Chargement à la première utilisation : la liste est prête dès que le
+  // panneau demande le store.
+  state.loaded = init()
+  return state
 }
 
-// Chargement eager : la liste est prête dès que le panneau s'ouvre
-state.loaded = init()
+function getStore(namespace) {
+  let state = stores.get(namespace)
+  if (!state) {
+    state = createStore(namespace)
+    stores.set(namespace, state)
+  }
+  return state
+}
 
-export function useWorkletPresets() {
+function usePresets(namespace) {
+  const state = getStore(namespace)
+
   // noms triés du plus récent au plus ancien
   const names = () =>
     Object.keys(state.entries).sort(
@@ -48,16 +66,24 @@ export function useWorkletPresets() {
     if (!name) return
     const value = { params: clone(params), savedAt: Date.now() }
     state.entries[name] = value
-    kvPut(NS, name, clone(value)).catch(() => {})
+    kvPut(namespace, name, clone(value)).catch(() => {})
   }
 
   const remove = (name) => {
     if (!(name in state.entries)) return
     delete state.entries[name]
-    kvDelete(NS, name).catch(() => {})
+    kvDelete(namespace, name).catch(() => {})
   }
 
   const ready = () => state.loaded
 
   return { names, get, save, remove, ready, state }
+}
+
+export function useWorkletPresets() {
+  return usePresets(WORKLET_NS)
+}
+
+export function useWaveshaperPresets() {
+  return usePresets(WAVESHAPER_NS)
 }

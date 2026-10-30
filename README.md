@@ -124,8 +124,31 @@ Tous les filtres exposent `frequency` (20…20 000 Hz, défaut 1 000) et `Q` (0.
 
 | Module | Description | Paramètres |
 |---|---|---|
-| **WaveShaper** | Distorsion (courbe tanh avec pré-gain modulable) | `drive` 0…10 (défaut 1, AudioParam modulable), `oversample` none/2x/4x |
+| **WaveShaper** | Distorsion / transfert arbitraire par courbe JS éditable dans le panneau (tanh par défaut) | `curve` (code JS, fonction `buildCurve(length)`), `drive` 0…10 (défaut 1, AudioParam modulable), `oversample` none/2x/4x |
 | **Convolver** | Réverbérateur par convolution (impulse response) | `buffer` (fichier audio), `normalize` booléen |
+
+#### Courbe du WaveShaper
+
+Le paramètre `curve` est un code JavaScript éditable dans le panneau, compilé au chargement
+du patch. Il doit définir une fonction `buildCurve(length = 8192)` qui retourne un
+`Float32Array` (ou un tableau) d'au moins 2 valeurs, une par point de x = −1 à x = +1.
+La courbe par défaut est la tanh normalisée ; n'importe quel transfert arbitraire est possible :
+
+```js
+function buildCurve(length = 8192) {
+  const curve = new Float32Array(length)
+  for (let i = 0; i < length; i++) {
+    const x = (i / (length - 1)) * 2 - 1
+    curve[i] = Math.sin(x * Math.PI / 2) // exemple : saturation douce
+  }
+  return curve
+}
+```
+
+Le code est exécuté dans le contexte de la page : ne chargez que des patches de confiance.
+En cas de code invalide, la courbe par défaut est utilisée. Les presets (`curve` + `drive` +
+`oversample`) se sauvegardent, se chargent et se suppriment depuis le panneau (IndexedDB,
+namespace `waveshaper-presets`).
 
 ### Spatial
 
@@ -491,6 +514,8 @@ Utilisé par les modules **FX / Sample** et **Convolver**.
 | `IndexedDB` | `modular-synth-store` → `patches:modular-patches` | Patches individuels (un seul graph) |
 | `IndexedDB` | `modular-synth-store` → `super-modules` | Définitions de super-modules |
 | `IndexedDB` | `modular-synth-store` → `envelope:<clé>` | Presets d'enveloppe par type de module |
+| `IndexedDB` | `modular-synth-store` → `worklet-presets` | Presets AudioWorklet |
+| `IndexedDB` | `modular-synth-store` → `waveshaper-presets` | Presets WaveShaper |
 | `IndexedDB` | `modular-synth-audio` | Fichiers audio bruts (clés par nom) |
 | Repli mémoire | — | Environnements sans IndexedDB (tests Node) |
 

@@ -10,6 +10,7 @@ import {
   WORKLET_PARAM_NAMES,
 } from "./useAudioWorklet.js"
 import { normalizeCurve, sampleCurve } from "./envelopeCurves.js"
+import { buildWaveshaperCurve } from "./useWaveshaperCurve.js"
 
 /* =========================================================
  * Utils
@@ -63,19 +64,6 @@ const noteToFreq = (note) =>
 
 function getEnvelopeDuration(stages = []) {
   return stages.reduce((t, s) => t + s.duration, 0)
-}
-
-/* Courbe de distorsion "soft clip" (tangente hyperbolique), normalisée pour
- * restituer l'unité au pic (x=1 → y=1). La saturation se règle avec le
- * pré-gain "drive" devant le WaveShaper. */
-function buildTanhCurve(length = 8192) {
-  const curve = new Float32Array(length)
-  const norm = Math.tanh(1)
-  for (let i = 0; i < length; i++) {
-    const x = (i / (length - 1)) * 2 - 1 // -1..1
-    curve[i] = Math.tanh(x) / norm
-  }
-  return curve
 }
 
 const safeStart = (node, t, offset, duration) => {
@@ -1254,15 +1242,17 @@ export function usePatchVoice(patch) {
       }
 
       case "waveshaper": {
-        // drive = pré-gain devant la courbe tanh : c'est un AudioParam
-        // modulable (enveloppe/CV). node = le WaveShaper (sortie) ;
-        // inputNode = le gain de drive (le son entre par là).
+        // drive = pré-gain devant la courbe : c'est un AudioParam modulable
+        // (enveloppe/CV). node = le WaveShaper (sortie) ; inputNode = le gain
+        // de drive (le son entre par là). La courbe vient du paramètre `curve`
+        // (code éditable dans le panneau) et retombe sur la tanh par défaut si
+        // le code est absent ou invalide.
         const driveGain = ctx.createGain()
         const drive = p.drive ?? 1
         driveGain.gain.setValueAtTime(drive, now)
 
         const ws = ctx.createWaveShaper()
-        ws.curve = buildTanhCurve()
+        ws.curve = buildWaveshaperCurve(p.curve)
         ws.oversample = p.oversample || "none"
 
         driveGain.connect(ws)

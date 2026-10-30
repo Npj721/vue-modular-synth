@@ -3,6 +3,7 @@ import { reactive, readonly } from "vue";
 import {
   getWorkletDefaults,
 } from "./useAudioWorklet.js";
+import { DEFAULT_WAVESHAPER_CURVE } from "./useWaveshaperCurve.js";
 
 /* Le code et la config par défaut vivent dans useAudioWorklet.js (c'est lui
  * qui empaquette le source en Blob) : on les récupère ici pour les insérer
@@ -504,9 +505,11 @@ const catalog = reactive({
     },
 
     /* =========================
-     * WAVESHAPER (distorsion)
-     * Le drive est un pré-gain devant la courbe tanh : c'est un vrai
-     * AudioParam, donc modulable par une enveloppe/CV en temps réel.
+     * WAVESHAPER (distorsion / courbe libre)
+     * La courbe est un code JavaScript éditable dans le panneau (comme le DSP
+     * d'un AudioWorklet) : tanh par défaut, mais n'importe quel transfert
+     * arbitraire est possible. Le drive est un pré-gain devant la courbe :
+     * c'est un vrai AudioParam, donc modulable par une enveloppe/CV.
      * ========================= */
 
     waveshaper: {
@@ -545,6 +548,11 @@ const catalog = reactive({
       },
 
       params: {
+        curve: {
+          type: "code",
+          default: DEFAULT_WAVESHAPER_CURVE,
+          rows: 18,
+        },
         drive: num(0, 10, 0.01, 1),
         oversample: {
           type: "enum",

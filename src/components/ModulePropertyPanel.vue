@@ -7,7 +7,8 @@ import {
   getWavetableFrameState,
 } from '../composables/usePatchVoice'
 import { parseRanges, WORKLET_PARAM_NAMES } from '../composables/useAudioWorklet'
-import { useWorkletPresets } from '../composables/useWorkletPresets'
+import { useWorkletPresets, useWaveshaperPresets } from '../composables/useWorkletPresets'
+import { validateWaveshaperCurve } from '../composables/useWaveshaperCurve'
 import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
 import SampleWaveformEditor from './SampleWaveformEditor.vue'
@@ -66,7 +67,7 @@ const jsonDraftStatus = ref({ pending: false, ok: false, message: "" })
 let jsonDraftTimer = 0
 
 /* =========================================================
- * CHAMP CODE (module AudioWorklet)
+ * CHAMP CODE (module AudioWorklet / courbe WaveShaper)
  *
  * Le textarea est un DRAFT local : le commit vers le patch est différé
  * (~500 ms après la dernière frappe) pour ne pas recompiler l'AudioWorklet
@@ -80,7 +81,17 @@ const CODE_COMMIT_MS = 500
 const codeDrafts = reactive({})   // key -> texte en cours de saisie
 const codeTimers = {}              // key -> timer de commit
 
+// Statut de la courbe WaveShaper (le moteur retombe sur la courbe par défaut
+// si le code est invalide, mais on prévient l'utilisateur dans le panneau).
+const curveStatus = ref(null)
+
 const codeValue = (key) => codeDrafts[key] ?? params[key] ?? ""
+
+const validateCurveCode = (source) => {
+  curveStatus.value = props.module?.type === 'waveshaper'
+    ? validateWaveshaperCurve(source)
+    : null
+}
 
 const onCodeInput = (key, e) => {
   codeDrafts[key] = e.target.value
@@ -93,6 +104,9 @@ const commitCode = (key) => {
   clearTimeout(codeTimers[key])
   codeTimers[key] = undefined
   if (codeDrafts[key] === undefined) return   // rien saisi : rien à commiter
+  if (props.module?.type === 'waveshaper' && key === 'curve') {
+    validateCurveCode(codeDrafts[key])
+  }
   emitChange(key, codeDrafts[key])
 }
 
@@ -109,6 +123,9 @@ const resetCode = (key) => {
   const def = paramDefs[key]
   const value = def?.default ?? ""
   codeDrafts[key] = value
+  if (props.module?.type === 'waveshaper' && key === 'curve') {
+    validateCurveCode(value)
+  }
   emitChange(key, value)
 }
 
@@ -199,6 +216,8 @@ watch(
     Object.keys(jsonTimers).forEach(k => clearTimeout(jsonTimers[k]))
     resetCodeDraft()
     closeJsonModal()
+    curveStatus.value = null
+    presetName.value = ""
     presetStatus.value = ""
 
     if (!mod) return
@@ -244,53 +263,60 @@ const emitChange = (key, value) => {
 }
 
 /* =========================================================
- * PRESETS AUDIOWORKLETT (module AudioWorklet)
+ * PRESETS DE MODULE À CODE (AudioWorklet / WaveShaper)
  *
- * Sauvegarde de la config COMPLÈTE du module (code, rate, channels,
- * options JSON, valeurs p1..p8) sous un nom dans IndexedDB, pour la
- * réutiliser plus tard — y compris dans un autre module d'un autre
- * patch. Le chargement écrase la config courante du module sélectionné.
+ * Sauvegarde de la config COMPLÈTE du module (code DSP / courbe + paramètres)
+ * sous un nom dans IndexedDB, pour la réutiliser plus tard — y compris dans un
+ * autre module d'un autre patch. Le chargement écrase la config courante du
+ * module sélectionné. Les stores sont séparés par type de module.
  * ========================================================= */
 
-const {
-  names: workletPresetNames,
-  get: getWorkletPreset,
-  save: saveWorkletPreset,
-  remove: removeWorkletPreset,
-} = useWorkletPresets()
+const workletPresets = useWorkletPresets()
+const waveshaperPresets = useWaveshaperPresets()
 
-const workletPresetList = computed(() =>
-  workletPresetNames().map((name) => ({
+const activePresetStore = computed(() => {
+  if (props.module?.type === 'audioworklet') return workletPresets
+  if (props.module?.type === 'waveshaper') return waveshaperPresets
+  return null
+})
+
+const presetList = computed(() => {
+  const store = activePresetStore.value
+  if (!store) return []
+  return store.names().map((name) => ({
     name,
-    savedAt: getWorkletPreset(name)?.savedAt ?? 0,
+    savedAt: store.get(name)?.savedAt ?? 0,
   }))
-)
+})
 
 const formatPresetDate = (ts) =>
   ts ? new Date(ts).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : ""
 
 // Capturer la config courante, brouillons de code non commis compris
-const snapshotWorkletParams = () => {
+const snapshotModuleParams = () => {
   // le textarea est un draft : on committe tout ce qui est en attente
   // pour que le snapshot reflète bien ce qui est affiché à l'écran
   Object.keys(codeDrafts).forEach((k) => commitCode(k))
   return deepClone(props.module?.params || {})
 }
 
-const saveCurrentWorkletPreset = () => {
+const saveCurrentPreset = () => {
+  const store = activePresetStore.value
+  if (!store) return
   const name = presetName.value.trim()
   if (!name) {
     presetStatus.value = "donnez un nom au preset"
     return
   }
-  saveWorkletPreset(name, snapshotWorkletParams())
+  store.save(name, snapshotModuleParams())
   presetName.value = ""
   presetStatus.value = `preset « ${name} » sauvegardé`
 }
 
 // Écraser la config courante par le preset choisi
-const applyWorkletPreset = (name) => {
-  const preset = getWorkletPreset(name)
+const applyPreset = (name) => {
+  const store = activePresetStore.value
+  const preset = store?.get(name)
   if (!preset || !props.module) return
   if (!window.confirm(`Charger le preset « ${name} » ? La config courante de ce module sera écrasée.`)) return
 
@@ -306,15 +332,20 @@ const applyWorkletPreset = (name) => {
       clearTimeout(codeTimers[key])
       codeTimers[key] = undefined
       codeDrafts[key] = value
+      if (props.module?.type === 'waveshaper' && key === 'curve') {
+        validateCurveCode(value)
+      }
     }
     emitChange(key, value)
   })
   presetStatus.value = `preset « ${name} » chargé`
 }
 
-const deleteWorkletPreset = (name) => {
+const deletePreset = (name) => {
+  const store = activePresetStore.value
+  if (!store) return
   if (!window.confirm(`Supprimer le preset « ${name} » ?`)) return
-  removeWorkletPreset(name)
+  store.remove(name)
   presetStatus.value = `preset « ${name} » supprimé`
 }
 
@@ -841,8 +872,9 @@ onBeforeUnmount(() => {
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
 
-      <!-- Code DSP (module AudioWorklet) : textarea en ligne, le commit vers
-           le patch est différé de 500 ms (cf. codeDrafts plus haut) -->
+      <!-- Code DSP (module AudioWorklet) / courbe (module WaveShaper) :
+           textarea en ligne, le commit vers le patch est différé de 500 ms
+           (cf. codeDrafts plus haut) -->
       <template v-else-if="def.type === 'code'">
         <textarea
           class="code-editor"
@@ -863,6 +895,12 @@ onBeforeUnmount(() => {
             compilé au chargement du patch — rejouez une note ou rechargez le patch
           </span>
         </div>
+        <span
+          v-if="module.type === 'waveshaper' && key === 'curve' && curveStatus"
+          class="code-status"
+          :class="curveStatus?.ok ? 'ok' : 'err'">
+          {{ curveStatus?.message }}
+        </span>
       </template>
 
       <!-- JSON (ex: wavetable) : bouton + résumé ici, le textarea géant n'est
@@ -954,30 +992,30 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <!-- Presets AudioWorklet : sauvegarde / rechargement de la config
-         complète (code, rate, channels, options, p1..p8) sous un nom,
-         persistée en IndexedDB (cf. useWorkletPresets) -->
-    <div v-if="module.type === 'audioworklet'" class="worklet-presets">
+    <!-- Presets des modules à code : sauvegarde / rechargement de la config
+         complète (code DSP / courbe + paramètres) sous un nom, persistée en
+         IndexedDB (cf. useWorkletPresets) -->
+    <div v-if="activePresetStore" class="worklet-presets">
       <h4>Presets</h4>
       <div class="worklet-preset-save">
         <input
           v-model="presetName"
           type="text"
-          placeholder="Nom du preset (ex: FM bell)"
-          @keydown.enter="saveCurrentWorkletPreset"
+          placeholder="Nom du preset"
+          @keydown.enter="saveCurrentPreset"
         />
-        <button type="button" @click="saveCurrentWorkletPreset">Sauver la config</button>
+        <button type="button" @click="saveCurrentPreset">Sauver la config</button>
       </div>
-      <ul v-if="workletPresetList.length" class="worklet-preset-list">
-        <li v-for="p in workletPresetList" :key="p.name">
+      <ul v-if="presetList.length" class="worklet-preset-list">
+        <li v-for="p in presetList" :key="p.name">
           <span class="worklet-preset-name" :title="p.name">{{ p.name }}</span>
           <span class="worklet-preset-date">{{ formatPresetDate(p.savedAt) }}</span>
-          <button type="button" @click="applyWorkletPreset(p.name)">Charger</button>
+          <button type="button" @click="applyPreset(p.name)">Charger</button>
           <button
             type="button"
             class="worklet-preset-delete"
             title="Supprimer"
-            @click="deleteWorkletPreset(p.name)">✕</button>
+            @click="deletePreset(p.name)">✕</button>
         </li>
       </ul>
       <span v-else class="hint">aucun preset sauvegardé pour l'instant</span>
@@ -1328,6 +1366,19 @@ onBeforeUnmount(() => {
 .code-actions .hint {
   font-size: 11px;
   color: #777;
+}
+
+.code-status {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.code-status.ok {
+  color: #27ae60;
+}
+.code-status.err {
+  color: #c0392b;
 }
 
 .param-loop {
