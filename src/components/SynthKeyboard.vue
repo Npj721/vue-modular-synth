@@ -26,6 +26,10 @@ const activeNotes = ref(new Set())
 const noteRefs = new Map()
 /* pointerId -> note tenue, ou null si le pointeur a glissé hors du clavier. */
 const pointerNotes = new Map()
+/* Touches actuellement tenues au clavier physique. On les suit séparément
+ * pour que le keyup ne relâche pas une note tenue par la souris/MIDI et pour
+ * pouvoir ignorer complètement la saisie dans un champ éditable. */
+const heldKeyboardKeys = new Set()
 
 /* =========================
  * Piano layout (from example/synth.js)
@@ -137,8 +141,13 @@ function noteOff(midi) {
 
 /** Relâche tout : perte de focus, onglet masqué, changement de patch. */
 function releaseAll() {
-  for (const midi of [...noteRefs.keys()]) noteOff(midi)
+  heldKeyboardKeys.clear()
   pointerNotes.clear()
+  // noteRefs compte les sources : il faut relâcher chaque référence, pas
+  // seulement une par note, sinon une note tenue par deux sources reste active.
+  for (const midi of [...noteRefs.keys()]) {
+    while (noteRefs.get(midi)) noteOff(midi)
+  }
 }
 
 function onVisibilityChange() {
@@ -205,14 +214,44 @@ function onWindowPointerUp(e) {
 /* =========================
  * Computer keyboard
  * ========================= */
+/* Un champ éditable (chat, code DSP, paramètres, JSON…) doit garder ses
+ * touches pour lui : sinon taper "q" joue une note au lieu d'écrire. */
+function isEditableElement(el) {
+  if (!el || typeof el.closest !== "function") return false
+  if (el.isContentEditable) return true
+  return !!el.closest(
+    "input, textarea, select, " +
+      "[contenteditable]:not([contenteditable='false']), " +
+      "[role='textbox'], [role='searchbox'], [role='combobox']"
+  )
+}
+
+function isTypingEvent(e) {
+  if (e.isComposing) return true
+  // composedPath couvre aussi les éditeurs placés dans un shadow DOM.
+  const path = e.composedPath?.() ?? []
+  return (
+    path.some((el) => isEditableElement(el)) || isEditableElement(e.target)
+  )
+}
+
 function handleKeyDown(e) {
-  if (e.repeat) return
-  const midi = KEY_BINDINGS[e.key.toLowerCase()]
-  if (midi !== undefined) noteOn(midi)
+  if (e.repeat || isTypingEvent(e)) return
+  // Ctrl/Meta/Alt sont des raccourcis : ne pas les transformer en notes.
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+
+  const key = e.key.toLowerCase()
+  const midi = KEY_BINDINGS[key]
+  if (midi === undefined || heldKeyboardKeys.has(key)) return
+  heldKeyboardKeys.add(key)
+  noteOn(midi)
 }
 
 function handleKeyUp(e) {
-  const midi = KEY_BINDINGS[e.key.toLowerCase()]
+  const key = e.key.toLowerCase()
+  // Seules les notes réellement déclenchées par le clavier sont relâchées ici.
+  if (!heldKeyboardKeys.delete(key)) return
+  const midi = KEY_BINDINGS[key]
   if (midi !== undefined) noteOff(midi)
 }
 

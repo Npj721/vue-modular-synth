@@ -386,6 +386,7 @@ Chaque voix déclenchée possède une clé unique (`trackId:step:note`) pour per
 
 - **5 octaves** (C4–B8), jouable à la souris (cliquer-glisser), multi-touch ou clavier AZERTY.
 - Raccourcis clavier : `q a s z d f e g r h t j k y l u m i o p` (do dièse 4 → si dièse 6).
+- Les raccourcis sont ignorés quand le focus est dans un champ de saisie (chat, code DSP, paramètres, JSON…) ou avec Ctrl/Alt/Meta.
 - Les notes actives sont mises en surbrillance ; les noms de notes et raccourcis sont affichés.
 
 ### MIDI (Web MIDI API)
