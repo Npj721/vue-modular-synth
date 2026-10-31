@@ -17,7 +17,13 @@ const props = defineProps({
   module: { type: Object, default: null }
 })
 
-const emit = defineEmits(['param-changed', 'label-changed'])
+const emit = defineEmits([
+  'param-changed',
+  'label-changed',
+  'edit-synth',
+  'load-super-synth',
+  'save-super-synth',
+])
 
 // Réactif pour l'affichage
 const params = reactive({})
@@ -185,6 +191,19 @@ const deepClone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)))
  * ========================================================= */
 
 const workletRanges = computed(() => parseRanges(params.options))
+
+// Les graphes internes d'un nœud Synth ne doivent pas apparaître comme des
+// champs JSON géants : ils s'éditent via le bouton "Ouvrir le synthé".
+const visibleParamDefs = computed(() => {
+  const type = props.module?.type
+  if (type !== "synth" && type !== "superSynth") return paramDefs
+  return Object.fromEntries(
+    Object.entries(paramDefs).filter(([key]) => {
+      if (type === "synth") return key !== "voicePatch" && key !== "mainPatch"
+      return key !== "synthPatch"
+    })
+  )
+})
 
 const baseParamDef = (key) => {
   const def = props.module ? getModuleByType(props.module.type) : null
@@ -829,6 +848,57 @@ onBeforeUnmount(() => {
       <span v-if="label" class="hint">utilisé comme préfixe des paramètres exposés</span>
     </div>
 
+    <!-- Nœud Synth : accès à l'éditeur voice/main interne -->
+    <div v-if="module.type === 'synth'" class="synth-module-block">
+      <div class="synth-module-title">
+        <strong>{{ params.name || module.label || "Synth" }}</strong>
+        <span class="hint">nœud Synth du SynthPatch</span>
+      </div>
+      <button type="button" class="synth-open-btn" @click="emit('edit-synth', module)">
+        Ouvrir le synthé (Voice / Main)
+      </button>
+      <p class="hint">
+        Ce nœud expose une entrée audio principale et une sortie. Les notes
+        jouées lui sont envoyées indépendamment des autres Synth.
+      </p>
+    </div>
+
+    <!-- Nœud SuperSynth : SynthPatch réutilisable, éditable récursivement -->
+    <div
+      v-if="module.type === 'superSynth'"
+      class="synth-module-block super-synth-module-block"
+    >
+      <div class="synth-module-title">
+        <strong>{{ params.name || module.label || "SuperSynth" }}</strong>
+        <span class="hint">SuperSynth réutilisable</span>
+      </div>
+      <button
+        type="button"
+        class="synth-open-btn"
+        @click="emit('edit-synth', module)"
+      >
+        Ouvrir le SuperSynth (Voice / Main)
+      </button>
+      <button
+        type="button"
+        class="synth-secondary-btn"
+        @click="emit('load-super-synth', module)"
+      >
+        Charger un SuperSynth…
+      </button>
+      <button
+        type="button"
+        class="synth-secondary-btn"
+        @click="emit('save-super-synth', module)"
+      >
+        Enregistrer dans la bibliothèque
+      </button>
+      <p class="hint">
+        Ce nœud contient un SynthPatch complet (synthés internes + couche main).
+        Les notes reçues sont propagées à tous ses synthés internes.
+      </p>
+    </div>
+
     <!-- Visualiseur pseudo-3D de la table (module wavetableS uniquement) :
          les frames fuient vers un point de fuite, la frame en cours de
          lecture est surlignée en clair avec sa ligne de temps. -->
@@ -847,7 +917,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-for="(def, key) in paramDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' || def.type === 'json', 'param-code': def.type === 'code' }">
+    <div v-for="(def, key) in visibleParamDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' || def.type === 'json', 'param-code': def.type === 'code' }">
       <label>{{ key }}</label>  
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
@@ -1103,6 +1173,63 @@ onBeforeUnmount(() => {
 .module-label .hint {
   font-size: 11px;
   color: #888;
+}
+
+.synth-module-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  border: 1px solid #d5c2e8;
+  border-radius: 6px;
+  background: #f8f3fc;
+}
+
+.synth-module-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.synth-module-title .hint,
+.synth-module-block .hint {
+  font-size: 11px;
+  color: #777;
+  margin: 0;
+}
+
+.synth-open-btn {
+  padding: 7px 10px;
+  border: 1px solid #8e44ad;
+  border-radius: 4px;
+  background: #8e44ad;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.synth-open-btn:hover {
+  background: #7a3a96;
+}
+
+.synth-secondary-btn {
+  padding: 6px 10px;
+  border: 1px solid #b9a3cc;
+  border-radius: 4px;
+  background: #fff;
+  color: #5b2c6f;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.synth-secondary-btn:hover {
+  background: #f0e6f7;
+}
+
+.super-synth-module-block {
+  border-color: #b9a3cc;
+  background: #f5eefb;
 }
 
 .json-button {

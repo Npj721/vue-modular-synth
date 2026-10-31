@@ -859,9 +859,43 @@ function startLoop(param, stages, ctx, velocity, base, startOffset) {
  * Main composable
  * ========================================================= */
 
-export function usePatchVoice(patch) {
-  const audioCtx = ref(null)
+export function usePatchVoice(patch, options = {}) {
+  // Un moteur = UN synthé (voicePatch + mainPatch). Plusieurs moteurs peuvent
+  // partager le même AudioContext : le manager (useSharedVoice) possède alors
+  // le contexte, l'analyser maître et la sortie finale, et chaque moteur reçoit
+  // son propre `outputNode` (le gain de sortie du synthé dans le SynthPatch).
+  const audioCtx = ref(options.context ?? null)
+  const manageContext = options.manageContext !== false
   const voices = new Map()
+
+  // Nœud vers lequel le module "destination" du mainPatch se branche.
+  // - moteur autonome (StepSequencer, ancien usage) : null => l'engine crée
+  //   son propre analyser maître puis le relie à ctx.destination.
+  // - moteur enfant d'un SynthPatch : gain fourni par le manager.
+  let outputNode = options.outputNode ?? null
+  let ownsOutput = !outputNode
+
+  // Pour un "hôte" de SynthPatch : map synthId -> { output, input } fournie
+  // par le manager. Les modules de type "synth" du graphe s'y branchent.
+  let getSynthNodes =
+    typeof options.getSynthNodes === "function"
+      ? options.getSynthNodes
+      : () => null
+
+  function setSynthNodesGetter(fn) {
+    getSynthNodes = typeof fn === "function" ? fn : () => null
+  }
+
+  // Bornes super.in / super.out du graphe main d'un SuperSynth. Les getters
+  // renvoient une Map moduleId -> GainNode (recalculée à chaque rebuild).
+  const getMainBoundaryIn =
+    typeof options.mainBoundaryIn === "function"
+      ? options.mainBoundaryIn
+      : () => null
+  const getMainBoundaryOut =
+    typeof options.mainBoundaryOut === "function"
+      ? options.mainBoundaryOut
+      : () => null
 
   // accepte un objet patch direct OU une fonction getter (doit retourner
   // l'objet patch courant). setPatch permet de changer la source vers un
@@ -972,23 +1006,28 @@ export function usePatchVoice(patch) {
   async function ensureContext() {
     if (!audioCtx.value) {
       audioCtx.value = new AudioContext()
+      ownsOutput = !outputNode
       // chaîne maîtresse créée de façon synchrone avec le contexte :
       // le prochain buildMainPatch y routera forcément le son.
-      ensureMasterAnalyser()
+      if (ownsOutput) ensureMasterAnalyser()
     }
-    if (audioCtx.value.state !== "running") {
-      try { await audioCtx.value.resume() } catch {}
+    if (manageContext) {
+      if (audioCtx.value.state !== "running") {
+        try { await audioCtx.value.resume() } catch {}
+      }
+      if (audioCtx.value.state === "running") {
+        startKeepAlive()
+      }
     }
-    if (audioCtx.value.state === "running") {
-      startKeepAlive()
-      ensureMasterAnalyser()
-    }
+    if (ownsOutput) ensureMasterAnalyser()
+    if (!outputNode) outputNode = masterAnalyser ?? audioCtx.value.destination
   }
 
   /* Crée l'analyser de sortie (une seule fois), branché sur les haut-parleurs.
    * Il est PERMANENT : jamais déconnecté. Les modules sortant vers le module
    * "output" lui sont connectés dans wireConnection. */
   function ensureMasterAnalyser() {
+    if (!ownsOutput) return
     if (!audioCtx.value) return
     if (masterAnalyser) return
     const ctx = audioCtx.value
@@ -1015,16 +1054,30 @@ export function usePatchVoice(patch) {
     await preloadGraphWorklets(ctx, patch?.voicePatch)
   }
 
+  let initPromise = null
+
   async function init() {
-    // les super-modules persistent dans IndexedDB : on attend leur chargement
-    // avant de construire le graphe (un patch peut y faire référence).
-    await useSuperModules().ready
-    await ensureContext()
-    // idem pour le code des AudioWorklets (voir preloadWorklets)
-    await preloadWorklets()
-    if (!mainNodes) {
-      buildMainPatch()
-    }
+    // Un moteur peut recevoir des notes très fréquemment : ne pas recharger
+    // les super-modules / worklets à chaque note. rebuildMainPatch() reste le
+    // chemin explicite pour reconstruire un graphe modifié.
+    if (initPromise) return initPromise
+
+    initPromise = (async () => {
+      // les super-modules persistent dans IndexedDB : on attend leur chargement
+      // avant de construire le graphe (un patch peut y faire référence).
+      await useSuperModules().ready
+      await ensureContext()
+      // idem pour le code des AudioWorklets (voir preloadWorklets)
+      await preloadWorklets()
+      if (!mainNodes) {
+        buildMainPatch()
+      }
+    })().catch((e) => {
+      initPromise = null
+      throw e
+    })
+
+    return initPromise
   }
 
   /* =========================================================
@@ -1397,6 +1450,25 @@ export function usePatchVoice(patch) {
           inParam: constantNode.offset, // une enveloppe/CV branchée sur "in" programme l'offset
           params: { offset: constantNode.offset },
           bases: { offset: value, in: value },
+        }
+      }
+
+      case "synth":
+      case "superSynth": {
+        // Nœud "Synth" (ou SuperSynth) d'un SynthPatch : il ne crée aucun son
+        // lui-même, il expose la sortie (et l'entrée principale) d'un moteur
+        // persistant. Le manager fournit la map moduleId -> { output, input }.
+        const synthId = p.synthId ?? mod.id
+        const synthNode =
+          o.synthNodes?.get(synthId) ?? o.synthNodes?.get(mod.id)
+        if (!synthNode) return null
+
+        return {
+          node: synthNode.output,
+          inputNode: synthNode.input ?? synthNode.output,
+          params: {},
+          bases: {},
+          isSynth: true,
         }
       }
 
@@ -1774,6 +1846,7 @@ export function usePatchVoice(patch) {
       boundaryOut: opts.boundaryOut ?? null,
       stopOverride: opts.stopOverride ?? new Map(),
       voiceStopHooks: opts.voiceStopHooks ?? [],
+      synthNodes: opts.synthNodes ?? null,
     }
 
     const nodes = new Map()
@@ -1801,17 +1874,29 @@ export function usePatchVoice(patch) {
 
   function buildMainPatch() {
     const ctx = audioCtx.value
+    if (!ctx) return
+
+    // sortie du synthé : son gain dans le SynthPatch (fourni par le manager)
+    // ou, en autonome, l'analyser maître / la destination du contexte.
+    if (!outputNode) {
+      if (ownsOutput) ensureMasterAnalyser()
+      outputNode = masterAnalyser ?? ctx.destination
+    }
 
     const started = []
     const worklets = []
 
     mainEnvs = []
-    const { nodes } = buildGraph(ctx, normalizeGraph(getPatch()?.mainPatch), {
-      destinationNode: ctx.destination,
+    const graph = normalizeGraph(getPatch()?.mainPatch)
+    const { nodes } = buildGraph(ctx, graph, {
+      destinationNode: outputNode,
       deferStart: true, // démarrés explicitement dans startMainPatch
       started,
       activeEnvs: mainEnvs,
       worklets,
+      synthNodes: getSynthNodes(),
+      boundaryIn: getMainBoundaryIn(),
+      boundaryOut: getMainBoundaryOut(),
     })
 
     mainNodes = nodes
@@ -1822,6 +1907,22 @@ export function usePatchVoice(patch) {
     mainInputNode = null
     for (const entry of nodes.values()) {
       if (entry.isInput) mainInputNode = entry.node
+    }
+
+    // SuperSynth : super.in est l'entrée audio externe (prioritaire sur
+    // "input") et super.out doit alimenter la sortie du SuperSynth.
+    for (const mod of graph.modules ?? []) {
+      if (mod.type === "super.in") {
+        const entry = nodes.get(mod.id)
+        if (entry?.node) mainInputNode = entry.node
+      } else if (mod.type === "super.out") {
+        const entry = nodes.get(mod.id)
+        if (entry?.node && outputNode) {
+          try {
+            entry.node.connect(outputNode)
+          } catch {}
+        }
+      }
     }
   }
 
@@ -1857,6 +1958,7 @@ export function usePatchVoice(patch) {
     if (
       entry.node !== dest &&
       entry.node !== masterAnalyser &&
+      entry.node !== outputNode &&
       entry.node !== keepNode
     ) {
       safeDisconnect(entry.node)
@@ -1885,7 +1987,9 @@ export function usePatchVoice(patch) {
 
     if (!mainNodes) return
     for (const entry of mainNodes.values()) {
-      disconnectEntry(entry)
+      // la sortie du synthé (gain du SynthPatch) est partagée avec le manager :
+      // on ne la déconnecte jamais ici.
+      disconnectEntry(entry, outputNode)
     }
 
     mainNodes = null
@@ -1915,7 +2019,7 @@ export function usePatchVoice(patch) {
     buildMainPatch()
     startMainPatch()
     reconnectTrackGains()
-    ensureMasterAnalyser()
+    if (ownsOutput) ensureMasterAnalyser()
   }
 
   /* =========================================================
@@ -2063,8 +2167,11 @@ export function usePatchVoice(patch) {
     startMainPatch()
 
     // Les voix sortent vers l'entrée du patch principal si elle existe,
-    // sinon directement sur la sortie (via l'analyser).
-    if (!destinationNode) destinationNode = audioCtx.value?.destination
+    // sinon directement sur la sortie du synthé (via l'analyser maître).
+    if (!destinationNode) {
+      destinationNode =
+        mainInputNode ?? outputNode ?? audioCtx.value?.destination
+    }
 
     const key = voiceKey ?? note
 
@@ -2120,7 +2227,15 @@ export function usePatchVoice(patch) {
     updateConstantValue,
     createTrackGainNode,
     setPatch,
+    getPatch,
     getContext: () => audioCtx.value,
     getAnalyser: () => masterAnalyser,
+    // points d'insertion du synthé dans le SynthPatch parent
+    getOutputNode: () => outputNode,
+    getInputNode: () => mainInputNode,
+    ownsOutput: () => ownsOutput,
+    // graphes persistants (SynthPatch voice/main)
+    startMain: () => startMainPatch(),
+    setSynthNodesGetter,
   }
 }

@@ -19,6 +19,8 @@ const props = defineProps({
   fillHeight: { type: Boolean, default: false },
   // catégories à masquer dans le menu contextuel (ex: ["interface"])
   excludeCategories: { type: Array, default: () => [] },
+  // types de modules à masquer (ex: note-driven au niveau SynthPatch)
+  excludeTypes: { type: Array, default: () => [] },
   // afficher l'option "Créer un super-module" dans le menu contextuel
   superExportEnabled: { type: Boolean, default: true },
 });
@@ -90,6 +92,7 @@ const CATEGORY_LABELS = {
   output: 'I/O',
   interface: 'Interface',
   super: 'Super Modules',
+  synth: 'Synths',
   code: 'Code',
 };
 
@@ -101,6 +104,7 @@ const menuGroups = computed(() => {
     const def = catalog[type];
     if (!def) continue;
     if (props.excludeCategories.includes(def.category)) continue;
+    if (props.excludeTypes.includes(type)) continue;
 
     const category = def.category ?? 'other';
     if (!byCategory.has(category)) byCategory.set(category, []);
@@ -438,6 +442,10 @@ const addModule = (type, x = 100, y = 100, forcedId = null, initialLabel = null)
   shape.on("change:position", () => {
     updatePortLabels();
   });
+
+  // Sélectionne le nouveau module : le panneau de propriétés s'ouvre
+  // immédiatement (utile pour configurer un Synth / SuperSynth ajouté).
+  selectModule(id);
 
   return id;
 };

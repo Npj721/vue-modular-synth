@@ -4,6 +4,7 @@ import {
   getWorkletDefaults,
 } from "./useAudioWorklet.js";
 import { DEFAULT_WAVESHAPER_CURVE } from "./useWaveshaperCurve.js";
+import { emptyGraph, emptySynthPatch } from "./useSynthPatch.js";
 
 /* Le code et la config par défaut vivent dans useAudioWorklet.js (c'est lui
  * qui empaquette le source en Blob) : on les récupère ici pour les insérer
@@ -998,6 +999,89 @@ const catalog = reactive({
             n === "p1" ? num(0, 100, 0.001, 1) : num(-10, 10, 0.001, 0),
           ]),
         ),
+      },
+    },
+
+    /* =========================
+     * SYNTH (niveau SynthPatch uniquement)
+     *
+     * Nœud composite : il expose l'entrée principale et la sortie d'un
+     * synthé complet. La définition (voicePatch + mainPatch) est embarquée
+     * dans les params pour que chaque instance soit indépendante.
+     * ========================= */
+
+    synth: {
+      label: "Synth",
+      color: "#8E44AD",
+      category: "synth",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "audioIn",
+            multiple: true,
+          },
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        name: { type: "string", default: "Synth" },
+        voicePatch: { type: "json", default: emptyGraph() },
+        mainPatch: { type: "json", default: emptyGraph() },
+      },
+    },
+
+    /* =========================
+     * SUPER-SYNTH (niveau SynthPatch uniquement)
+     *
+     * SynthPatch complet réutilisable. Il expose une entrée/un sortie audio
+     * (super.in / super.out dans sa couche main) et propage les notes à ses
+     * synthés internes. Deux instances ont des moteurs indépendants.
+     * ========================= */
+
+    superSynth: {
+      label: "SuperSynth",
+      color: "#6C3483",
+      category: "synth",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "in",
+            label: "In",
+            kind: "audio",
+            role: "audioIn",
+            multiple: true,
+          },
+        ],
+        outputs: [
+          {
+            id: "out",
+            label: "Out",
+            kind: "audio",
+            role: "audioOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        name: { type: "string", default: "SuperSynth" },
+        synthPatch: { type: "json", default: emptySynthPatch() },
       },
     },
 

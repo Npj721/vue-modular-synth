@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, watch } from "vue"
+import { ref, reactive, watch, nextTick } from "vue"
 import Swal from "sweetalert2"
 import PatchEditor from "./PatchEditor.vue";
 import SuperModuleEditor from "./SuperModuleEditor.vue";
@@ -627,21 +627,67 @@ const handleAiPatchReceived = (answer) => {
 }
 
 const props = defineProps({
+  // Ancien usage : éditeur autonome d'un synthé complet.
   patch: {
     type: Object,
-    required: true
-  }
+    default: null,
+  },
+  // Nouvel usage : édition d'un nœud Synth d'un SynthPatch. L'objet est le
+  // plus souvent `module.params` ({ name, voicePatch, mainPatch }).
+  synth: {
+    type: Object,
+    default: null,
+  },
+  // Affiche un bouton de fermeture (utilisé dans la modale du SynthPatch).
+  closeable: {
+    type: Boolean,
+    default: false,
+  },
 })
-const patch = props.patch
+const patch = props.patch ?? reactive({})
+
+const emit = defineEmits(["update:patch", "update:synth", "close"])
+
+const deepClone = (v) => JSON.parse(JSON.stringify(v ?? {}))
+
+/** Émet l'état courant vers le nœud Synth parent (graphes clonés). */
+const emitSynthUpdate = () => {
+  if (!props.synth) return
+  emit("update:synth", {
+    ...deepClone(props.synth),
+    voicePatch: deepClone(voicePatch),
+    mainPatch: deepClone(mainPatch),
+  })
+}
+
+/**
+ * Charge le synthé sélectionné dans les deux éditeurs. Les objets locaux
+ * `voicePatch` / `mainPatch` restent stables (PatchEditor capture leur
+ * référence au montage) : on remplace leur contenu, pas leur identité.
+ */
+const loadSynthIntoEditors = async (synth) => {
+  if (!synth) return
+  const voiceData = deepClone(synth.voicePatch ?? { modules: [], connections: [] })
+  const mainData = deepClone(synth.mainPatch ?? { modules: [], connections: [] })
+  await nextTick()
+  voiceEditor.value?.loadPatch(voiceData)
+  mainEditor.value?.loadPatch(mainData)
+}
+
+watch(() => props.synth, loadSynthIntoEditors, { immediate: true })
 
 watch(
   voicePatch,
   (newPatch) => {
-    patch.value = {
-        voicePatch:newPatch,
-        mainPatch
+    if (props.synth) {
+      emitSynthUpdate()
+      return
     }
-    emit("update:patch", patch.value )
+    patch.value = {
+      voicePatch: newPatch,
+      mainPatch,
+    }
+    emit("update:patch", patch.value)
   },
   { deep: true }
 );
@@ -649,22 +695,24 @@ watch(
 watch(
   mainPatch,
   (newPatch) => {
-    patch.value = {
-        voicePatch,
-        mainPatch:newPatch
+    if (props.synth) {
+      emitSynthUpdate()
+      return
     }
-    emit("update:patch", patch )
+    patch.value = {
+      voicePatch,
+      mainPatch: newPatch,
+    }
+    emit("update:patch", patch.value)
   },
   { deep: true }
 );
-
-const emit = defineEmits(["update:patch"])
 
 </script>
 <template>
 <div>
     <SynthPatchManager
-      :patch="patch"
+      :patch="props.synth ?? patch"
       :voice-patch="voicePatch"
       :main-patch="mainPatch"
       @load="handleSynthPatchLoaded"
@@ -701,9 +749,16 @@ const emit = defineEmits(["update:patch"])
           :class="{ actif: aiOpen }"
           @click="aiOpen = !aiOpen"
         >{{ aiOpen ? "◀ IA" : "▶ IA" }}</button>
+
+        <button
+          v-if="closeable"
+          class="button close-synth"
+          type="button"
+          @click="emit('close')"
+        >✕ Fermer</button>
     </div>
-    <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" :manager-open="patchManagerOpen" v-show="currentPatch === 'voice'"></PatchEditor>
-    <PatchEditor ref="mainEditor" v-model:patch="mainPatch" :manager-open="patchManagerOpen" v-show="currentPatch === 'main'"></PatchEditor>
+    <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" :manager-open="patchManagerOpen" :exclude-categories="['synth']" v-show="currentPatch === 'voice'"></PatchEditor>
+    <PatchEditor ref="mainEditor" v-model:patch="mainPatch" :manager-open="patchManagerOpen" :exclude-categories="['synth']" v-show="currentPatch === 'main'"></PatchEditor>
     <SuperModuleEditor v-show="currentPatch === 'super'"></SuperModuleEditor>
 
     <aside v-if="aiOpen" class="ai-panel">
@@ -747,6 +802,11 @@ h1{
 
 .button:hover {
   transform: scale(1.05);
+}
+
+.button.close-synth {
+  background: #444;
+  margin-left: auto;
 }
 
 .button.clear {

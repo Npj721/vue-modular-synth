@@ -33,12 +33,21 @@ const props = defineProps({
   initialPatch: { type: Object, default: null },
   // afficher l'option "Créer un super-module" dans le menu contextuel
   superExportEnabled: { type: Boolean, default: true },
+  // types de modules à masquer (ex: note-driven au niveau SynthPatch)
+  excludeTypes: { type: Array, default: () => [] },
+  // catégories supplémentaires à masquer (ex: ["synth"] dans un Synth)
+  excludeCategories: { type: Array, default: () => [] },
 })
 const patch = props.patch
 
 const defPatch = ref(null)
 
-const emit = defineEmits(["update:patch"])
+const emit = defineEmits([
+  "update:patch",
+  "edit-synth",
+  "load-super-synth",
+  "save-super-synth",
+])
 /* --------------------
  * Sélection
  * -------------------- */
@@ -361,7 +370,11 @@ onMounted(async () => {
           ref="paperRef"
           class="editor-paper"
           :fill-height="paperFillHeight"
-          :exclude-categories="allowInterfaceModules ? [] : ['interface']"
+          :exclude-categories="[
+            ...(allowInterfaceModules ? [] : ['interface']),
+            ...excludeCategories,
+          ]"
+          :exclude-types="excludeTypes"
           :super-export-enabled="superExportEnabled"
           @module-selected="handleModuleSelected"
           @module-removed="handleModuleRemoved"
@@ -382,6 +395,9 @@ onMounted(async () => {
         :module="selectedModule()"
         @param-changed="handleParamChanged"
         @label-changed="handleLabelChanged"
+        @edit-synth="(mod) => emit('edit-synth', mod)"
+        @load-super-synth="(mod) => emit('load-super-synth', mod)"
+        @save-super-synth="(mod) => emit('save-super-synth', mod)"
       />
   </div>
 </template>
