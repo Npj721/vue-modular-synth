@@ -104,6 +104,9 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
   /** Pistes vues par cette instance (pour reconnecter les gains après rebuild). */
   const tracks = new Set()
 
+  /** Notes actuellement tenues (pour les enveloppes globales de la couche voice). */
+  const activeNoteKeys = new Set()
+
   let mainHost = null
   let voiceHost = null
   let voiceBus = null
@@ -434,6 +437,11 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
   async function noteOn(note, velocity, track, voiceKey) {
     await init()
 
+    // Enveloppes globales de la couche voice : le graphe est persistant, donc
+    // on les relance explicitement à chaque note.
+    activeNoteKeys.add(voiceKey ?? note)
+    voiceHost?.retriggerMainEnvelopes(velocity ?? 1)
+
     const jobs = []
     for (const record of synthRecords.values()) {
       const dest = track ? connectTrackGain(track, record) : null
@@ -453,9 +461,17 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
     for (const record of superRecords.values()) {
       record.child.noteOff(note, voiceKey)
     }
+
+    // Ne relâche l'enveloppe globale que lorsque la dernière note est levée.
+    activeNoteKeys.delete(voiceKey ?? note)
+    if (activeNoteKeys.size === 0) {
+      voiceHost?.releaseMainEnvelopes()
+    }
   }
 
   function stopAll() {
+    activeNoteKeys.clear()
+    voiceHost?.releaseMainEnvelopes()
     for (const record of synthRecords.values()) record.engine.stopAll()
     for (const record of superRecords.values()) record.child.stopAll()
   }
@@ -497,6 +513,10 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
       if (found) return found
     }
     return null
+  }
+
+  function getVoiceEnvelopes() {
+    return voiceHost?.getMainEnvelopes?.() ?? []
   }
 
   async function rebuildSynth(id) {
@@ -567,6 +587,7 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
     getOutputNode,
     getSynthIds,
     getEngineById,
+    getVoiceEnvelopes,
     dispose,
   }
 }
@@ -744,6 +765,7 @@ function createManager() {
     updateConstantValue,
     getSynthIds: () => root?.getSynthIds() ?? [],
     getSynthEngine: (id) => root?.getEngineById(id) ?? null,
+    getVoiceEnvelopes: () => root?.getVoiceEnvelopes() ?? [],
     getContext: () => audioCtx,
     getAnalyser: () => masterAnalyser,
   }

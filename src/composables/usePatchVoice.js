@@ -1728,9 +1728,11 @@ export function usePatchVoice(patch, options = {}) {
         o.activeEnvs.push({
           param,
           base: baseValue,
+          press: stages.press,
           release: stages.release,
           affectsAmplitude,
           modulatorType: from.modType,
+          looping,
           loop: registerLoop(loop),
         })
       }
@@ -1946,6 +1948,56 @@ export function usePatchVoice(patch, options = {}) {
     }
     mainRunning = false
     mainStarted = []
+  }
+
+  /* Relance les enveloppes du graphe persistant (couche voice d'un
+   * SynthPatch). Le graphe n'est pas recréé à chaque note : sans ce
+   * retrigger, une enveloppe placée au niveau SynthPatch resterait figée
+   * après son unique planification de construction. */
+  function retriggerMainEnvelopes(velocity = 1) {
+    const ctx = audioCtx.value
+    if (!ctx) return
+    for (const env of mainEnvs) {
+      if (!env.param || !env.press?.length) continue
+      if (env.loop) {
+        unregisterLoop(env.loop)
+        env.loop = null
+      }
+      if (env.looping) {
+        env.loop = registerLoop(
+          startLoop(env.param, env.press, ctx, velocity, env.base, 0)
+        )
+      } else {
+        scheduleStages(env.param, env.press, ctx, velocity, env.base)
+      }
+    }
+  }
+
+  function releaseMainEnvelopes() {
+    const ctx = audioCtx.value
+    if (!ctx) return
+    for (const env of mainEnvs) {
+      if (!env.param) continue
+      if (env.loop) {
+        unregisterLoop(env.loop)
+        env.loop = null
+      }
+      if (env.release?.length) {
+        scheduleStages(env.param, env.release, ctx, 1, env.base)
+      }
+    }
+  }
+
+  /** Diagnostic : état des enveloppes du graphe persistant. */
+  function getMainEnvelopes() {
+    return mainEnvs.map((env) => ({
+      value: env.param?.value ?? null,
+      base: env.base,
+      press: env.press?.length ?? 0,
+      release: env.release?.length ?? 0,
+      looping: env.looping,
+      hasLoop: !!env.loop,
+    }))
   }
 
   function disconnectEntry(entry, keepNode = null) {
@@ -2236,6 +2288,9 @@ export function usePatchVoice(patch, options = {}) {
     ownsOutput: () => ownsOutput,
     // graphes persistants (SynthPatch voice/main)
     startMain: () => startMainPatch(),
+    retriggerMainEnvelopes,
+    releaseMainEnvelopes,
+    getMainEnvelopes,
     setSynthNodesGetter,
   }
 }
