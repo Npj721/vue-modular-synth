@@ -21,6 +21,7 @@ const emit = defineEmits([
   'param-changed',
   'label-changed',
   'edit-synth',
+  'load-synth',
   'load-super-synth',
   'save-super-synth',
 ])
@@ -856,6 +857,13 @@ onBeforeUnmount(() => {
       </div>
       <button type="button" class="synth-open-btn" @click="emit('edit-synth', module)">
         Ouvrir le synthé (Voice / Main)
+      </button>
+      <button
+        type="button"
+        class="synth-secondary-btn"
+        @click="emit('load-synth', module)"
+      >
+        Charger un synthé…
       </button>
       <p class="hint">
         Ce nœud expose une entrée audio principale et une sortie. Les notes

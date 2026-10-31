@@ -11,19 +11,22 @@
 // Un clic sur "Ouvrir le SuperSynth" ouvre un SynthPatchEditor récursif sur
 // la définition embarquée dans le module.
 
-import { ref, computed, nextTick } from "vue"
+import { ref, computed, nextTick, watch } from "vue"
 import Swal from "sweetalert2"
 import PatchEditor from "./PatchEditor.vue"
 import SynthEditor from "./SynthEditor.vue"
 import SynthPatchBank from "./SynthPatchBank.vue"
 import { useDockState } from "../composables/useDockState"
 import { useSuperSynthBank } from "../composables/useSuperSynthBank.js"
+import { useSynthBank } from "../composables/useSynthBank.js"
 import {
   getSynthModules,
   getSuperSynthModules,
   normalizeSynthPatch,
   createSuperSynthDefinition,
   emptySynthPatch,
+  applySynthToModule,
+  emptyGraph,
 } from "../composables/useSynthPatch.js"
 
 const NOTE_DRIVEN = ["voice", "wavetable", "wavetableS"]
@@ -64,6 +67,93 @@ const selectedSynth = computed(() => {
 const editingSuperPatch = computed(
   () => editingSuperModule.value?.params?.synthPatch ?? null
 )
+
+/* =========================================================
+ * Banque de synthés complets (modular-synth-patches)
+ * ========================================================= */
+
+const synthBank = useSynthBank()
+const synthBankNames = computed(() => synthBank.names())
+const selectedBankSynth = ref("")
+
+// Pré-sélectionne le premier synthé dès que la banque est disponible (le
+// seed des synthés de base est asynchrone au démarrage).
+watch(
+  synthBankNames,
+  (names) => {
+    if (!selectedBankSynth.value && names.length) {
+      selectedBankSynth.value = names[0]
+    }
+  },
+  { immediate: true }
+)
+
+const addSynthFromBank = () => {
+  const name = selectedBankSynth.value
+  if (!name) return
+
+  const synth = synthBank.get(name)
+  if (!synth) return
+
+  const count = (props.patch.voice.modules ?? []).filter(
+    (m) => m.type === "synth"
+  ).length
+  const position = {
+    x: 80 + (count % 4) * 200,
+    y: 80 + Math.floor(count / 4) * 180,
+  }
+
+  const id = voiceEditor.value?.addModule(
+    "synth",
+    {
+      name: synth.name ?? name,
+      voicePatch: synth.voicePatch ?? emptyGraph(),
+      mainPatch: synth.mainPatch ?? emptyGraph(),
+    },
+    position
+  )
+
+  if (id) {
+    voiceEditor.value?.setModuleLabel(id, synth.name ?? name)
+  }
+  tab.value = "voice"
+}
+
+/** Remplace la définition d'un nœud Synth par un synthé de la banque. */
+const handleLoadSynth = async (module) => {
+  if (!module) return
+
+  const names = synthBank.names()
+  if (!names.length) {
+    Swal.fire({
+      title: "Aucun synthé enregistré",
+      text: "Enregistrez d'abord un synthé depuis son éditeur (Patch Manager).",
+      icon: "info",
+      confirmButtonText: "OK",
+    })
+    return
+  }
+
+  const { value: name, isConfirmed } = await Swal.fire({
+    title: "Charger un synthé",
+    input: "select",
+    inputOptions: Object.fromEntries(names.map((n) => [n, n])),
+    inputPlaceholder: "Choisir un synthé",
+    inputValue: module.params?.name ?? "",
+    showCancelButton: true,
+    confirmButtonText: "Charger",
+    cancelButtonText: "Annuler",
+  })
+  if (!isConfirmed || !name) return
+
+  const synth = synthBank.get(name)
+  if (!synth) return
+
+  applySynthToModule(module, synth)
+  module.label = synth.name ?? name
+  voiceEditor.value?.setModuleLabel(module.id, module.label)
+  voiceEditor.value?.refreshSelectedModule()
+}
 
 /* =========================================================
  * Synth nodes
@@ -304,6 +394,22 @@ const handleLoad = async (loaded) => {
       >
         aucun — ajoutez un module « Synth » ou « SuperSynth » via le menu contextuel
       </span>
+
+      <span class="syntp-sep"></span>
+      <span class="syntp-strip-label">Banque :</span>
+      <select v-model="selectedBankSynth" class="syntp-bank-select">
+        <option value="">— choisir —</option>
+        <option v-for="n in synthBankNames" :key="n" :value="n">
+          {{ n }}
+        </option>
+      </select>
+      <button
+        class="syntp-btn syntp-btn-bank"
+        :disabled="!selectedBankSynth"
+        @click="addSynthFromBank"
+      >
+        Ajouter ce synthé
+      </button>
     </div>
 
     <div class="syntp-editors">
@@ -314,8 +420,10 @@ const handleLoad = async (loaded) => {
         :initial-patch="props.patch.voice"
         :show-patch-manager="false"
         :exclude-types="NOTE_DRIVEN"
+        :exclude-categories="['super']"
         :super-export-enabled="false"
         @edit-synth="handleEditSynth"
+        @load-synth="handleLoadSynth"
         @load-super-synth="handleLoadSuperSynth"
         @save-super-synth="handleSaveSuperSynth"
       />
@@ -326,7 +434,7 @@ const handleLoad = async (loaded) => {
         :initial-patch="props.patch.main"
         :show-patch-manager="false"
         :exclude-types="NOTE_DRIVEN"
-        :exclude-categories="['synth']"
+        :exclude-categories="['synth', 'super']"
         :allow-interface-modules="nested"
         :super-export-enabled="false"
       />
@@ -468,6 +576,33 @@ const handleLoad = async (loaded) => {
 .syntp-empty {
   font-size: 12px;
   color: #888;
+}
+
+.syntp-bank-select {
+  padding: 4px 8px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  font-size: 12px;
+  min-width: 150px;
+}
+
+.syntp-btn-bank {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-color: #017a66;
+  color: #017a66;
+}
+
+.syntp-btn-bank:hover:not(:disabled) {
+  background: #017a66;
+  color: #fff;
+}
+
+.syntp-btn-bank:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .syntp-editors {

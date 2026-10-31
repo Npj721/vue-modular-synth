@@ -45,6 +45,7 @@ const defPatch = ref(null)
 const emit = defineEmits([
   "update:patch",
   "edit-synth",
+  "load-synth",
   "load-super-synth",
   "save-super-synth",
 ])
@@ -112,7 +113,52 @@ const loadPatchExternal = (data) => {
   selectedModuleId.value = null;
 };
 
-defineExpose({ clearPatch, loadPatch: loadPatchExternal });
+/* Ajoute un module programmatiquement (ex: depuis la banque de synthés du
+   SynthPatch). Le paper sélectionne le nouveau nœud, puis on applique les
+   paramètres fournis par-dessus les valeurs par défaut du catalogue. */
+const addModuleExternal = (type, params = {}, position = null) => {
+  const id = paperRef.value?.addModule(
+    type,
+    position?.x ?? 120,
+    position?.y ?? 120
+  );
+  if (!id) return null;
+
+  const module = patch.modules.find((m) => m.id === id);
+  if (module) {
+    const merged = {
+      ...JSON.parse(JSON.stringify(module.params ?? {})),
+      ...JSON.parse(JSON.stringify(params ?? {})),
+    };
+    module.params = merged;
+    paperRef.value?.setModuleParams(id, merged);
+  }
+  return id;
+};
+
+const setModuleLabelExternal = (id, label) => {
+  const module = patch.modules.find((m) => m.id === id);
+  if (module) module.label = label;
+  paperRef.value?.setModuleLabel(id, label);
+};
+
+/* Force le panneau de propriétés à relire les params du module sélectionné
+   (après un remplacement de définition, par ex. chargement d'un synthé). */
+const refreshSelectedModule = async () => {
+  const id = selectedModuleId.value;
+  if (!id) return;
+  selectedModuleId.value = null;
+  await nextTick();
+  selectedModuleId.value = id;
+};
+
+defineExpose({
+  clearPatch,
+  loadPatch: loadPatchExternal,
+  addModule: addModuleExternal,
+  setModuleLabel: setModuleLabelExternal,
+  refreshSelectedModule,
+});
 
 /* =========================================================
  * CONNECTIONS
@@ -396,6 +442,7 @@ onMounted(async () => {
         @param-changed="handleParamChanged"
         @label-changed="handleLabelChanged"
         @edit-synth="(mod) => emit('edit-synth', mod)"
+        @load-synth="(mod) => emit('load-synth', mod)"
         @load-super-synth="(mod) => emit('load-super-synth', mod)"
         @save-super-synth="(mod) => emit('save-super-synth', mod)"
       />
