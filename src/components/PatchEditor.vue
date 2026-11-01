@@ -37,6 +37,8 @@ const props = defineProps({
   excludeTypes: { type: Array, default: () => [] },
   // catégories supplémentaires à masquer (ex: ["synth"] dans un Synth)
   excludeCategories: { type: Array, default: () => [] },
+  // éditeur sous une modale : désactiver les raccourcis clavier du paper
+  inactive: { type: Boolean, default: false },
 })
 const patch = props.patch
 
@@ -422,6 +424,7 @@ onMounted(async () => {
           ]"
           :exclude-types="excludeTypes"
           :super-export-enabled="superExportEnabled"
+          :inactive="inactive"
           @module-selected="handleModuleSelected"
           @module-removed="handleModuleRemoved"
           @connection-added="handleConnectionAdded"

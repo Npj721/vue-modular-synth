@@ -23,6 +23,9 @@ const props = defineProps({
   excludeTypes: { type: Array, default: () => [] },
   // afficher l'option "Créer un super-module" dans le menu contextuel
   superExportEnabled: { type: Boolean, default: true },
+  // paper sous une modale : ne pas capter les raccourcis clavier (Delete,
+  // Ctrl+D), sinon la suppression touche aussi la sélection du patch parent
+  inactive: { type: Boolean, default: false },
 });
 
 const paperEl = ref(null);
@@ -797,6 +800,11 @@ const loadPatch = (patch) => {
  * ========================= */
 
 const onKeyDown = (e) => {
+  // Paper inactif (ex: éditeur SynthPatch sous la modale d'un synthé) :
+  // il ne doit pas réagir aux raccourcis clavier, sinon un Delete dans
+  // l'éditeur enfant supprime aussi le module sélectionné du parent.
+  if (props.inactive) return;
+
   // ne pas déclencher les actions du paper pendant l'édition d'un champ texte
   const t = e.target;
   const editingText =

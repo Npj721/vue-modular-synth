@@ -422,6 +422,7 @@ const handleLoad = async (loaded) => {
         :exclude-types="NOTE_DRIVEN"
         :exclude-categories="['super']"
         :super-export-enabled="false"
+        :inactive="synthModalOpen || superModalOpen"
         @edit-synth="handleEditSynth"
         @load-synth="handleLoadSynth"
         @load-super-synth="handleLoadSuperSynth"
@@ -437,6 +438,7 @@ const handleLoad = async (loaded) => {
         :exclude-categories="['synth', 'super']"
         :allow-interface-modules="nested"
         :super-export-enabled="false"
+        :inactive="synthModalOpen || superModalOpen"
       />
     </div>
 
