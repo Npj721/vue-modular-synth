@@ -203,6 +203,7 @@ async function deleteDef(def) {
           :paper-fill-height="true"
           :initial-patch="initialPatch"
           :super-export-enabled="false"
+          :exclude-categories="['event']"
         />
       </section>
     </div>

@@ -12,6 +12,14 @@ import { validateWaveshaperCurve } from '../composables/useWaveshaperCurve'
 import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
 import SampleWaveformEditor from './SampleWaveformEditor.vue'
+import {
+  clampSequencerNumber,
+  normalizeSequencerSteps,
+  toggleSequencer,
+  isSequencerPlaying,
+  getSequencerStep,
+} from '../composables/useSequencerEngine'
+import { markEventOnlyPatchChange } from '../composables/useSharedVoice.js'
 
 const props = defineProps({
   module: { type: Object, default: null }
@@ -197,6 +205,17 @@ const workletRanges = computed(() => parseRanges(params.options))
 // champs JSON géants : ils s'éditent via le bouton "Ouvrir le synthé".
 const visibleParamDefs = computed(() => {
   const type = props.module?.type
+
+  // Le séquenceur a son propre éditeur de pas/BPM : on ne duplique pas ces
+  // champs dans la liste générique.
+  if (type === "sequencer") {
+    return Object.fromEntries(
+      Object.entries(paramDefs).filter(
+        ([key]) => key !== "steps" && key !== "bpm" && key !== "stepCount"
+      )
+    )
+  }
+
   if (type !== "synth" && type !== "superSynth") return paramDefs
   return Object.fromEntries(
     Object.entries(paramDefs).filter(([key]) => {
@@ -205,6 +224,49 @@ const visibleParamDefs = computed(() => {
     })
   )
 })
+
+/* =========================================================
+ * SÉQUENCEUR (module event mono-piste)
+ * ========================================================= */
+
+const sequencerPlaying = computed(() =>
+  isSequencerPlaying(props.module?.id)
+)
+const sequencerCurrentStep = computed(() =>
+  getSequencerStep(props.module?.id)
+)
+const sequencerSteps = computed(() =>
+  normalizeSequencerSteps(params.steps, params.stepCount)
+)
+
+const toggleSequencerPlay = () => {
+  if (!props.module) return
+  toggleSequencer(props.module)
+}
+
+const setSequencerStep = (index, patch) => {
+  const steps = normalizeSequencerSteps(params.steps, params.stepCount)
+  steps[index] = { ...steps[index], ...patch }
+  emitChange("steps", steps)
+}
+
+const toggleSequencerStep = (index) => {
+  const steps = normalizeSequencerSteps(params.steps, params.stepCount)
+  steps[index] = { ...steps[index], active: !steps[index].active }
+  emitChange("steps", steps)
+}
+
+const setSequencerNote = (index, value) => {
+  setSequencerStep(index, {
+    note: Math.round(clampSequencerNumber(value, 0, 127, 60)),
+  })
+}
+
+const setSequencerVelocity = (index, value) => {
+  setSequencerStep(index, {
+    velocity: clampSequencerNumber(value, 0, 1, 1),
+  })
+}
 
 const baseParamDef = (key) => {
   const def = props.module ? getModuleByType(props.module.type) : null
@@ -277,8 +339,22 @@ watch(
 
 // Émettre les changements
 const emitChange = (key, value) => {
+  const previous = props.module?.params?.[key]
   params[key] = value
   if (paramDefs[key]?.type === "json") scheduleJsonValidation(key)
+
+  // Les pas/BPM d'un séquenceur ne modifient pas le graphe audio : inutile de
+  // couper les voix en cours pour les appliquer. On ne lève le drapeau que si
+  // la valeur change réellement, sinon il resterait armé pour une modification
+  // audio suivante.
+  if (
+    props.module?.type === "sequencer" &&
+    (key === "steps" || key === "bpm" || key === "stepCount") &&
+    previous !== value
+  ) {
+    markEventOnlyPatchChange()
+  }
+
   emit('param-changed', { key, value })
 }
 
@@ -849,6 +925,108 @@ onBeforeUnmount(() => {
       <span v-if="label" class="hint">utilisé comme préfixe des paramètres exposés</span>
     </div>
 
+    <!-- Module clavier : source d'événements du SynthPatch -->
+    <div v-if="module.type === 'keyboard'" class="synth-module-block">
+      <div class="synth-module-title">
+        <strong>{{ params.name || module.label || "Keyboard" }}</strong>
+        <span class="hint">source d'événements</span>
+      </div>
+      <p class="hint">
+        Le clavier à l'écran et le clavier MIDI envoient leurs notes aux
+        synthés dont l'entrée Events est reliée à ce module. Une même sortie
+        peut alimenter plusieurs synthés.
+      </p>
+    </div>
+
+    <!-- Module séquenceur : source d'événements du SynthPatch -->
+    <div
+      v-if="module.type === 'sequencer'"
+      class="synth-module-block sequencer-module-block"
+    >
+      <div class="synth-module-title">
+        <strong>{{ params.name || module.label || "Sequencer" }}</strong>
+        <span class="hint">source d'événements</span>
+      </div>
+
+      <div class="sequencer-controls">
+        <button
+          type="button"
+          class="sequencer-play"
+          :class="{ playing: sequencerPlaying }"
+          @click="toggleSequencerPlay"
+        >
+          {{ sequencerPlaying ? "Stop" : "Play" }}
+        </button>
+        <label>
+          BPM
+          <input
+            v-model.number="params.bpm"
+            type="number"
+            min="40"
+            max="300"
+            step="1"
+            @input="emitChange('bpm', params.bpm)"
+          />
+        </label>
+        <label>
+          Pas
+          <input
+            v-model.number="params.stepCount"
+            type="number"
+            min="1"
+            max="64"
+            step="1"
+            @input="emitChange('stepCount', params.stepCount)"
+          />
+        </label>
+      </div>
+
+      <div class="sequencer-steps">
+        <div
+          v-for="(step, i) in sequencerSteps"
+          :key="i"
+          class="sequencer-step"
+          :class="{ active: step.active, current: i === sequencerCurrentStep }"
+        >
+          <button
+            type="button"
+            class="sequencer-step-toggle"
+            :aria-pressed="step.active"
+            :title="step.active ? 'Désactiver le pas' : 'Activer le pas'"
+            @click="toggleSequencerStep(i)"
+          >
+            {{ i + 1 }}
+          </button>
+          <input
+            class="sequencer-step-note"
+            type="number"
+            min="0"
+            max="127"
+            step="1"
+            :value="step.note"
+            title="Note MIDI"
+            @change="setSequencerNote(i, $event.target.value)"
+          />
+          <input
+            class="sequencer-step-velocity"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            :value="step.velocity"
+            title="Vélocité"
+            @input="setSequencerVelocity(i, $event.target.value)"
+          />
+        </div>
+      </div>
+
+      <p class="hint">
+        Les notes partent sur la sortie Events. Câblez-la vers l'entrée Events
+        d'un ou plusieurs synthés. La séquence continue même si ce panneau est
+        fermé.
+      </p>
+    </div>
+
     <!-- Nœud Synth : accès à l'éditeur voice/main interne -->
     <div v-if="module.type === 'synth'" class="synth-module-block">
       <div class="synth-module-title">
@@ -1238,6 +1416,105 @@ onBeforeUnmount(() => {
 .super-synth-module-block {
   border-color: #b9a3cc;
   background: #f5eefb;
+}
+
+/* ---------- Séquenceur (source d'événements) ---------- */
+
+.sequencer-module-block {
+  border-color: #f0b35a;
+  background: #fdf6ea;
+}
+
+.sequencer-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sequencer-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #555;
+}
+
+.sequencer-controls input {
+  width: 58px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.sequencer-play {
+  padding: 6px 14px;
+  border: 1px solid #d68910;
+  border-radius: 4px;
+  background: #f39c12;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sequencer-play.playing {
+  background: #c0392b;
+  border-color: #a93226;
+}
+
+.sequencer-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sequencer-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #e0c9a6;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.sequencer-step.active {
+  border-color: #d68910;
+  background: #ffe9c4;
+}
+
+.sequencer-step.current {
+  box-shadow: 0 0 0 2px #e74c3c;
+}
+
+.sequencer-step-toggle {
+  width: 30px;
+  padding: 2px 0;
+  border: none;
+  border-radius: 3px;
+  background: #eee;
+  color: #666;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.sequencer-step.active .sequencer-step-toggle {
+  background: #f39c12;
+  color: #fff;
+}
+
+.sequencer-step-note {
+  width: 38px;
+  text-align: center;
+  font-size: 11px;
+  padding: 2px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+}
+
+.sequencer-step-velocity {
+  width: 40px;
 }
 
 .json-button {

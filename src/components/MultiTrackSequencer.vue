@@ -1,6 +1,6 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from "vue"
-import { getSharedVoice, setSharedPatch, initSharedVoice } from "../composables/useSharedVoice"
+import { ref, onUnmounted } from "vue"
+import { getSharedVoice, initSharedVoice } from "../composables/useSharedVoice"
 import SequencerTrack from "./SequencerTrack.vue"
 
 const props = defineProps({
@@ -41,17 +41,6 @@ function setTrackRef(id, el) {
   if (el) trackRefs.value[id] = el
   else delete trackRefs.value[id]
 }
-
-/* =========================
- * Patch partagé
- * ========================= */
-watch(
-  () => props.patch,
-  () => setSharedPatch(props.patch),
-  { deep: true, immediate: true }
-)
-
-onMounted(() => setSharedPatch(props.patch))
 
 /* =========================
  * Horloge maîtresse (une seule pour toutes les pistes)

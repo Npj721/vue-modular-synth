@@ -39,6 +39,13 @@ const props = defineProps({
   closeable: { type: Boolean, default: false },
 })
 
+// Les sources d'événements (clavier, séquenceur) n'ont de sens qu'au niveau
+// supérieur : un SuperSynth reçoit ses notes par son entrée Events. On les
+// masque donc dans l'éditeur imbriqué pour éviter des sources inertes.
+const voiceExcludeCategories = computed(() =>
+  props.nested ? ["super", "event"] : ["super"]
+)
+
 const emit = defineEmits(["close"])
 
 const { showVisualizer, showKeyboard } = useDockState()
@@ -420,7 +427,7 @@ const handleLoad = async (loaded) => {
         :initial-patch="props.patch.voice"
         :show-patch-manager="false"
         :exclude-types="NOTE_DRIVEN"
-        :exclude-categories="['super']"
+        :exclude-categories="voiceExcludeCategories"
         :super-export-enabled="false"
         :inactive="synthModalOpen || superModalOpen"
         @edit-synth="handleEditSynth"
@@ -435,7 +442,7 @@ const handleLoad = async (loaded) => {
         :initial-patch="props.patch.main"
         :show-patch-manager="false"
         :exclude-types="NOTE_DRIVEN"
-        :exclude-categories="['synth', 'super']"
+        :exclude-categories="['synth', 'super', 'event']"
         :allow-interface-modules="nested"
         :super-export-enabled="false"
         :inactive="synthModalOpen || superModalOpen"

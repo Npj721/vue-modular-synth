@@ -24,6 +24,11 @@ const activeNotes = ref(new Set())
  * : sans compteur, le relâchement d'un doigt coupait une note encore tenue par
  * un autre. */
 const noteRefs = new Map()
+/* midi -> { sourceId, voiceKey } mémorisé au noteOn. Le noteOff doit libérer
+ * le même synthé même si la source a changé (module supprimé, patch rechargé).
+ * La voiceKey inclut l'id de la source pour que deux sources jouant la même
+ * note ne se coupent pas mutuellement dans le moteur. */
+const noteTargets = new Map()
 /* pointerId -> note tenue, ou null si le pointeur a glissé hors du clavier. */
 const pointerNotes = new Map()
 /* Touches actuellement tenues au clavier physique. On les suit séparément
@@ -106,6 +111,15 @@ async function initAudio() {
   ready.value = true
 }
 
+/* Module "keyboard" du SynthPatch : le clavier à l'écran lui transmet ses
+ * notes. S'il n'y en a pas (ancien patch), on garde le comportement
+ * historique : diffusion à tous les synthés. */
+const keyboardSource = computed(() => {
+  const modules = props.patch?.voice?.modules ?? []
+  return modules.find((m) => m.type === "keyboard") ?? null
+})
+const sourceId = computed(() => keyboardSource.value?.id ?? null)
+
 /* Un NOUVEAU patch (et non un simple réglage) : on relâche les notes tenues. */
 watch(
   () => props.patch,
@@ -117,14 +131,24 @@ function noteOn(midi, velocity = 1) {
   noteRefs.set(midi, n + 1)
   if (n > 0) return // déjà tenue par une autre source
   activeNotes.value.add(midi)
+
+  const src = sourceId.value
+  const target = {
+    sourceId: src,
+    voiceKey: src ? `${src}:${midi}` : midi,
+  }
+  noteTargets.set(midi, target)
+
   if (!ready.value) {
     initAudio().then(() => {
       // le doigt a pu être relâché pendant l'initialisation
-      if (noteRefs.has(midi)) getSharedVoice().noteOn(midi, velocity)
+      if (!noteRefs.has(midi)) return
+      const t = noteTargets.get(midi) ?? target
+      getSharedVoice().noteOn(midi, velocity, null, t.voiceKey, t.sourceId)
     })
     return
   }
-  getSharedVoice().noteOn(midi, velocity)
+  getSharedVoice().noteOn(midi, velocity, null, target.voiceKey, src)
 }
 
 function noteOff(midi) {
@@ -136,7 +160,16 @@ function noteOff(midi) {
   }
   noteRefs.delete(midi)
   activeNotes.value.delete(midi)
-  if (ready.value) getSharedVoice().noteOff(midi)
+
+  const target = noteTargets.get(midi)
+  noteTargets.delete(midi)
+  if (ready.value) {
+    getSharedVoice().noteOff(
+      midi,
+      target?.voiceKey ?? midi,
+      target?.sourceId ?? null
+    )
+  }
 }
 
 /** Relâche tout : perte de focus, onglet masqué, changement de patch. */

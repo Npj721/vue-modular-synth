@@ -96,6 +96,7 @@ const CATEGORY_LABELS = {
   interface: 'Interface',
   super: 'Super Modules',
   synth: 'Synths',
+  event: 'Event Sources',
   code: 'Code',
 };
 
@@ -236,6 +237,15 @@ const portGroups = {
       text: { fill: "#000", fontSize: 10, textAnchor: "start", y: 0 },
     },
   },
+};
+
+/* Les câbles d'événements (clavier -> synthé) sont visuellement distincts
+ * des câbles audio : trait bleu pointillé. Le moteur audio les ignore. */
+const styleLink = (link) => {
+  const isEvent = (link.get("source")?.port ?? "") === "out:events";
+  link.attr("line/stroke", isEvent ? "#00A8E8" : "#333");
+  link.attr("line/strokeWidth", 2);
+  link.attr("line/strokeDasharray", isEvent ? "6 4" : null);
 };
 
 /* =========================
@@ -626,6 +636,7 @@ const cloneSelectedModules = () => {
       target: { id: idMap.get(t.id), port: t.port },
       attrs: { line: { stroke: "#333", strokeWidth: 2 } },
     });
+    styleLink(newLink);
     newLink.addTo(graph);
     emit("connection-added", {
       from: newLink.get("source"),
@@ -740,6 +751,7 @@ const importPatch = (patch) => {
       target: c.to,
       attrs: { line: { stroke: "#333", strokeWidth: 2 } }
     })
+    styleLink(link)
     link.addTo(graph)
   })
 }
@@ -782,6 +794,7 @@ const loadPatch = (patch) => {
       target: c.to,
       attrs: { line: { stroke: "#333", strokeWidth: 2 } },
     })
+    styleLink(link)
     link.addTo(graph)
   })
 
@@ -876,6 +889,22 @@ onMounted(() => {
       const tRole = tgtMagnet.getAttribute("data-role");
 
       if (!sKind || !tKind || !sRole || !tRole) return false;
+
+      /* =========================
+       * ÉVÉNEMENTS (SynthPatch)
+       *
+       * Une sortie "eventOut" (clavier, séquenceur...) ne peut alimenter
+       * qu'une entrée "eventIn" (nœud Synth / SuperSynth). Ces câbles ne
+       * transportent pas d'audio : le moteur les ignore.
+       * ========================= */
+      if (sKind === "event" || tKind === "event") {
+        return (
+          sKind === "event" &&
+          tKind === "event" &&
+          sRole === "eventOut" &&
+          tRole === "eventIn"
+        );
+      }
 
       /* =========================
        * CHAÎNE AUDIO (générique)
@@ -1175,6 +1204,7 @@ onMounted(() => {
   // connection créée
   paper.on("link:connect", (linkView) => {
     const link = linkView.model;
+    styleLink(link);
     emit("connection-added", {
       from: link.get("source"),
       to: link.get("target"),

@@ -18,6 +18,7 @@
 // il est normalisé en SynthPatch contenant un unique Synth.
 
 const DEFAULT_SYNTH_ID = "synth-default"
+const DEFAULT_KEYBOARD_ID = "synth-keyboard"
 const DEFAULT_VOICE_DEST_ID = "synth-voice-destination"
 const DEFAULT_MAIN_INPUT_ID = "synth-main-input"
 const DEFAULT_MAIN_DEST_ID = "synth-main-destination"
@@ -130,6 +131,13 @@ export function createDefaultSynthPatch({ name = "SynthPatch", synth = null } = 
           position: { x: 80, y: 80 },
         }),
         {
+          id: DEFAULT_KEYBOARD_ID,
+          type: "keyboard",
+          label: "",
+          params: {},
+          position: { x: 80, y: 260 },
+        },
+        {
           id: DEFAULT_VOICE_DEST_ID,
           type: "destination",
           label: "",
@@ -138,6 +146,10 @@ export function createDefaultSynthPatch({ name = "SynthPatch", synth = null } = 
         },
       ],
       connections: [
+        {
+          from: { id: DEFAULT_KEYBOARD_ID, port: "out:events" },
+          to: { id: DEFAULT_SYNTH_ID, port: "in:events" },
+        },
         {
           from: { id: DEFAULT_SYNTH_ID, port: "out:out" },
           to: { id: DEFAULT_VOICE_DEST_ID, port: "in:in" },
@@ -217,6 +229,7 @@ function synthPatchFromSynthList(patch) {
     return createDefaultSynthPatch({ name: patch.name ?? "SynthPatch" })
   }
 
+  const keyboardId = "synth-keyboard"
   const destinationId = "synth-voice-destination"
   const mainInputId = "synth-main-input"
   const mainDestId = "synth-main-destination"
@@ -228,6 +241,13 @@ function synthPatchFromSynthList(patch) {
       modules: [
         ...synthModules,
         {
+          id: keyboardId,
+          type: "keyboard",
+          label: "",
+          params: {},
+          position: { x: 80, y: 260 },
+        },
+        {
           id: destinationId,
           type: "destination",
           label: "",
@@ -235,10 +255,18 @@ function synthPatchFromSynthList(patch) {
           position: { x: 80 + synthModules.length * 200, y: 80 },
         },
       ],
-      connections: synthModules.map((m) => ({
-        from: { id: m.id, port: "out:out" },
-        to: { id: destinationId, port: "in:in" },
-      })),
+      connections: [
+        // Tous les synthés importés reçoivent le clavier, comme l'ancien
+        // comportement où chaque note était diffusée à toutes les pistes.
+        ...synthModules.map((m) => ({
+          from: { id: keyboardId, port: "out:events" },
+          to: { id: m.id, port: "in:events" },
+        })),
+        ...synthModules.map((m) => ({
+          from: { id: m.id, port: "out:out" },
+          to: { id: destinationId, port: "in:in" },
+        })),
+      ],
     },
     main: {
       modules: [
@@ -375,6 +403,23 @@ export function createSuperSynthDefinition(patch, name = "SuperSynth") {
   const p = normalizeSynthPatch(patch)
   const voice = deepClone(p.voice)
   const main = deepClone(p.main)
+
+  /* Un SuperSynth reçoit ses notes par son entrée Events et les propage à ses
+   * synthés internes : les sources d'événements (clavier, séquenceur) de la
+   * couche voice n'ont pas de sens dans une définition réutilisable. */
+  const eventSourceIds = new Set(
+    (voice.modules ?? [])
+      .filter((m) => m.type === "keyboard" || m.type === "sequencer")
+      .map((m) => m.id)
+  )
+  if (eventSourceIds.size) {
+    voice.modules = (voice.modules ?? []).filter(
+      (m) => !eventSourceIds.has(m.id)
+    )
+    voice.connections = (voice.connections ?? []).filter(
+      (c) => !eventSourceIds.has(c.from?.id) && !eventSourceIds.has(c.to?.id)
+    )
+  }
 
   let hasIn = false
   let hasOut = false

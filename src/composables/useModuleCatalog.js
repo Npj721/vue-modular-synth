@@ -1025,6 +1025,13 @@ const catalog = reactive({
             role: "audioIn",
             multiple: true,
           },
+          {
+            id: "events",
+            label: "Events",
+            kind: "event",
+            role: "eventIn",
+            multiple: true,
+          },
         ],
         outputs: [
           {
@@ -1067,6 +1074,13 @@ const catalog = reactive({
             role: "audioIn",
             multiple: true,
           },
+          {
+            id: "events",
+            label: "Events",
+            kind: "event",
+            role: "eventIn",
+            multiple: true,
+          },
         ],
         outputs: [
           {
@@ -1082,6 +1096,73 @@ const catalog = reactive({
       params: {
         name: { type: "string", default: "SuperSynth" },
         synthPatch: { type: "json", default: emptySynthPatch() },
+      },
+    },
+
+    /* =========================
+     * EVENT SOURCES (niveau SynthPatch)
+     *
+     * Ces modules ne produisent aucun son : ils émettent des événements
+     * (notes, vélocité) sur leur port "Events". On les câble vers l'entrée
+     * "Events" d'un nœud Synth / SuperSynth pour choisir quels synthés ils
+     * pilotent. Une même sortie peut alimenter plusieurs synthés, et un
+     * synthé peut recevoir plusieurs sources.
+     * ========================= */
+
+    keyboard: {
+      label: "Keyboard",
+      color: "#00A8E8",
+      category: "event",
+      singleton: true,
+
+      ports: {
+        inputs: [],
+        outputs: [
+          {
+            id: "events",
+            label: "Events",
+            kind: "event",
+            role: "eventOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        name: { type: "string", default: "Keyboard" },
+      },
+    },
+
+    /* Séquenceur mono-piste : même contrat qu'un clavier (une sortie
+     * "Events"), mais il émet ses notes tout seul selon ses pas. Le moteur
+     * d'horloge vit au niveau du SynthPatch (useSequencerEngine.js) pour
+     * continuer à jouer même quand le panneau de propriétés est fermé. */
+    sequencer: {
+      label: "Sequencer",
+      color: "#F39C12",
+      category: "event",
+      singleton: false,
+
+      ports: {
+        inputs: [],
+        outputs: [
+          {
+            id: "events",
+            label: "Events",
+            kind: "event",
+            role: "eventOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        name: { type: "string", default: "Sequencer" },
+        bpm: num(40, 300, 1, 120),
+        stepCount: num(1, 64, 1, 16),
+        // Type dédié : le panneau affiche une grille de pas, pas un éditeur
+        // JSON générique.
+        steps: { type: "steps", default: defaultSequenceSteps(16) },
       },
     },
 
@@ -1116,6 +1197,16 @@ const catalog = reactive({
 
   function num(min, max, step, def) {
     return { type: "number", min, max, step, default: def };
+  }
+
+  /* Pas par défaut d'un séquenceur : une note tous les 4 pas, petite montée
+   * chromatique pour entendre immédiatement le résultat. */
+  function defaultSequenceSteps(count = 16) {
+    return Array.from({ length: count }, (_, i) => ({
+      note: Math.min(127, 48 + i * 2),
+      active: i % 4 === 0,
+      velocity: 1,
+    }));
   }
 
   function paramPorts(names) {

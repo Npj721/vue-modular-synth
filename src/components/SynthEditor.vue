@@ -757,8 +757,8 @@ watch(
           @click="emit('close')"
         >✕ Fermer</button>
     </div>
-    <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" :manager-open="patchManagerOpen" :exclude-categories="['synth']" v-show="currentPatch === 'voice'"></PatchEditor>
-    <PatchEditor ref="mainEditor" v-model:patch="mainPatch" :manager-open="patchManagerOpen" :exclude-categories="['synth']" v-show="currentPatch === 'main'"></PatchEditor>
+    <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" :manager-open="patchManagerOpen" :exclude-categories="['synth', 'event']" v-show="currentPatch === 'voice'"></PatchEditor>
+    <PatchEditor ref="mainEditor" v-model:patch="mainPatch" :manager-open="patchManagerOpen" :exclude-categories="['synth', 'event']" v-show="currentPatch === 'main'"></PatchEditor>
     <SuperModuleEditor v-show="currentPatch === 'super'"></SuperModuleEditor>
 
     <aside v-if="aiOpen" class="ai-panel">

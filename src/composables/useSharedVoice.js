@@ -23,6 +23,16 @@ import { normalizeSynthPatch } from "./useSynthPatch.js"
 let sharedPatch = null
 let manager = null
 
+/* Certains paramètres (pas/BPM d'un séquenceur) ne changent pas le graphe
+ * audio : on peut se contenter de rafraîchir le routage des événements, sans
+ * couper les notes en cours. Le panneau de propriétés lève ce drapeau juste
+ * avant de muter le patch ; le prochain setSharedPatch le consomme. */
+let eventOnlyPatchChange = false
+
+export function markEventOnlyPatchChange() {
+  eventOnlyPatchChange = true
+}
+
 /* =========================================================
  * Parcours récursif des graphes (buffers audio)
  * ========================================================= */
@@ -107,6 +117,9 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
   /** Notes actuellement tenues (pour les enveloppes globales de la couche voice). */
   const activeNoteKeys = new Set()
 
+  /** sourceModuleId -> Set<targetModuleId> : câbles d'événements de la couche voice. */
+  let eventRoutes = new Map()
+
   let mainHost = null
   let voiceHost = null
   let voiceBus = null
@@ -122,6 +135,45 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
 
   function refreshPatch() {
     normalized = normalizeSynthPatch(getPatch?.())
+  }
+
+  /* ---------- Routage des événements (notes) ---------- */
+
+  function isEventConnection(c) {
+    return c?.from?.port === "out:events" && c?.to?.port === "in:events"
+  }
+
+  /** Reconstruit la table source -> synthés ciblés depuis le graphe voice. */
+  function syncEventRoutes() {
+    const routes = new Map()
+    for (const c of normalized.voice.connections ?? []) {
+      if (!isEventConnection(c)) continue
+      const fromId = c.from?.id
+      const toId = c.to?.id
+      if (!fromId || !toId) continue
+      let targets = routes.get(fromId)
+      if (!targets) {
+        targets = new Set()
+        routes.set(fromId, targets)
+      }
+      targets.add(toId)
+    }
+    eventRoutes = routes
+  }
+
+  /**
+   * Cibles d'une source d'événements.
+   * - `null` : source inconnue / ancien appel -> diffusion à tous les synthés
+   *   (comportement historique, préserve les anciens patches).
+   * - Set vide : la source existe mais n'est câblée à aucun synthé -> silence.
+   */
+  function eventTargets(sourceId) {
+    if (!sourceId) return null
+    const known = (normalized.voice.modules ?? []).some(
+      (m) => m.id === sourceId
+    )
+    if (!known) return null
+    return eventRoutes.get(sourceId) ?? new Set()
   }
 
   function ensureBoundaryGains() {
@@ -269,6 +321,8 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
       superRecords.delete(id)
       synthNodes.delete(id)
     }
+
+    syncEventRoutes()
   }
 
   /* ---------- Gains par piste ---------- */
@@ -427,6 +481,17 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
     reconnectTrackGains()
   }
 
+  /**
+   * Met à jour uniquement le routage des événements (sources -> synthés) sans
+   * reconstruire le graphe audio. Utilisé quand seuls les paramètres d'un
+   * séquenceur changent : on ne veut pas couper les notes en cours pendant
+   * l'édition des pas.
+   */
+  function refreshRouting() {
+    refreshPatch()
+    syncEventRoutes()
+  }
+
   function setPatch() {
     if (!initPromise) return Promise.resolve()
     return rebuildAll()
@@ -434,7 +499,7 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
 
   /* ---------- Notes ---------- */
 
-  async function noteOn(note, velocity, track, voiceKey) {
+  async function noteOn(note, velocity, track, voiceKey, sourceId = null) {
     await init()
 
     // Enveloppes globales de la couche voice : le graphe est persistant, donc
@@ -442,23 +507,34 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
     activeNoteKeys.add(voiceKey ?? note)
     voiceHost?.retriggerMainEnvelopes(velocity ?? 1)
 
+    // Une source câblée ne pilote que les synthés connectés à sa sortie
+    // Events. Sans source (anciens appels), on conserve la diffusion globale.
+    const targets = eventTargets(sourceId)
+
     const jobs = []
-    for (const record of synthRecords.values()) {
+    for (const [id, record] of synthRecords) {
+      if (targets && !targets.has(id)) continue
       const dest = track ? connectTrackGain(track, record) : null
       jobs.push(record.engine.noteOn(note, velocity, dest, voiceKey))
     }
-    for (const record of superRecords.values()) {
+    for (const [id, record] of superRecords) {
+      if (targets && !targets.has(id)) continue
+      // Un SuperSynth propage la note à tous ses synthés internes.
       jobs.push(record.child.noteOn(note, velocity, track, voiceKey))
     }
 
     await Promise.all(jobs)
   }
 
-  function noteOff(note, voiceKey) {
-    for (const record of synthRecords.values()) {
+  function noteOff(note, voiceKey, sourceId = null) {
+    const targets = eventTargets(sourceId)
+
+    for (const [id, record] of synthRecords) {
+      if (targets && !targets.has(id)) continue
       record.engine.noteOff(note, voiceKey)
     }
-    for (const record of superRecords.values()) {
+    for (const [id, record] of superRecords) {
+      if (targets && !targets.has(id)) continue
       record.child.noteOff(note, voiceKey)
     }
 
@@ -576,6 +652,7 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
   return {
     init,
     setPatch,
+    refreshRouting,
     rebuildAll,
     rebuildSynth,
     noteOn,
@@ -660,7 +737,7 @@ function createManager() {
     return initPromise
   }
 
-  function setPatch(patch) {
+  function setPatch(patch, { audio = true } = {}) {
     sharedPatch = patch
 
     // Pas encore de contexte : init() fera le premier sync avec sharedPatch.
@@ -669,7 +746,8 @@ function createManager() {
     syncChain = syncChain
       .then(async () => {
         await initPromise
-        await root?.setPatch()
+        if (audio) await root?.setPatch()
+        else root?.refreshRouting()
       })
       .catch((e) => {
         console.error("Échec de la mise à jour du patch partagé :", e)
@@ -690,14 +768,20 @@ function createManager() {
     return root?.rebuildSynth(id)
   }
 
-  async function noteOn(note, velocity = 1, destinationNode = null, voiceKey = null) {
+  async function noteOn(
+    note,
+    velocity = 1,
+    destinationNode = null,
+    voiceKey = null,
+    sourceId = null
+  ) {
     await init()
     const track = destinationNode ? trackGainByNode.get(destinationNode) : null
-    await root?.noteOn(note, velocity, track, voiceKey)
+    await root?.noteOn(note, velocity, track, voiceKey, sourceId)
   }
 
-  function noteOff(note, voiceKey = null) {
-    root?.noteOff(note, voiceKey)
+  function noteOff(note, voiceKey = null, sourceId = null) {
+    root?.noteOff(note, voiceKey, sourceId)
   }
 
   function stopAll() {
@@ -818,8 +902,11 @@ export async function hydratePatchBuffers(patch) {
 export function setSharedPatch(patch) {
   sharedPatch = patch
 
+  const audio = !eventOnlyPatchChange
+  eventOnlyPatchChange = false
+
   if (manager) {
-    manager.setPatch(patch).catch(() => {})
+    manager.setPatch(patch, { audio }).catch(() => {})
   }
 
   hydratePatchBuffers(patch).catch((e) => {

@@ -1663,7 +1663,15 @@ export function usePatchVoice(patch, options = {}) {
    * CONNEXIONS
    * ========================================================= */
 
+  /* Les câbles d'événements (out:events -> in:events) appartiennent au
+   * SynthPatch, pas au graphe audio : le moteur les ignore complètement. */
+  function isEventConnection(c) {
+    return c?.from?.port === "out:events" && c?.to?.port === "in:events"
+  }
+
   function wireConnection(ctx, c, nodes, o, audioDelay) {
+    if (isEventConnection(c)) return
+
     const from = nodes.get(c.from?.id)
     const to = nodes.get(c.to?.id)
     if (!from || !to) return
@@ -1803,6 +1811,7 @@ export function usePatchVoice(patch, options = {}) {
 
     const edges = []
     for (const c of graph.connections ?? []) {
+      if (isEventConnection(c)) continue
       const from = nodes.get(c.from?.id)
       const to = nodes.get(c.to?.id)
       if (!from || !to || from.modulator) continue
