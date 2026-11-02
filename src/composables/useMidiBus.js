@@ -83,7 +83,7 @@ function handleMidiMessage(input, e) {
     emit({
       type: "noteOn",
       note,
-      velocity: velocity / 127,
+      velocity: 1, //velocity / 127,
       deviceId: input.id,
       deviceName: input.name || "",
     })
