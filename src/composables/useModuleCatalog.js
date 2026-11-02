@@ -1133,6 +1133,37 @@ const catalog = reactive({
       },
     },
 
+    /* Clavier MIDI : un module par appareil. Le choix de l'appareil se fait
+     * dans le panneau de propriétés (params.device) ; le moteur
+     * useMidiEventSources.js n'envoie les notes qu'aux synthés câblés à ce
+     * module. Le clavier du PC / de l'écran reste le module `keyboard`. */
+    midi: {
+      label: "MIDI Keyboard",
+      color: "#3498DB",
+      category: "event",
+      singleton: false,
+
+      ports: {
+        inputs: [],
+        outputs: [
+          {
+            id: "events",
+            label: "Events",
+            kind: "event",
+            role: "eventOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        name: { type: "string", default: "MIDI Keyboard" },
+        // id de l'appareil Web MIDI ; sélectionné via un menu dédié dans le
+        // panneau de propriétés (pas le champ texte générique).
+        device: { type: "string", default: "" },
+      },
+    },
+
     /* Séquenceur mono-piste : même contrat qu'un clavier (une sortie
      * "Events"), mais il émet ses notes tout seul selon ses pas. Le moteur
      * d'horloge vit au niveau du SynthPatch (useSequencerEngine.js) pour

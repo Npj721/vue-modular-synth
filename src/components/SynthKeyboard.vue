@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from "vue"
 import { getSharedVoice, initSharedVoice } from "../composables/useSharedVoice"
-import { registerMidiNoteHandler } from "../composables/useMidiBus"
 
 const props = defineProps({
   patch: {
@@ -19,10 +18,10 @@ const props = defineProps({
  * ========================= */
 const ready = ref(false)
 const activeNotes = ref(new Set())
-/* Nombre de sources (doigts, souris, clavier physique, MIDI) qui tiennent
- * chaque note. La voix ne gère qu'une entrée par note (usePatchVoice.js:1781)
- * : sans compteur, le relâchement d'un doigt coupait une note encore tenue par
- * un autre. */
+/* Nombre de sources (doigts, souris, clavier physique) qui tiennent chaque
+ * note. La voix ne gère qu'une entrée par note (usePatchVoice.js:1781) : sans
+ * compteur, le relâchement d'un doigt coupait une note encore tenue par un
+ * autre. */
 const noteRefs = new Map()
 /* midi -> { sourceId, voiceKey } mémorisé au noteOn. Le noteOff doit libérer
  * le même synthé même si la source a changé (module supprimé, patch rechargé).
@@ -32,7 +31,7 @@ const noteTargets = new Map()
 /* pointerId -> note tenue, ou null si le pointeur a glissé hors du clavier. */
 const pointerNotes = new Map()
 /* Touches actuellement tenues au clavier physique. On les suit séparément
- * pour que le keyup ne relâche pas une note tenue par la souris/MIDI et pour
+ * pour que le keyup ne relâche pas une note tenue par la souris et pour
  * pouvoir ignorer complètement la saisie dans un champ éditable. */
 const heldKeyboardKeys = new Set()
 
@@ -288,8 +287,6 @@ function handleKeyUp(e) {
   if (midi !== undefined) noteOff(midi)
 }
 
-let unregisterMidi = null
-
 onMounted(() => {
   window.addEventListener("keydown", handleKeyDown)
   window.addEventListener("keyup", handleKeyUp)
@@ -297,10 +294,6 @@ onMounted(() => {
   window.addEventListener("pointercancel", onWindowPointerUp)
   window.addEventListener("blur", releaseAll)
   document.addEventListener("visibilitychange", onVisibilityChange)
-  unregisterMidi = registerMidiNoteHandler((msg) => {
-    if (msg.type === "noteOn") noteOn(msg.note, msg.velocity ?? 1)
-    else if (msg.type === "noteOff") noteOff(msg.note)
-  })
 })
 
 onUnmounted(() => {
@@ -310,7 +303,6 @@ onUnmounted(() => {
   window.removeEventListener("pointercancel", onWindowPointerUp)
   window.removeEventListener("blur", releaseAll)
   document.removeEventListener("visibilitychange", onVisibilityChange)
-  if (unregisterMidi) unregisterMidi()
   releaseAll()
   getSharedVoice()?.stopAll()
 })

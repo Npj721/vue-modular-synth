@@ -12,12 +12,21 @@
     syncSequencers,
     stopAllSequencers,
   } from './composables/useSequencerEngine.js'
+  import {
+    initMidiEventSources,
+    syncMidiEventSources,
+    stopMidiEventSources,
+  } from './composables/useMidiEventSources.js'
   const { showVisualizer, showKeyboard } = useDockState()
 
   // Un SynthPatch par défaut contient déjà un nœud Synth vide, relié à la
   // destination de la couche voice. L'utilisateur peut l'ouvrir et y charger
   // un synthé (ou en ajouter d'autres via le menu contextuel).
   const synthPatch = reactive(createDefaultSynthPatch())
+
+  // Un seul écouteur MIDI pour toute l'application : les modules "midi" du
+  // patch filtrent ensuite les notes par appareil.
+  initMidiEventSources()
 
   /* Source de vérité du moteur partagé. Le watch doit vivre ici (et non dans
    * le séquenceur) : les câbles d'événements doivent être reconstruits même
@@ -28,6 +37,8 @@
       setSharedPatch(synthPatch)
       // Un module séquenceur supprimé ne doit pas continuer à tourner.
       syncSequencers(synthPatch)
+      // Un module MIDI supprimé / changé d'appareil doit relâcher ses notes.
+      syncMidiEventSources(synthPatch)
     },
     { deep: true, immediate: true }
   )
@@ -54,6 +65,7 @@
   onUnmounted(() => {
     if (dockObserver) dockObserver.disconnect()
     stopAllSequencers()
+    stopMidiEventSources()
   })
 
 </script>

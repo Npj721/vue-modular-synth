@@ -20,6 +20,7 @@ import {
   getSequencerStep,
 } from '../composables/useSequencerEngine'
 import { markEventOnlyPatchChange } from '../composables/useSharedVoice.js'
+import { midiState, requestMidiAccess } from '../composables/useMidiBus.js'
 
 const props = defineProps({
   module: { type: Object, default: null }
@@ -216,6 +217,13 @@ const visibleParamDefs = computed(() => {
     )
   }
 
+  // Le module MIDI a un sélecteur d'appareil dédié.
+  if (type === "midi") {
+    return Object.fromEntries(
+      Object.entries(paramDefs).filter(([key]) => key !== "device")
+    )
+  }
+
   if (type !== "synth" && type !== "superSynth") return paramDefs
   return Object.fromEntries(
     Object.entries(paramDefs).filter(([key]) => {
@@ -343,20 +351,51 @@ const emitChange = (key, value) => {
   params[key] = value
   if (paramDefs[key]?.type === "json") scheduleJsonValidation(key)
 
-  // Les pas/BPM d'un séquenceur ne modifient pas le graphe audio : inutile de
-  // couper les voix en cours pour les appliquer. On ne lève le drapeau que si
-  // la valeur change réellement, sinon il resterait armé pour une modification
-  // audio suivante.
-  if (
-    props.module?.type === "sequencer" &&
-    (key === "steps" || key === "bpm" || key === "stepCount") &&
-    previous !== value
-  ) {
+  // Les pas/BPM d'un séquenceur et l'appareil d'un module MIDI ne modifient
+  // pas le graphe audio : inutile de couper les voix en cours pour les
+  // appliquer. On ne lève le drapeau que si la valeur change réellement, sinon
+  // il resterait armé pour une modification audio suivante.
+  const eventOnly =
+    (props.module?.type === "sequencer" &&
+      (key === "steps" || key === "bpm" || key === "stepCount")) ||
+    (props.module?.type === "midi" && key === "device")
+  if (eventOnly && previous !== value) {
     markEventOnlyPatchChange()
   }
 
   emit('param-changed', { key, value })
 }
+
+/* =========================================================
+ * MIDI (module event, un par appareil)
+ * ========================================================= */
+
+const midiStatusText = computed(() => {
+  if (!midiState.supported) return "Web MIDI non disponible"
+  if (!midiState.requested) return "MIDI non activé"
+  if (!midiState.devices.length) return "Aucun appareil détecté"
+  return `${midiState.devices.length} appareil(s) détecté(s)`
+})
+
+const midiDeviceMissing = computed(() => {
+  if (props.module?.type !== "midi") return false
+  const id = props.module.params?.device
+  if (!id) return false
+  return !midiState.devices.some((d) => d.id === id)
+})
+
+// S'il n'y a qu'un seul appareil, le sélectionner automatiquement : le module
+// devient immédiatement utilisable après "Activer MIDI".
+watch(
+  () => midiState.devices.length,
+  (count) => {
+    if (props.module?.type !== "midi") return
+    if (props.module.params?.device) return
+    if (count !== 1) return
+    emitChange("device", midiState.devices[0].id)
+  },
+  { immediate: true }
+)
 
 /* =========================================================
  * PRESETS DE MODULE À CODE (AudioWorklet / WaveShaper)
@@ -932,9 +971,74 @@ onBeforeUnmount(() => {
         <span class="hint">source d'événements</span>
       </div>
       <p class="hint">
-        Le clavier à l'écran et le clavier MIDI envoient leurs notes aux
-        synthés dont l'entrée Events est reliée à ce module. Une même sortie
-        peut alimenter plusieurs synthés.
+        Le clavier à l'écran et le clavier physique du PC envoient leurs notes
+        aux synthés dont l'entrée Events est reliée à ce module. Une même
+        sortie peut alimenter plusieurs synthés. Pour un clavier MIDI, ajoutez
+        un module MIDI.
+      </p>
+    </div>
+
+    <!-- Module MIDI : un appareil MIDI = une source d'événements -->
+    <div
+      v-if="module.type === 'midi'"
+      class="synth-module-block midi-module-block"
+    >
+      <div class="synth-module-title">
+        <strong>{{ params.name || module.label || "MIDI Keyboard" }}</strong>
+        <span class="hint">source d'événements</span>
+      </div>
+
+      <div class="midi-module-controls">
+        <button
+          type="button"
+          class="midi-enable-btn"
+          :disabled="!midiState.supported || midiState.requested"
+          @click="requestMidiAccess"
+        >
+          {{ midiState.requested ? "MIDI activé" : "Activer MIDI" }}
+        </button>
+        <span
+          class="midi-module-status"
+          :class="{ ok: midiState.devices.length > 0 }"
+        >
+          {{ midiStatusText }}
+        </span>
+      </div>
+
+      <div v-if="midiState.error" class="midi-module-error">
+        {{ midiState.error }}
+      </div>
+
+      <label v-if="midiState.devices.length" class="midi-module-device">
+        Appareil
+        <select
+          :value="params.device"
+          @change="emitChange('device', $event.target.value)"
+        >
+          <option value="">— Choisir un appareil —</option>
+          <option v-for="d in midiState.devices" :key="d.id" :value="d.id">
+            {{ d.name }}<template v-if="d.manufacturer"> ({{ d.manufacturer }})</template>
+          </option>
+        </select>
+      </label>
+      <p v-else-if="midiState.requested" class="hint">
+        Aucun appareil MIDI détecté. Branchez un clavier puis rouvrez ce panneau.
+      </p>
+      <p v-else-if="midiState.supported" class="hint">
+        Activez MIDI pour lister les appareils disponibles.
+      </p>
+      <p v-else class="hint">
+        Le Web MIDI API n'est pas disponible dans ce navigateur. Utilisez Chrome
+        ou Edge.
+      </p>
+
+      <p v-if="midiDeviceMissing" class="midi-module-error">
+        L'appareil sélectionné n'est plus disponible.
+      </p>
+
+      <p class="hint">
+        Chaque module MIDI représente un appareil. Câblez sa sortie Events vers
+        l'entrée Events des synthés à piloter.
       </p>
     </div>
 
@@ -1416,6 +1520,65 @@ onBeforeUnmount(() => {
 .super-synth-module-block {
   border-color: #b9a3cc;
   background: #f5eefb;
+}
+
+/* ---------- MIDI (source d'événements) ---------- */
+
+.midi-module-block {
+  border-color: #7fb3d5;
+  background: #eef6fc;
+}
+
+.midi-module-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.midi-enable-btn {
+  padding: 6px 14px;
+  border: 1px solid #2c7be5;
+  border-radius: 4px;
+  background: #4d96ff;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.midi-enable-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.midi-module-status {
+  color: #777;
+  font-size: 12px;
+}
+
+.midi-module-status.ok {
+  color: #00a86b;
+}
+
+.midi-module-device {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #555;
+}
+
+.midi-module-device select {
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.midi-module-error {
+  color: #c0392b;
+  font-size: 12px;
+  margin: 0;
 }
 
 /* ---------- Séquenceur (source d'événements) ---------- */

@@ -239,7 +239,7 @@ const importFile = async (e) => {
     <button v-if="false" class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
     <button v-if="false" class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
     <div class="spm-midi-sep"></div>
-    <MidiController :patch="props.patch" />
+    <MidiController />
   </div>
 
   <div v-if="modalOpen" class="spm-modal" @click.self="modalOpen = false">
@@ -332,7 +332,8 @@ const importFile = async (e) => {
   background: transparent;
 }
 .synth-patch-manager :deep(.midi-hint),
-.synth-patch-manager :deep(.midi-error) {
+.synth-patch-manager :deep(.midi-error),
+.synth-patch-manager :deep(.midi-devices) {
   display: none;
 }
 .synth-patch-manager :deep(.midi-status) {
@@ -341,14 +342,6 @@ const importFile = async (e) => {
 }
 .synth-patch-manager :deep(.midi-status.ok) {
   color: #00ffd0;
-}
-.synth-patch-manager :deep(.midi-select) {
-  min-width: 180px;
-  padding: 3px 6px;
-  border: 1px solid #2c5a4c;
-  border-radius: 4px;
-  background: #0b211a;
-  color: #d6e7e0;
 }
 .synth-patch-manager :deep(.midi-btn) {
   padding: 3px 10px;
@@ -368,11 +361,6 @@ const importFile = async (e) => {
 }
 .synth-patch-manager :deep(.midi-btn.request:disabled) {
   background: #1d4d40;
-}
-.synth-patch-manager :deep(.midi-btn.connect.active) {
-  background: #a33d47;
-  border-color: #7d2c34;
-  color: white;
 }
 .spm-name,
 .spm-select {
