@@ -8,7 +8,6 @@ import LmStudioChat from "./LmStudioChat.vue";
 
 import { useDockState } from "../composables/useDockState";
 import { useModuleCatalog } from "../composables/useModuleCatalog";
-const { showVisualizer, showKeyboard } = useDockState()
 const { getCatalog } = useModuleCatalog()
 
 const currentPatch = ref("voice")
@@ -731,18 +730,6 @@ watch(
           :disabled="currentPatch === 'super'"
           @click="patchManagerOpen = !patchManagerOpen"
         >{{ patchManagerOpen ? "◀ Patch Manager" : "▶ Patch Manager" }}</button>
-
-        <button
-          class="button toggle-manager"
-          :disabled="currentPatch === 'super'"
-          @click="showVisualizer = !showVisualizer"
-        >{{ showVisualizer ? "◀ Spectrum" : "▶ Spectrum" }}</button>
-
-        <button
-          class="button toggle-manager"
-          :disabled="currentPatch === 'super'"
-          @click="showKeyboard = !showKeyboard"
-        >{{ showKeyboard ? "◀ Keyboard" : "▶ Keyboard" }}</button>
 
         <button
           class="button toggle-manager"

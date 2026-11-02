@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from "vue"
 import Swal from "sweetalert2"
-import MidiController from "./MidiController.vue"
+//import MidiController from "./MidiController.vue"
 import { usePatchStorage } from "../composables/usePatchStorage"
 import {
   collectSuperModules,
@@ -239,7 +239,6 @@ const importFile = async (e) => {
     <button v-if="false" class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
     <button v-if="false" class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
     <div class="spm-midi-sep"></div>
-    <MidiController />
   </div>
 
   <div v-if="modalOpen" class="spm-modal" @click.self="modalOpen = false">
