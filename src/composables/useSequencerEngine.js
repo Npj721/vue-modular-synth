@@ -14,6 +14,9 @@
 import { reactive } from "vue"
 import { getSharedVoice, initSharedVoice } from "./useSharedVoice.js"
 
+/** Nombre maximal de pas d'un séquenceur (grille dynamique). */
+export const SEQUENCER_MAX_STEPS = 512
+
 /** moduleId -> { playing, step, timer, pending, generation } */
 const states = reactive({})
 
@@ -41,7 +44,9 @@ export function clampSequencerNumber(value, min, max, fallback) {
  * des valeurs bornées. Les pas manquants prennent les valeurs par défaut.
  */
 export function normalizeSequencerSteps(steps, count) {
-  const total = Math.round(clampSequencerNumber(count, 1, 64, 16))
+  const total = Math.round(
+    clampSequencerNumber(count, 1, SEQUENCER_MAX_STEPS, 16)
+  )
   const source = Array.isArray(steps) ? steps : []
 
   return Array.from({ length: total }, (_, i) => {
@@ -100,7 +105,12 @@ function scheduleNext(module) {
   st.timer = setTimeout(() => {
     if (!st.playing) return
     const count = Math.round(
-      clampSequencerNumber(module.params?.stepCount, 1, 64, 16)
+      clampSequencerNumber(
+        module.params?.stepCount,
+        1,
+        SEQUENCER_MAX_STEPS,
+        16
+      )
     )
     st.step = (st.step + 1) % count
     triggerStep(module, st.step)

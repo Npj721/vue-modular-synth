@@ -1190,7 +1190,7 @@ const catalog = reactive({
       params: {
         name: { type: "string", default: "Sequencer" },
         bpm: num(40, 300, 1, 120),
-        stepCount: num(1, 64, 1, 16),
+        stepCount: num(1, 512, 1, 16),
         // Type dédié : le panneau affiche une grille de pas, pas un éditeur
         // JSON générique.
         steps: { type: "steps", default: defaultSequenceSteps(16) },

@@ -12,12 +12,14 @@ import { validateWaveshaperCurve } from '../composables/useWaveshaperCurve'
 import GraphEnvelopeEditor from './GraphEnvelopeEditor.vue'
 import AudioFilePicker from './AudioFilePicker.vue'
 import SampleWaveformEditor from './SampleWaveformEditor.vue'
+import SequencerGrid from './SequencerGrid.vue'
 import {
   clampSequencerNumber,
   normalizeSequencerSteps,
   toggleSequencer,
   isSequencerPlaying,
   getSequencerStep,
+  SEQUENCER_MAX_STEPS,
 } from '../composables/useSequencerEngine'
 import { markEventOnlyPatchChange } from '../composables/useSharedVoice.js'
 import { midiState, requestMidiAccess } from '../composables/useMidiBus.js'
@@ -254,26 +256,71 @@ const toggleSequencerPlay = () => {
 
 const setSequencerStep = (index, patch) => {
   const steps = normalizeSequencerSteps(params.steps, params.stepCount)
+  if (!steps[index]) return
   steps[index] = { ...steps[index], ...patch }
   emitChange("steps", steps)
 }
 
-const toggleSequencerStep = (index) => {
+// Grille : un clic sur une cellule active/déplace la note du pas, un clic sur
+// la note déjà active la désactive.
+const toggleSequencerStepAt = ({ index, note }) => {
   const steps = normalizeSequencerSteps(params.steps, params.stepCount)
-  steps[index] = { ...steps[index], active: !steps[index].active }
+  const step = steps[index]
+  if (!step) return
+
+  if (step.active && step.note === note) {
+    step.active = false
+  } else {
+    step.active = true
+    step.note = Math.round(clampSequencerNumber(note, 0, 127, 60))
+  }
   emitChange("steps", steps)
 }
 
-const setSequencerNote = (index, value) => {
-  setSequencerStep(index, {
-    note: Math.round(clampSequencerNumber(value, 0, 127, 60)),
-  })
+// La grille et le moteur se basent tous deux sur stepCount : on garde le
+// tableau de pas synchronisé quand on ajoute/retire des colonnes.
+const setSequencerStepCount = (value) => {
+  const current = Math.round(
+    clampSequencerNumber(params.stepCount, 1, SEQUENCER_MAX_STEPS, 16)
+  )
+  const next = Math.round(
+    clampSequencerNumber(value, 1, SEQUENCER_MAX_STEPS, current)
+  )
+
+  if (next !== current) {
+    const steps = normalizeSequencerSteps(params.steps, next)
+    emitChange("stepCount", next)
+    emitChange("steps", steps)
+    return
+  }
+
+  // Valeur saisie invalide (vide, hors bornes) : on réaffiche la valeur
+  // courante sans toucher aux pas.
+  params.stepCount = next
+}
+
+const addSequencerStep = (delta = 1) => {
+  const current = Math.round(
+    clampSequencerNumber(params.stepCount, 1, SEQUENCER_MAX_STEPS, 16)
+  )
+  setSequencerStepCount(current + delta)
+}
+
+const onSequencerStepCountChange = (event) => {
+  setSequencerStepCount(event.target.value)
+  event.target.value = Math.round(
+    clampSequencerNumber(params.stepCount, 1, SEQUENCER_MAX_STEPS, 16)
+  )
 }
 
 const setSequencerVelocity = (index, value) => {
   setSequencerStep(index, {
     velocity: clampSequencerNumber(value, 0, 1, 1),
   })
+}
+
+const onSequencerVelocityChange = ({ index, value }) => {
+  setSequencerVelocity(index, value)
 }
 
 const baseParamDef = (key) => {
@@ -1072,62 +1119,49 @@ onBeforeUnmount(() => {
             @input="emitChange('bpm', params.bpm)"
           />
         </label>
-        <label>
-          Pas
-          <input
-            v-model.number="params.stepCount"
-            type="number"
-            min="1"
-            max="64"
-            step="1"
-            @input="emitChange('stepCount', params.stepCount)"
-          />
-        </label>
-      </div>
-
-      <div class="sequencer-steps">
-        <div
-          v-for="(step, i) in sequencerSteps"
-          :key="i"
-          class="sequencer-step"
-          :class="{ active: step.active, current: i === sequencerCurrentStep }"
-        >
+        <div class="sequencer-step-count">
+          <span>Pas</span>
           <button
             type="button"
-            class="sequencer-step-toggle"
-            :aria-pressed="step.active"
-            :title="step.active ? 'Désactiver le pas' : 'Activer le pas'"
-            @click="toggleSequencerStep(i)"
+            class="sequencer-count-btn"
+            title="Retirer un pas"
+            @click="addSequencerStep(-1)"
           >
-            {{ i + 1 }}
+            −
           </button>
           <input
-            class="sequencer-step-note"
+            :value="params.stepCount"
             type="number"
-            min="0"
-            max="127"
+            min="1"
+            :max="SEQUENCER_MAX_STEPS"
             step="1"
-            :value="step.note"
-            title="Note MIDI"
-            @change="setSequencerNote(i, $event.target.value)"
+            @change="onSequencerStepCountChange"
           />
-          <input
-            class="sequencer-step-velocity"
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            :value="step.velocity"
-            title="Vélocité"
-            @input="setSequencerVelocity(i, $event.target.value)"
-          />
+          <button
+            type="button"
+            class="sequencer-count-btn"
+            title="Ajouter un pas"
+            @click="addSequencerStep(1)"
+          >
+            +
+          </button>
         </div>
       </div>
 
+      <SequencerGrid
+        :steps="sequencerSteps"
+        :step-count="Math.round(Number(params.stepCount) || 16)"
+        :current-step="sequencerCurrentStep"
+        @toggle-step="toggleSequencerStepAt"
+        @velocity-change="onSequencerVelocityChange"
+        @add-step="addSequencerStep(1)"
+      />
+
       <p class="hint">
-        Les notes partent sur la sortie Events. Câblez-la vers l'entrée Events
-        d'un ou plusieurs synthés. La séquence continue même si ce panneau est
-        fermé.
+        Cliquez sur une cellule pour poser (ou déplacer) la note du pas.
+        Cliquez sur la note active pour la retirer. Le curseur vertical au-dessus
+        de chaque pas règle sa vélocité. Les notes partent sur la sortie Events :
+        câblez-la vers l'entrée Events d'un ou plusieurs synthés.
       </p>
     </div>
 
@@ -1625,59 +1659,37 @@ onBeforeUnmount(() => {
   border-color: #a93226;
 }
 
-.sequencer-steps {
+.sequencer-step-count {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
+  font-size: 12px;
+  color: #555;
 }
 
-.sequencer-step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid #e0c9a6;
+.sequencer-step-count input {
+  width: 58px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.sequencer-count-btn {
+  width: 24px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #d68910;
   border-radius: 4px;
   background: #fff;
-}
-
-.sequencer-step.active {
-  border-color: #d68910;
-  background: #ffe9c4;
-}
-
-.sequencer-step.current {
-  box-shadow: 0 0 0 2px #e74c3c;
-}
-
-.sequencer-step-toggle {
-  width: 30px;
-  padding: 2px 0;
-  border: none;
-  border-radius: 3px;
-  background: #eee;
-  color: #666;
-  font-size: 10px;
+  color: #b9770e;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
   cursor: pointer;
 }
 
-.sequencer-step.active .sequencer-step-toggle {
-  background: #f39c12;
-  color: #fff;
-}
-
-.sequencer-step-note {
-  width: 38px;
-  text-align: center;
-  font-size: 11px;
-  padding: 2px;
-  border: 1px solid #ddd;
-  border-radius: 3px;
-}
-
-.sequencer-step-velocity {
-  width: 40px;
+.sequencer-count-btn:hover {
+  background: #ffe9c4;
 }
 
 .json-button {
