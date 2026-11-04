@@ -815,7 +815,7 @@ onBeforeUnmount(() => {
       >Tableau</button>
     </div>
 
-    <div v-show="viewMode === 'graph'" class="d-flex flex-column gap-3">
+    <div v-show="viewMode === 'graph'" class="flex-column gap-3" style="display: flex">
       <div class="border rounded p-2 bg-body-tertiary">
         <div class="d-flex justify-content-between align-items-center mb-2 gap-2">
           <h4 class="h6 mb-0">Press (Note On)</h4>
@@ -891,7 +891,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-show="viewMode === 'table'" class="d-flex flex-column gap-3">
+    <div v-show="viewMode === 'table'" class="flex-column gap-3" style="display: flex">
       <div
         v-for="cfg in tablePhaseConfigs"
         :key="cfg.key"

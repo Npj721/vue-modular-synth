@@ -396,7 +396,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="d-flex flex-column gap-3">
+  <div class="flex-column gap-3" style="display: flex">
     <div
       style="
         position: relative;

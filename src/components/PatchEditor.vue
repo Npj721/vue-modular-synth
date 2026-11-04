@@ -401,66 +401,68 @@ onMounted(async () => {
 
 <template>
   <div
-    class="d-flex flex-row overflow-hidden"
+    class="overflow-hidden"
     :style="{ height: fill ? '100%' : 'calc(100vh - var(--dock-height, 0px))' }"
   >
-    <!-- Main area -->
-    <div class="d-flex flex-grow-1 min-w-0 overflow-hidden">
-      <!-- Patch manager (left) -->
-      <aside
-        v-if="showPatchManager"
-        class="flex-shrink-0 border-end bg-body-tertiary overflow-y-auto"
-        :class="{ 'opacity-0 border-0 overflow-hidden': !managerOpen }"
-        :style="{
-          width: managerOpen ? '260px' : '0px',
-          transition: 'width 0.25s ease, opacity 0.25s ease',
-        }"
-      >
-        <PatchManager
-          :paperRef="paperRef"
-          :patch="patch"
-          @patch-loaded="handlePatchLoaded"
-        />
-      </aside>
+    <div class="d-flex flex-row overflow-hidden h-100">
+      <!-- Main area -->
+      <div class="d-flex flex-grow-1 min-w-0 overflow-hidden">
+        <!-- Patch manager (left) -->
+        <aside
+          v-if="showPatchManager"
+          class="flex-shrink-0 border-end bg-body-tertiary overflow-y-auto"
+          :class="{ 'opacity-0 border-0 overflow-hidden': !managerOpen }"
+          :style="{
+            width: managerOpen ? '260px' : '0px',
+            transition: 'width 0.25s ease, opacity 0.25s ease',
+          }"
+        >
+          <PatchManager
+            :paperRef="paperRef"
+            :patch="patch"
+            @patch-loaded="handlePatchLoaded"
+          />
+        </aside>
 
-      <!-- Center column : le paper occupe l'espace restant -->
-      <section class="d-flex flex-column flex-grow-1 min-w-0 min-h-0 overflow-hidden">
-        <!-- Paper -->
-        <ModulePaper
-          ref="paperRef"
-          class="flex-grow-1 overflow-hidden"
-          :fill-height="paperFillHeight"
-          :exclude-categories="[
-            ...(allowInterfaceModules ? [] : ['interface']),
-            ...excludeCategories,
-          ]"
-          :exclude-types="excludeTypes"
-          :super-export-enabled="superExportEnabled"
-          :inactive="inactive"
-          @module-selected="handleModuleSelected"
-          @module-removed="handleModuleRemoved"
-          @connection-added="handleConnectionAdded"
-          @connection-removed="handleConnectionRemoved"
-          @module-added="handleModuleAdded"
-          @module-moved="handleModuleMoved"
-          @module-param-copied="handleParamCopied"
-          @request-super-module="handleRequestSuperModule"
-        />
-      </section>
+        <!-- Center column : le paper occupe l'espace restant -->
+        <section class="d-flex flex-column flex-grow-1 min-w-0 min-h-0 overflow-hidden">
+          <!-- Paper -->
+          <ModulePaper
+            ref="paperRef"
+            class="flex-grow-1 overflow-hidden"
+            :fill-height="paperFillHeight"
+            :exclude-categories="[
+              ...(allowInterfaceModules ? [] : ['interface']),
+              ...excludeCategories,
+            ]"
+            :exclude-types="excludeTypes"
+            :super-export-enabled="superExportEnabled"
+            :inactive="inactive"
+            @module-selected="handleModuleSelected"
+            @module-removed="handleModuleRemoved"
+            @connection-added="handleConnectionAdded"
+            @connection-removed="handleConnectionRemoved"
+            @module-added="handleModuleAdded"
+            @module-moved="handleModuleMoved"
+            @module-param-copied="handleParamCopied"
+            @request-super-module="handleRequestSuperModule"
+          />
+        </section>
+      </div>
+
+      <!-- Properties (colonne dédiée : collée à droite, à côté du paper) -->
+      <ModulePropertyPanel
+        v-if="selectedModule()"
+        class="flex-shrink-0 border-start bg-body-tertiary overflow-y-auto"
+        style="width: 600px; max-width: 60%"
+        :module="selectedModule()"
+        @param-changed="handleParamChanged"
+        @label-changed="handleLabelChanged"
+        @edit-synth="(mod) => emit('edit-synth', mod)"
+        @load-synth="(mod) => emit('load-synth', mod)"
+        @load-super-synth="(mod) => emit('load-super-synth', mod)"
+        @save-super-synth="(mod) => emit('save-super-synth', mod)"
+      />
     </div>
-
-    <!-- Properties (colonne dédiée : collée à droite, à côté du paper) -->
-    <ModulePropertyPanel
-      v-if="selectedModule()"
-      class="flex-shrink-0 border-start bg-body-tertiary overflow-y-auto"
-      style="width: 600px; max-width: 60%"
-      :module="selectedModule()"
-      @param-changed="handleParamChanged"
-      @label-changed="handleLabelChanged"
-      @edit-synth="(mod) => emit('edit-synth', mod)"
-      @load-synth="(mod) => emit('load-synth', mod)"
-      @load-super-synth="(mod) => emit('load-super-synth', mod)"
-      @save-super-synth="(mod) => emit('save-super-synth', mod)"
-    />
   </div>
 </template>

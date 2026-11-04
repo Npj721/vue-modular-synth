@@ -148,8 +148,8 @@ async function deleteDef(def) {
 
 <template>
   <div
-    class="d-flex flex-column border rounded overflow-hidden"
-    style="height: calc(100vh - var(--dock-height, 0px))"
+    class="flex-column border rounded overflow-hidden"
+    style="display: flex; height: calc(100vh - var(--dock-height, 0px))"
   >
     <!-- Barre d'action -->
     <header class="d-flex align-items-center flex-wrap gap-2 p-2 bg-body-tertiary border-bottom">
