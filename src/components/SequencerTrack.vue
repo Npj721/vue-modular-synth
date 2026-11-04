@@ -77,35 +77,39 @@ defineExpose({ trigger, steps })
 </script>
 
 <template>
-  <div class="track">
-    <div class="track-head">
-      <span class="track-name">{{ name }}</span>
-      <label class="volume" title="Volume de la piste">
+  <div class="d-flex flex-column gap-2 p-2 border rounded bg-body-tertiary">
+    <div class="d-flex align-items-center gap-2">
+      <span class="fw-bold small">{{ name }}</span>
+      <label class="d-flex align-items-center gap-2 small text-body-secondary ms-3" title="Volume de la piste">
         Vol
         <input
           v-model.number="volume"
+          class="form-range"
+          style="width: 90px"
           type="range"
           min="0"
           max="1"
           step="0.01"
           @input="applyVolume"
         />
-        <span class="volume-value">{{ Math.round(volume * 100) }}%</span>
+        <span class="font-monospace text-end" style="min-width: 40px">{{ Math.round(volume * 100) }}%</span>
       </label>
-      <span class="track-remove"><slot name="remove" /></span>
+      <span class="ms-auto"><slot name="remove" /></span>
     </div>
-    <div class="steps">
+    <div class="d-flex flex-wrap gap-1">
       <div
         v-for="(step, i) in steps"
         :key="i"
-        class="step"
-        :class="{ active: step.active, current: i === currentStep }"
+        class="border rounded d-flex flex-column align-items-center gap-1 p-1 user-select-none"
+        :class="{ 'bg-info text-dark': step.active, 'border-danger': i === currentStep }"
+        :style="{ width: '40px', cursor: 'pointer', boxShadow: i === currentStep ? '0 0 0 2px var(--bs-danger)' : 'none' }"
         @click="step.active = !step.active"
       >
-        <span class="step-label">{{ i }}</span>
+        <span class="small opacity-75">{{ i }}</span>
         <input
           v-model.number="step.note"
-          class="step-note"
+          class="form-control form-control-sm p-0 text-center"
+          style="width: 32px; font-size: 12px"
           type="number"
           min="0"
           max="127"
@@ -115,99 +119,3 @@ defineExpose({ trigger, steps })
     </div>
   </div>
 </template>
-
-<style scoped>
-.track {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  border: 1px solid #ddd;
-  background: #fafafa;
-}
-
-.track-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.track-name {
-  font-weight: bold;
-  font-size: 13px;
-}
-
-.volume {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  opacity: 0.85;
-  margin-left: 12px;
-}
-
-.volume input[type="range"] {
-  width: 90px;
-}
-
-.volume-value {
-  min-width: 40px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.track-remove {
-  margin-left: auto;
-}
-
-.track-remove .remove {
-  border: none;
-  background: #c0392b;
-  color: white;
-  border-radius: 4px;
-  width: 22px;
-  height: 22px;
-  cursor: pointer;
-  line-height: 1;
-}
-
-.steps {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.step {
-  width: 40px;
-  padding: 4px;
-  border: 1px solid #999;
-  background: #f0f0f0;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  user-select: none;
-}
-
-.step.active {
-  background: #00c9a7;
-  color: white;
-}
-
-.step.current {
-  border-color: #ff6b6b;
-  box-shadow: 0 0 0 2px #ff6b6b;
-}
-
-.step-label {
-  font-size: 10px;
-  opacity: 0.6;
-}
-
-.step-note {
-  width: 32px;
-  text-align: center;
-  font-size: 12px;
-}
-</style>

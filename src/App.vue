@@ -71,38 +71,18 @@
 </script>
 
 <template>
-  <div class="app" :style="{ '--dock-height': dockHeight + 'px' }">
-    <div class="app-main" :style="{ paddingBottom: dockHeight + 'px' }">
+  <div class="app min-vh-100" :style="{ '--dock-height': dockHeight + 'px' }">
+    <div class="app-main min-vh-100" :style="{ paddingBottom: dockHeight + 'px' }">
       <SynthPatchEditor :patch="synthPatch" />
       <MultiTrackSequencer :patch="synthPatch" />
     </div>
 
-    <div class="bottom-dock" ref="dock">
+    <div
+      ref="dock"
+      class="bottom-dock position-fixed bottom-0 start-0 end-0 z-3 d-flex flex-column bg-body-tertiary border-top shadow"
+    >
       <AudioVisualizer v-show="showVisualizer" />
       <SynthKeyboard v-show="showKeyboard" :patch="synthPatch" />
     </div>
   </div>
 </template>
-
-<style scoped>
-.app {
-  min-height: 100vh;
-}
-
-.app-main {
-  min-height: 100vh;
-}
-
-.bottom-dock {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  background: #0b0f0d;
-  border-top: 1px solid #1e3a30;
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.45);
-}
-</style>

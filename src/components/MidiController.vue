@@ -22,96 +22,35 @@ const statusText = computed(() => {
 </script>
 
 <template>
-  <div class="midi-controller">
-    <div class="midi-controls">
+  <div class="d-flex flex-column gap-2 p-2 border rounded bg-body-tertiary small">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
       <button
-        class="midi-btn request"
+        class="btn btn-sm fw-bold"
+        :class="midiState.requested ? 'btn-outline-dark' : 'btn-primary'"
         :disabled="midiState.requested || !midiState.supported"
         @click="requestMidiAccess"
       >{{ midiState.requested ? "MIDI activé" : "Activer MIDI" }}</button>
 
-      <span class="midi-status" :class="{ ok: midiState.devices.length > 0 }">
+      <span class="small" :class="midiState.devices.length > 0 ? 'text-success-emphasis' : 'text-body-secondary'">
         {{ statusText }}
       </span>
     </div>
 
-    <div v-if="midiState.error" class="midi-error">{{ midiState.error }}</div>
-    <p v-else-if="!midiState.supported" class="midi-hint">
+    <div v-if="midiState.error" class="alert alert-danger py-1 px-2 small mb-0">{{ midiState.error }}</div>
+    <p v-else-if="!midiState.supported" class="form-text mb-0">
       Le Web MIDI API n'est pas disponible dans ce navigateur. Utilisez Chrome
       ou Edge.
     </p>
-    <p v-else-if="!midiState.requested" class="midi-hint">
+    <p v-else-if="!midiState.requested" class="form-text mb-0">
       Activez MIDI pour pouvoir jouer avec votre piano / clavier MIDI.
     </p>
-    <ul v-else-if="midiState.devices.length" class="midi-devices">
+    <ul v-else-if="midiState.devices.length" class="mb-0 ps-3 small text-body-secondary">
       <li v-for="d in midiState.devices" :key="d.id">
         {{ d.name }}<span v-if="d.manufacturer"> ({{ d.manufacturer }})</span>
       </li>
     </ul>
-    <p v-else class="midi-hint">
+    <p v-else class="form-text mb-0">
       Aucun appareil détecté. Branchez un clavier MIDI puis rouvrez ce panneau.
     </p>
   </div>
 </template>
-
-<style scoped>
-.midi-controller {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background: #fafafa;
-  font-size: 13px;
-}
-.midi-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-.midi-btn {
-  padding: 6px 14px;
-  border: 1px solid #999;
-  border-radius: 4px;
-  cursor: pointer;
-  background: #eee;
-  color: #333;
-  font-weight: bold;
-}
-.midi-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.midi-btn.request {
-  background: #4d96ff;
-  color: white;
-  border-color: #2c7be5;
-}
-.midi-btn.request:disabled {
-  background: #8bb8ff;
-}
-.midi-status {
-  color: #888;
-  font-size: 12px;
-}
-.midi-status.ok {
-  color: #00a86b;
-}
-.midi-devices {
-  margin: 0;
-  padding-left: 18px;
-  color: #555;
-  font-size: 12px;
-}
-.midi-error {
-  color: #c0392b;
-  font-size: 12px;
-}
-.midi-hint {
-  color: #888;
-  font-size: 12px;
-  margin: 0;
-}
-</style>

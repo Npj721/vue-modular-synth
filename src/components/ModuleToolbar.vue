@@ -63,19 +63,19 @@ const handleAddModule = (type) => {
 </script>
 
 <template>
-  <div class="toolbar">
+  <div class="d-flex align-items-center gap-3 flex-wrap mb-2">
     <div
       v-for="(group, gi) in groups"
       :key="group.category"
-      class="toolbar-group"
+      class="d-flex align-items-center gap-2"
     >
-      <span v-if="gi > 0" class="toolbar-separator"></span>
-      <span class="toolbar-category">{{ group.label }}</span>
+      <span v-if="gi > 0" class="vr mx-1"></span>
+      <span class="text-uppercase small text-body-secondary" style="letter-spacing: 0.5px">{{ group.label }}</span>
       <button
         v-for="mod in group.modules"
         :key="mod.type"
-        :style="{ backgroundColor: mod.color }"
-        class="toolbar-button"
+        :style="{ backgroundColor: mod.color, color: '#fff' }"
+        class="btn btn-sm border-0 fw-bold"
         @click="handleAddModule(mod.type)"
       >
         {{ mod.label }}
@@ -83,47 +83,3 @@ const handleAddModule = (type) => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.toolbar-separator {
-  width: 1px;
-  height: 22px;
-  background: #bbb;
-  margin-right: 4px;
-}
-
-.toolbar-category {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #666;
-}
-
-.toolbar-button {
-  padding: 6px 12px;
-  border: none;
-  color: white;
-  font-weight: bold;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: transform 0.1s;
-}
-
-.toolbar-button:hover {
-  transform: scale(1.05);
-}
-</style>

@@ -216,49 +216,57 @@ const openModal = () => {
 </script>
 
 <template>
-  <div class="synth-patch-bank">
-    <span class="spb-title">SynthPatch</span>
+  <div class="d-flex align-items-center flex-wrap gap-2 px-3 py-2 border-bottom bg-body-tertiary">
+    <span class="fw-bold me-1">SynthPatch</span>
 
-    <button class="spb-btn" :disabled="!selected" @click="savePatch">
+    <button class="btn btn-sm btn-outline-dark" :disabled="!selected" @click="savePatch">
       Enregistrer
     </button>
-    <button class="spb-btn" @click="savePatchAs">Enregistrer sous</button>
+    <button class="btn btn-sm btn-outline-dark" @click="savePatchAs">Enregistrer sous</button>
 
     <button
-      class="spb-btn spb-nav"
+      class="btn btn-sm btn-outline-dark"
       :disabled="!available.length"
       @click="cyclePatch(-1)"
     >◀</button>
-    <button class="spb-btn spb-select" @click="openModal">
+    <button class="btn btn-sm btn-outline-dark text-start" style="min-width: 220px" @click="openModal">
       {{ selected || "— Sélectionner un SynthPatch —" }}
     </button>
     <button
-      class="spb-btn spb-nav"
+      class="btn btn-sm btn-outline-dark"
       :disabled="!available.length"
       @click="cyclePatch(1)"
     >▶</button>
 
-    <button class="spb-btn" @click="exportFile">Exporter</button>
-    <label class="spb-btn spb-import">
+    <button class="btn btn-sm btn-outline-dark" @click="exportFile">Exporter</button>
+    <label class="btn btn-sm btn-outline-dark mb-0">
       Importer
       <input type="file" accept=".json" hidden @change="importFile" />
     </label>
   </div>
 
-  <div v-if="modalOpen" class="spb-modal" @click.self="modalOpen = false">
-    <div class="spb-modal-box">
-      <div class="spb-modal-head">
+  <div
+    v-if="modalOpen"
+    class="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+    style="z-index: 5000; background: rgba(0, 0, 0, 0.45)"
+    @click.self="modalOpen = false"
+  >
+    <div
+      class="d-flex flex-column gap-2 p-3 bg-body rounded-3 shadow-lg"
+      style="width: min(560px, 92vw); max-height: 80vh"
+    >
+      <div class="d-flex align-items-center justify-content-between fw-bold">
         <span>Liste des SynthPatches</span>
-        <button class="spb-btn" @click="modalOpen = false">✕</button>
+        <button class="btn-close" type="button" aria-label="Fermer" @click="modalOpen = false"></button>
       </div>
       <input
         v-model="filter"
-        class="spb-search"
+        class="form-control form-control-sm"
         type="text"
         placeholder="Filtrer"
       />
-      <div class="spb-table-wrap">
-        <table class="spb-table">
+      <div class="overflow-auto">
+        <table class="table table-sm table-hover align-middle mb-0">
           <thead>
             <tr>
               <th>Nom</th>
@@ -266,22 +274,23 @@ const openModal = () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!available.length" class="spb-empty">
-              <td colspan="2">Aucun SynthPatch enregistré</td>
+            <tr v-if="!available.length">
+              <td colspan="2" class="text-center text-body-secondary">Aucun SynthPatch enregistré</td>
             </tr>
-            <tr v-else-if="!filtered.length" class="spb-empty">
-              <td colspan="2">Aucun résultat pour « {{ filter }} »</td>
+            <tr v-else-if="!filtered.length">
+              <td colspan="2" class="text-center text-body-secondary">Aucun résultat pour « {{ filter }} »</td>
             </tr>
             <tr
               v-for="name in filtered"
               :key="name"
-              :class="{ current: name === selected }"
+              :class="{ 'table-primary': name === selected }"
+              style="cursor: pointer"
               @click="selectPatch(name)"
             >
-              <td class="spb-name-cell">{{ name }}</td>
+              <td class="fw-semibold">{{ name }}</td>
               <td>
                 <button
-                  class="spb-del"
+                  class="btn btn-sm btn-link text-danger-emphasis p-0 border-0"
                   title="Supprimer ce SynthPatch"
                   @click.stop="deletePatch(name)"
                 >✕</button>
@@ -293,124 +302,3 @@ const openModal = () => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.synth-patch-bank {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 8px 12px;
-  border-bottom: 1px solid #ddd;
-  background: #f7f7f7;
-}
-
-.spb-title {
-  font-weight: 700;
-  color: #333;
-  margin-right: 4px;
-}
-
-.spb-btn {
-  padding: 5px 10px;
-  border: 1px solid #bbb;
-  border-radius: 4px;
-  background: #fff;
-  color: #333;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.spb-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.spb-select {
-  min-width: 220px;
-  text-align: left;
-}
-
-.spb-import {
-  display: inline-flex;
-  align-items: center;
-}
-
-.spb-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 5000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-}
-
-.spb-modal-box {
-  width: min(560px, 92vw);
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-}
-
-.spb-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-weight: 700;
-}
-
-.spb-search {
-  padding: 6px 9px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-}
-
-.spb-table-wrap {
-  overflow: auto;
-}
-
-.spb-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.spb-table th,
-.spb-table td {
-  padding: 6px 8px;
-  border-bottom: 1px solid #eee;
-  text-align: left;
-}
-
-.spb-table tbody tr {
-  cursor: pointer;
-}
-
-.spb-table tbody tr:hover,
-.spb-table tbody tr.current {
-  background: #eef7f4;
-}
-
-.spb-name-cell {
-  font-weight: 600;
-}
-
-.spb-empty {
-  color: #888;
-  text-align: center;
-}
-
-.spb-del {
-  border: none;
-  background: transparent;
-  color: #c0392b;
-  cursor: pointer;
-  font-size: 14px;
-}
-</style>

@@ -224,41 +224,48 @@ const importFile = async (e) => {
 </script>
 
 <template>
-  <div class="synth-patch-manager">
-    <span class="spm-title">synthéthiseur complet</span>
-    <button class="spm-btn" :disabled="!hasVoiceModules || !selected" @click="savePatch">Enregistrer</button>
-    <button class="spm-btn" :disabled="!hasVoiceModules" @click="savePatchAs">Enregistrer sous</button>
-    
+  <div class="d-flex align-items-center flex-wrap gap-2 px-3 py-2 border-bottom bg-body-tertiary">
+    <span class="fw-bold text-uppercase text-primary-emphasis me-1" style="letter-spacing: 1px">synthéthiseur complet</span>
+    <button class="btn btn-sm btn-outline-dark" :disabled="!hasVoiceModules || !selected" @click="savePatch">Enregistrer</button>
+    <button class="btn btn-sm btn-outline-dark" :disabled="!hasVoiceModules" @click="savePatchAs">Enregistrer sous</button>
 
-    <button class="spm-btn spm-nav" :disabled="!availableSynths.length" @click="cycleSynth(-1)">◀</button>
-    <button class="spm-btn spm-select" @click="openModal">
+    <button class="btn btn-sm btn-outline-dark" :disabled="!availableSynths.length" @click="cycleSynth(-1)">◀</button>
+    <button class="btn btn-sm btn-outline-dark text-start" style="min-width: 180px" @click="openModal">
       {{ selected || "— Sélectionner synthéthiseur —" }}
     </button>
-    <button class="spm-btn spm-nav" :disabled="!availableSynths.length" @click="cycleSynth(1)">▶</button>
-    <button v-if="hasVoiceModules" class="spm-btn" @click="exportFile">Exporter</button>
-    <button v-if="false" class="spm-btn" :disabled="!selected" @click="loadSelected">Recharger</button>
-    <button v-if="false" class="spm-btn danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
-    <div class="spm-midi-sep"></div>
+    <button class="btn btn-sm btn-outline-dark" :disabled="!availableSynths.length" @click="cycleSynth(1)">▶</button>
+    <button v-if="hasVoiceModules" class="btn btn-sm btn-outline-dark" @click="exportFile">Exporter</button>
+    <button v-if="false" class="btn btn-sm btn-outline-dark" :disabled="!selected" @click="loadSelected">Recharger</button>
+    <button v-if="false" class="btn btn-sm btn-danger" :disabled="!selected" @click="deletePatch">Supprimer</button>
   </div>
 
-  <div v-if="modalOpen" class="spm-modal" @click.self="modalOpen = false">
-    <div class="spm-modal-box">
-      <div class="spm-modal-head">
-        <label class="spm-import">
+  <div
+    v-if="modalOpen"
+    class="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+    style="z-index: 1000; background: rgba(0, 0, 0, 0.55)"
+    @click.self="modalOpen = false"
+  >
+    <div
+      class="d-flex flex-column bg-body border rounded-3 shadow-lg overflow-hidden"
+      style="width: auto; min-width: 80vw; max-width: 85vw; height: fit-content; min-height: 80vh; max-height: 85vh"
+    >
+      <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom fw-bold">
+        <label class="btn btn-sm btn-outline-dark mb-0">
           Importer
           <input type="file" accept=".json" hidden @change="importFile" />
         </label>
         <span>Liste des synthéthiseurs</span>
-        <button class="spm-btn" @click="modalOpen = false">✕</button>
+        <button class="btn-close" type="button" aria-label="Fermer" @click="modalOpen = false"></button>
       </div>
       <input
         v-model="filter"
-        class="spm-search"
+        class="form-control form-control-sm mx-3 my-2"
+        style="width: auto"
         type="text"
         placeholder="Filtrer"
       />
-      <div class="spm-table-wrap">
-<table class="spm-table">
+      <div class="overflow-auto" style="max-height: 60%">
+        <table class="table table-sm table-hover align-middle mb-0">
           <thead>
             <tr>
               <th>Nom</th>
@@ -266,22 +273,23 @@ const importFile = async (e) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!availableSynths.length" class="spm-empty">
-              <td colspan="2">Aucun synthé enregistré</td>
+            <tr v-if="!availableSynths.length">
+              <td colspan="2" class="text-center text-body-secondary">Aucun synthé enregistré</td>
             </tr>
-            <tr v-else-if="!filteredSynths.length" class="spm-empty">
-              <td colspan="2">Aucun résultat pour « {{ filter }} »</td>
+            <tr v-else-if="!filteredSynths.length">
+              <td colspan="2" class="text-center text-body-secondary">Aucun résultat pour « {{ filter }} »</td>
             </tr>
             <tr
               v-for="name in filteredSynths"
               :key="name"
-              :class="{ current: name === selected }"
+              :class="{ 'table-primary': name === selected }"
+              style="cursor: pointer"
               @click="selectSynth(name)"
             >
-              <td class="spm-name-cell">{{ name }}</td>
+              <td class="text-truncate fw-semibold" style="max-width: 0">{{ name }}</td>
               <td>
                 <button
-                  class="spm-del"
+                  class="btn btn-sm btn-link text-danger-emphasis p-0 border-0"
                   title="Supprimer ce synthé"
                   @click.stop="deleteSynth(name)"
                 >✕</button>
@@ -293,236 +301,3 @@ const importFile = async (e) => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.synth-patch-manager {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 12px;
-  background: #12332b;
-  border-bottom: 1px solid #0b3a2f;
-  color: #cfd8d4;
-  font-size: 13px;
-}
-.spm-title {
-  font-weight: bold;
-  color: #00ffd0;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-right: 4px;
-}
-
-.spm-midi-sep {
-  width: 1px;
-  align-self: stretch;
-  background: rgba(255, 255, 255, 0.15);
-  margin: 0 2px;
-}
-.synth-patch-manager :deep(.midi-controller) {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  padding: 2px 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-}
-.synth-patch-manager :deep(.midi-hint),
-.synth-patch-manager :deep(.midi-error),
-.synth-patch-manager :deep(.midi-devices) {
-  display: none;
-}
-.synth-patch-manager :deep(.midi-status) {
-  color: #8fb3a8;
-  font-size: 12px;
-}
-.synth-patch-manager :deep(.midi-status.ok) {
-  color: #00ffd0;
-}
-.synth-patch-manager :deep(.midi-btn) {
-  padding: 3px 10px;
-  border: 1px solid #2c5a4c;
-  border-radius: 4px;
-  background: #174035;
-  color: #cfd8d4;
-}
-.synth-patch-manager :deep(.midi-btn:disabled) {
-  opacity: 0.6;
-  cursor: default;
-}
-.synth-patch-manager :deep(.midi-btn.request) {
-  background: #0e7a60;
-  border-color: #0a5a46;
-  color: white;
-}
-.synth-patch-manager :deep(.midi-btn.request:disabled) {
-  background: #1d4d40;
-}
-.spm-name,
-.spm-select {
-  padding: 4px 6px;
-  border: 1px solid #2c5a4c;
-  border-radius: 4px;
-  background: #0b211a;
-  color: #d6e7e0;
-}
-.spm-select {
-  min-width: 180px;
-}
-.spm-btn {
-  padding: 4px 12px;
-  border: 1px solid #2c5a4c;
-  border-radius: 4px;
-  background: #174035;
-  color: #d6e7e0;
-  cursor: pointer;
-  font-weight: bold;
-}
-.spm-btn:hover:not(:disabled) {
-  background: #1f5547;
-  border-color: #00ffd0;
-}
-.spm-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.spm-btn.danger {
-  background: #4a1f1f;
-  border-color: #7a3a3a;
-}
-.spm-btn.danger:hover:not(:disabled) {
-  background: #662b2b;
-}
-.spm-import {
-  padding: 4px 12px;
-  border: 1px solid #2c5a4c;
-  border-radius: 4px;
-  background: #174035;
-  color: #d6e7e0;
-  cursor: pointer;
-  font-weight: bold;
-}
-.spm-import:hover {
-  background: #1f5547;
-  border-color: #00ffd0;
-}
-.spm-select {
-  min-width: 180px;
-  text-align: left;
-  cursor: pointer;
-}
-.spm-nav {
-  width: 28px;
-  padding: 4px 0;
-  text-align: center;
-}
-.spm-modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.spm-modal-box {
-  width: auto;
-  min-width: 80vw;
-  max-width: 85vw;
-  height: fit-content;
-  min-height: 80vh;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  background: #0e2b22;
-  border: 1px solid #2c5a4c;
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  overflow: hidden;
-}
-.spm-modal-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid #2c5a4c;
-  color: #00ffd0;
-  font-weight: bold;
-}
-.spm-search {
-  margin: 8px 12px;
-  padding: 4px 8px;
-  border: 1px solid #2c5a4c;
-  border-radius: 4px;
-  background: #0b211a;
-  color: #d6e7e0;
-  font-size: 12px;
-}
-.spm-table-wrap {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 60%;
-  overflow-y: auto;
-}
-.spm-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.spm-table th {
-  color: #6fa08f;
-  font-size: 11px;
-  font-weight: normal;
-  text-align: left;
-  padding: 6px 12px;
-  border-bottom: 1px solid #1f4538;
-}
-.spm-table td {
-  padding: 8px 12px;
-  cursor: pointer;
-  color: #d6e7e0;
-  border-bottom: 1px solid #1f4538;
-}
-.spm-name-cell {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 0;
-}
-.spm-del {
-  width: 24px;
-  height: 22px;
-  line-height: 1;
-  padding: 0;
-  font-size: 12px;
-  background: #4a1f1f;
-  color: #f0b6b6;
-  border: 1px solid #7a3a3a;
-  border-radius: 3px;
-  cursor: pointer;
-}
-.spm-del:hover {
-  background: #662b2b;
-}
-.spm-table tr:hover td {
-  background: #174035;
-  color: #00ffd0;
-}
-.spm-table tr.current td {
-  background: #00ffd0;
-  color: #0b211a;
-  font-weight: bold;
-}
-.spm-table tr.spm-empty {
-  cursor: default;
-}
-.spm-table tr.spm-empty td {
-  color: #6fa08f;
-}
-.spm-table tr.spm-empty:hover td {
-  background: transparent;
-  color: #6fa08f;
-}
-</style>

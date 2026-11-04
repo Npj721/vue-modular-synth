@@ -413,12 +413,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="audio-visualizer">
-    <div class="viz-toolbar">
-      <span class="viz-title">Visualisation de la sortie</span>
+  <div class="audio-visualizer p-2 bg-body-tertiary border-top">
+    <div class="d-flex align-items-center justify-content-between gap-2 mb-2 flex-wrap">
+      <span class="fw-bold">Visualisation de la sortie</span>
       <button
-        class="viz-toggle"
-        :class="{ active: notePreviewEnabled }"
+        class="btn btn-sm"
+        :class="notePreviewEnabled ? 'btn-primary' : 'btn-outline-dark'"
         type="button"
         :aria-pressed="notePreviewEnabled"
         @click="notePreviewEnabled = !notePreviewEnabled"
@@ -426,116 +426,42 @@ onUnmounted(() => {
         Note jouée : {{ notePreviewEnabled ? "activée" : "désactivée" }}
       </button>
     </div>
-    <div v-if="debug" class="viz-debug">{{ debugState }}</div>
-    <div v-if="notePreviewEnabled" class="viz-note-panel">
-      <span class="viz-label">Note jouée</span>
-      <span class="viz-note-name">{{ noteLabel }}</span>
-      <span v-if="noteCents != null" class="viz-note-cents">
+    <div v-if="debug" class="font-monospace small text-warning-emphasis mb-2 text-wrap">{{ debugState }}</div>
+    <div
+      v-if="notePreviewEnabled"
+      class="d-flex align-items-baseline gap-2 mb-2 p-2 rounded border bg-body-secondary"
+    >
+      <span class="small text-uppercase text-body-secondary">Note jouée</span>
+      <span class="fs-4 fw-bold font-monospace">{{ noteLabel }}</span>
+      <span v-if="noteCents != null" class="font-monospace small text-body-secondary">
         {{ noteCents > 0 ? "+" : "" }}{{ noteCents }}¢
       </span>
     </div>
-    <div class="viz-grid">
-      <div class="viz-panel">
-        <div class="viz-label">Oscilloscope</div>
-        <canvas ref="oscCanvas" class="viz-canvas" :style="{ height: OSC_HEIGHT + 'px' }"></canvas>
+    <div class="row g-2">
+      <div class="col-12 col-xl-4">
+        <div class="small text-uppercase text-body-secondary mb-1">Oscilloscope</div>
+        <canvas
+          ref="oscCanvas"
+          class="d-block w-100 rounded border bg-dark"
+          :style="{ height: OSC_HEIGHT + 'px' }"
+        ></canvas>
       </div>
-      <div class="viz-panel">
-        <div class="viz-label">Spectre</div>
-        <canvas ref="spectrumCanvas" class="viz-canvas" :style="{ height: SPECTRUM_HEIGHT + 'px' }"></canvas>
+      <div class="col-12 col-xl-4">
+        <div class="small text-uppercase text-body-secondary mb-1">Spectre</div>
+        <canvas
+          ref="spectrumCanvas"
+          class="d-block w-100 rounded border bg-dark"
+          :style="{ height: SPECTRUM_HEIGHT + 'px' }"
+        ></canvas>
       </div>
-      <div class="viz-panel">
-        <div class="viz-label">Spectrogramme</div>
-        <canvas ref="specCanvas" class="viz-canvas" :style="{ height: SPEC_HEIGHT + 'px' }"></canvas>
+      <div class="col-12 col-xl-4">
+        <div class="small text-uppercase text-body-secondary mb-1">Spectrogramme</div>
+        <canvas
+          ref="specCanvas"
+          class="d-block w-100 rounded border bg-dark"
+          :style="{ height: SPEC_HEIGHT + 'px' }"
+        ></canvas>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.audio-visualizer {
-  background: #0c1410;
-  color: #cfd8d4;
-}
-.viz-title {
-  font-weight: bold;
-  color: #00ffd0;
-}
-.viz-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.viz-toggle {
-  background: #04120e;
-  color: #7ad4c0;
-  border: 1px solid #1e3a30;
-  border-radius: 4px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-.viz-toggle:hover {
-  border-color: #00ffd0;
-}
-.viz-toggle.active {
-  background: #0a2b22;
-  border-color: #00ffd0;
-  color: #00ffd0;
-}
-.viz-debug {
-  font-family: monospace;
-  font-size: 11px;
-  color: #ffb000;
-  margin-bottom: 6px;
-  white-space: pre-wrap;
-}
-.viz-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.viz-panel {
-  flex: 1 1 280px;
-  min-width: 260px;
-}
-.viz-note-panel {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 6px;
-  background: #04120e;
-  border: 1px solid #1e3a30;
-  border-radius: 4px;
-  padding: 6px 10px;
-}
-.viz-note-name {
-  font-size: 22px;
-  font-weight: bold;
-  font-family: monospace;
-  color: #00ffd0;
-  min-width: 64px;
-}
-.viz-note-cents {
-  font-family: monospace;
-  font-size: 12px;
-  color: #7ad4c0;
-}
-.viz-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 4px;
-  color: #7ad4c0;
-}
-.viz-canvas {
-  display: block;
-  width: 100%;
-  background: #04120e;
-  border: 1px solid #1e3a30;
-  border-radius: 4px;
-}
-</style>

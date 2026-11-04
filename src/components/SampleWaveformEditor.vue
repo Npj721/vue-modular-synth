@@ -270,102 +270,28 @@ const fmtSec = (ms) => `${(ms / 1000).toFixed(2)} s`
 </script>
 
 <template>
-  <div class="waveform-editor">
+  <div class="d-flex flex-column gap-2 w-100">
     <canvas
       ref="canvasRef"
-      class="waveform-canvas"
-      :style="{ height: HEIGHT + 'px' }"
+      class="border rounded w-100 d-block"
+      :style="{ height: HEIGHT + 'px', cursor: 'ew-resize', touchAction: 'none' }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
     ></canvas>
 
-    <div class="waveform-info" v-if="hasBuffer">
-      <span class="waveform-duration">
+    <div class="d-flex flex-wrap align-items-center gap-2 small text-body-secondary" v-if="hasBuffer">
+      <span class="d-inline-flex align-items-baseline gap-1 px-2 py-1 bg-success-subtle border border-success rounded small text-success-emphasis">
         Durée du son
-        <b>{{ fmtMs(playedMs) }}</b>
-        <i>({{ fmtSec(playedMs) }})</i>
-        <em v-if="hasRegion">de {{ fmtMs(startMs) }} à {{ fmtMs(endMs) }}</em>
-        <em v-else>fichier entier</em>
+        <b class="font-monospace fs-6 text-success-emphasis">{{ fmtMs(playedMs) }}</b>
+        <i class="fst-normal">{{ fmtSec(playedMs) }}</i>
+        <em v-if="hasRegion" class="fst-normal text-body">de {{ fmtMs(startMs) }} à {{ fmtMs(endMs) }}</em>
+        <em v-else class="fst-normal text-body">fichier entier</em>
       </span>
-      <span class="waveform-pos">début {{ fmtMs(startMs) }}</span>
-      <span class="waveform-pos">fin {{ fmtMs(endMs) }}</span>
-      <button class="waveform-reset" title="Lecture complète du fichier" @click="setFull">↺ complet</button>
+      <span class="font-monospace">début {{ fmtMs(startMs) }}</span>
+      <span class="font-monospace">fin {{ fmtMs(endMs) }}</span>
+      <button class="btn btn-sm btn-outline-dark ms-auto" title="Lecture complète du fichier" @click="setFull">↺ complet</button>
     </div>
   </div>
 </template>
-
-<style scoped>
-.waveform-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
-
-.waveform-canvas {
-  width: 100%;
-  border: 1px solid #3a4150;
-  border-radius: 4px;
-  cursor: ew-resize;
-  display: block;
-  touch-action: none;
-}
-
-.waveform-info {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  font-size: 11px;
-  color: #888;
-}
-
-.waveform-pos {
-  font-family: monospace;
-}
-
-.waveform-duration {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 3px 8px;
-  background: rgba(46, 139, 87, 0.12);
-  border: 1px solid rgba(46, 139, 87, 0.4);
-  border-radius: 4px;
-  font-size: 12px;
-  color: #cde3d8;
-}
-
-.waveform-duration b {
-  font-family: monospace;
-  font-size: 14px;
-  color: #4ade80;
-}
-
-.waveform-duration i {
-  font-style: normal;
-  color: #6b9a7f;
-}
-
-.waveform-duration em {
-  font-style: normal;
-  color: #e2e8f0;
-}
-
-.waveform-reset {
-  margin-left: auto;
-  border: 1px solid #3a4150;
-  background: none;
-  color: #9aa7b5;
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 2px 6px;
-  cursor: pointer;
-}
-.waveform-reset:hover {
-  color: #e2e8f0;
-  border-color: #64748b;
-}
-</style>

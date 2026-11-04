@@ -331,58 +331,58 @@ const handleLoad = async (loaded) => {
 </script>
 
 <template>
-  <div class="syntp-root">
+  <div class="d-flex flex-column min-h-0">
     <SynthPatchBank
       v-if="!nested"
       :patch="props.patch"
       @load="handleLoad"
     />
 
-    <div class="syntp-toolbar">
-      <span v-if="nested" class="syntp-title">
+    <div class="d-flex align-items-center flex-wrap gap-2 px-3 py-2 border-bottom bg-body-tertiary">
+      <span v-if="nested" class="fw-bold text-primary-emphasis me-2">
         SuperSynth : {{ props.patch.name || "sans nom" }}
       </span>
 
       <button
-        class="syntp-btn"
-        :class="{ actif: tab === 'voice' }"
+        class="btn btn-sm"
+        :class="tab === 'voice' ? 'btn-primary' : 'btn-outline-dark'"
         @click="tab = 'voice'"
       >SynthPatch Voice</button>
       <button
-        class="syntp-btn"
-        :class="{ actif: tab === 'main' }"
+        class="btn btn-sm"
+        :class="tab === 'main' ? 'btn-primary' : 'btn-outline-dark'"
         @click="tab = 'main'"
       >SynthPatch Main</button>
 
-      <span class="syntp-sep"></span>
+      <span class="vr mx-1"></span>
 
       <button
         v-if="!nested"
-        class="syntp-btn syntp-btn-super"
+        class="btn btn-sm btn-outline-primary fw-bold"
         @click="createSuperSynth"
       >Créer un SuperSynth</button>
 
-      <button class="syntp-btn" @click="showVisualizer = !showVisualizer">
+      <button class="btn btn-sm btn-outline-dark" @click="showVisualizer = !showVisualizer">
         {{ showVisualizer ? "◀ Spectrum" : "▶ Spectrum" }}
       </button>
-      <button class="syntp-btn" @click="showKeyboard = !showKeyboard">
+      <button class="btn btn-sm btn-outline-dark" @click="showKeyboard = !showKeyboard">
         {{ showKeyboard ? "◀ Keyboard" : "▶ Keyboard" }}
       </button>
 
       <button
         v-if="closeable"
-        class="syntp-btn syntp-btn-close"
+        class="btn btn-sm btn-dark ms-auto"
         type="button"
         @click="emit('close')"
       >✕ Fermer</button>
     </div>
 
-    <div class="syntp-synth-strip">
-      <span class="syntp-strip-label">Synths :</span>
+    <div class="d-flex align-items-center flex-wrap gap-2 px-3 py-2 border-bottom bg-body-tertiary">
+      <span class="small fw-bold text-primary-emphasis">Synths :</span>
       <button
         v-for="s in synthModules"
         :key="s.id"
-        class="syntp-synth-btn"
+        class="btn btn-sm btn-outline-primary rounded-pill"
         @click="openSynth(s.id)"
       >
         {{ s.name }}
@@ -390,28 +390,28 @@ const handleLoad = async (loaded) => {
       <button
         v-for="s in superModules"
         :key="s.id"
-        class="syntp-synth-btn syntp-super-btn"
+        class="btn btn-sm btn-primary rounded-pill"
         @click="openSuper(s.module)"
       >
         ★ {{ s.name }}
       </button>
       <span
         v-if="!synthModules.length && !superModules.length"
-        class="syntp-empty"
+        class="small text-body-secondary"
       >
         aucun — ajoutez un module « Synth » ou « SuperSynth » via le menu contextuel
       </span>
 
-      <span class="syntp-sep"></span>
-      <span class="syntp-strip-label">Banque :</span>
-      <select v-model="selectedBankSynth" class="syntp-bank-select">
+      <span class="vr mx-1"></span>
+      <span class="small fw-bold text-primary-emphasis">Banque :</span>
+      <select v-model="selectedBankSynth" class="form-select form-select-sm" style="min-width: 150px; width: auto">
         <option value="">— choisir —</option>
         <option v-for="n in synthBankNames" :key="n" :value="n">
           {{ n }}
         </option>
       </select>
       <button
-        class="syntp-btn syntp-btn-bank"
+        class="btn btn-sm btn-outline-success"
         :disabled="!selectedBankSynth"
         @click="addSynthFromBank"
       >
@@ -419,7 +419,7 @@ const handleLoad = async (loaded) => {
       </button>
     </div>
 
-    <div class="syntp-editors">
+    <div class="position-relative flex-grow-1 min-h-0">
       <PatchEditor
         ref="voiceEditor"
         v-show="tab === 'voice'"
@@ -450,8 +450,12 @@ const handleLoad = async (loaded) => {
     </div>
 
     <!-- Éditeur d'un nœud Synth -->
-    <div v-if="synthModalOpen && selectedSynth" class="syntp-modal">
-      <div class="syntp-modal-inner">
+    <div
+      v-if="synthModalOpen && selectedSynth"
+      class="position-fixed top-0 start-0 w-100 h-100 bg-body overflow-auto"
+      style="z-index: 4000"
+    >
+      <div class="min-vh-100 bg-body">
         <SynthEditor
           :patch="selectedSynth"
           :synth="selectedSynth"
@@ -465,9 +469,10 @@ const handleLoad = async (loaded) => {
     <!-- Éditeur récursif d'un nœud SuperSynth -->
     <div
       v-if="superModalOpen && editingSuperPatch"
-      class="syntp-modal syntp-super-modal"
+      class="position-fixed top-0 start-0 w-100 h-100 bg-body overflow-auto"
+      style="z-index: 4100"
     >
-      <div class="syntp-modal-inner">
+      <div class="min-vh-100 bg-body">
         <SynthPatchEditor
           :key="editingSuperModule?.id"
           :patch="editingSuperPatch"
@@ -479,161 +484,3 @@ const handleLoad = async (loaded) => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.syntp-root {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.syntp-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 8px 12px;
-  border-bottom: 1px solid #ddd;
-  background: #fafafa;
-}
-
-.syntp-title {
-  font-weight: 700;
-  color: #5b2c6f;
-  margin-right: 6px;
-}
-
-.syntp-btn {
-  padding: 6px 12px;
-  border: 1px solid #bbb;
-  border-radius: 4px;
-  background: #fff;
-  color: #333;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.syntp-btn.actif {
-  background: #017a66;
-  border-color: #017a66;
-  color: #fff;
-}
-
-.syntp-btn-super {
-  border-color: #8e44ad;
-  color: #6c3483;
-}
-
-.syntp-btn-super:hover {
-  background: #8e44ad;
-  color: #fff;
-}
-
-.syntp-btn-close {
-  margin-left: auto;
-  background: #444;
-  border-color: #444;
-  color: #fff;
-}
-
-.syntp-sep {
-  width: 1px;
-  height: 22px;
-  background: #ddd;
-  margin: 0 4px;
-}
-
-.syntp-synth-strip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 6px 12px;
-  border-bottom: 1px solid #eee;
-  background: #f8f3fc;
-}
-
-.syntp-strip-label {
-  font-weight: 700;
-  font-size: 12px;
-  color: #6c3483;
-  margin-right: 2px;
-}
-
-.syntp-synth-btn {
-  padding: 4px 10px;
-  border: 1px solid #8e44ad;
-  border-radius: 999px;
-  background: #fff;
-  color: #6c3483;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.syntp-synth-btn:hover {
-  background: #8e44ad;
-  color: #fff;
-}
-
-.syntp-super-btn {
-  border-color: #6c3483;
-  background: #f0e6f7;
-}
-
-.syntp-empty {
-  font-size: 12px;
-  color: #888;
-}
-
-.syntp-bank-select {
-  padding: 4px 8px;
-  border: 1px solid #bbb;
-  border-radius: 4px;
-  background: #fff;
-  color: #333;
-  font-size: 12px;
-  min-width: 150px;
-}
-
-.syntp-btn-bank {
-  padding: 4px 10px;
-  font-size: 12px;
-  border-color: #017a66;
-  color: #017a66;
-}
-
-.syntp-btn-bank:hover:not(:disabled) {
-  background: #017a66;
-  color: #fff;
-}
-
-.syntp-btn-bank:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.syntp-editors {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-}
-
-.syntp-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 4000;
-  background: #fff;
-  overflow: auto;
-}
-
-.syntp-super-modal {
-  z-index: 4100;
-}
-
-.syntp-modal-inner {
-  min-height: 100vh;
-  background: #fff;
-}
-</style>

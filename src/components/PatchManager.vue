@@ -157,22 +157,22 @@ const importFile = async (e) => {
 </script>
 
 <template>
-  <div class="patch-manager">
-    <h3>Patch Manager</h3>
+  <div class="d-flex flex-column gap-2 border rounded p-3 bg-body-tertiary">
+    <h3 class="h6 mb-0">Patch Manager</h3>
 
     <!-- Name -->
     <input
       v-model="patchName"
       placeholder="Patch name"
-      class="patch-name"
+      class="form-control form-control-sm"
     />
 
     <!-- Actions -->
-    <div class="actions">
-      <button @click="savePatch">Save</button>
-      <button @click="exportFile">Export</button>
+    <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-sm btn-primary" @click="savePatch">Save</button>
+      <button class="btn btn-sm btn-outline-primary" @click="exportFile">Export</button>
 
-      <label class="import-btn">
+      <label class="btn btn-sm btn-outline-dark mb-0">
         Import
         <input type="file" accept=".json" hidden @change="importFile" />
       </label>
@@ -182,15 +182,17 @@ const importFile = async (e) => {
     <input
       v-model="filter"
       placeholder="Filter patches"
-      class="filter"
+      class="form-control form-control-sm"
     />
 
     <!-- Patch list -->
-    <ul class="patch-list">
+    <ul class="list-group overflow-auto" style="max-height: 140px">
       <li
         v-for="name in availablePatches"
         :key="name"
-        :class="{ selected: selected === name }"
+        class="list-group-item list-group-item-action py-1"
+        :class="{ active: selected === name }"
+        style="cursor: pointer"
         @click="selected = name"
       >
         {{ name }}
@@ -198,57 +200,9 @@ const importFile = async (e) => {
     </ul>
 
     <!-- Load/Delete -->
-    <div class="actions">
-      <button @click="loadPatchByName(selected)">Load</button>
-      <button :disabled="!selected" @click="deletePatch">Delete</button>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-primary" @click="loadPatchByName(selected)">Load</button>
+      <button class="btn btn-sm btn-danger" :disabled="!selected" @click="deletePatch">Delete</button>
     </div>
   </div>
 </template>
-
-<style scoped>
-.patch-manager {
-  border: 1px solid #ccc;
-  padding: 10px;
-
-  background: #fafafa;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.patch-name,
-.filter {
-  padding: 4px;
-}
-
-.actions {
-  display: flex;
-  gap: 6px;
-}
-
-.import-btn {
-  background: #eee;
-  padding: 4px 8px;
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.patch-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  max-height: 140px;
-  overflow-y: auto;
-  border: 1px solid #ddd;
-}
-
-.patch-list li {
-  padding: 4px 6px;
-  cursor: pointer;
-}
-
-.patch-list li.selected {
-  background: #4da3ff;
-  color: white;
-}
-</style>

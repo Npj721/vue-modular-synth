@@ -709,163 +709,91 @@ watch(
 
 </script>
 <template>
-<div>
+  <div>
     <SynthPatchManager
       :patch="props.synth ?? patch"
       :voice-patch="voicePatch"
       :main-patch="mainPatch"
       @load="handleSynthPatchLoaded"
     />
-    <div class="top-panel">
-        <button :class="currentPatch === 'voice' ? 'button actif' : 'button'" @click="toggleVoicePatch">Voice</button>
-        <button :class="currentPatch === 'main' ? 'button actif' : 'button'" class="button" @click="toggleMainPatch">Main</button>
-        <button :class="currentPatch === 'super' ? 'button actif' : 'button'" class="button" @click="toggleSuperModules">Super Modules</button>
-        <button
-          class="button clear"
-          :disabled="currentPatch === 'super'"
-          @click="clearCurrentPatch"
-        >Effacer</button>
-        <button
-          class="button toggle-manager"
-          :disabled="currentPatch === 'super'"
-          @click="patchManagerOpen = !patchManagerOpen"
-        >{{ patchManagerOpen ? "◀ Patch Manager" : "▶ Patch Manager" }}</button>
+    <div class="d-flex flex-wrap align-items-center gap-2 p-2 border-bottom bg-body-tertiary">
+      <button
+        class="btn btn-sm"
+        :class="currentPatch === 'voice' ? 'btn-primary' : 'btn-outline-dark'"
+        @click="toggleVoicePatch"
+      >Voice</button>
+      <button
+        class="btn btn-sm"
+        :class="currentPatch === 'main' ? 'btn-primary' : 'btn-outline-dark'"
+        @click="toggleMainPatch"
+      >Main</button>
+      <button
+        class="btn btn-sm"
+        :class="currentPatch === 'super' ? 'btn-primary' : 'btn-outline-dark'"
+        @click="toggleSuperModules"
+      >Super Modules</button>
+      <button
+        class="btn btn-sm btn-danger ms-4"
+        :disabled="currentPatch === 'super'"
+        @click="clearCurrentPatch"
+      >Effacer</button>
+      <button
+        class="btn btn-sm btn-outline-dark ms-2"
+        :disabled="currentPatch === 'super'"
+        @click="patchManagerOpen = !patchManagerOpen"
+      >{{ patchManagerOpen ? "◀ Patch Manager" : "▶ Patch Manager" }}</button>
 
-        <button
-          class="button toggle-manager"
-          :class="{ actif: aiOpen }"
-          @click="aiOpen = !aiOpen"
-        >{{ aiOpen ? "◀ IA" : "▶ IA" }}</button>
+      <button
+        class="btn btn-sm"
+        :class="aiOpen ? 'btn-primary' : 'btn-outline-dark'"
+        @click="aiOpen = !aiOpen"
+      >{{ aiOpen ? "◀ IA" : "▶ IA" }}</button>
 
-        <button
-          v-if="closeable"
-          class="button close-synth"
-          type="button"
-          @click="emit('close')"
-        >✕ Fermer</button>
+      <button
+        v-if="closeable"
+        class="btn btn-sm btn-dark ms-auto"
+        type="button"
+        @click="emit('close')"
+      >✕ Fermer</button>
     </div>
-    <PatchEditor ref="voiceEditor" v-model:patch="voicePatch" :manager-open="patchManagerOpen" :exclude-categories="['synth', 'event']" v-show="currentPatch === 'voice'"></PatchEditor>
-    <PatchEditor ref="mainEditor" v-model:patch="mainPatch" :manager-open="patchManagerOpen" :exclude-categories="['synth', 'event']" v-show="currentPatch === 'main'"></PatchEditor>
+    <PatchEditor
+      ref="voiceEditor"
+      v-model:patch="voicePatch"
+      :manager-open="patchManagerOpen"
+      :exclude-categories="['synth', 'event']"
+      v-show="currentPatch === 'voice'"
+    ></PatchEditor>
+    <PatchEditor
+      ref="mainEditor"
+      v-model:patch="mainPatch"
+      :manager-open="patchManagerOpen"
+      :exclude-categories="['synth', 'event']"
+      v-show="currentPatch === 'main'"
+    ></PatchEditor>
     <SuperModuleEditor v-show="currentPatch === 'super'"></SuperModuleEditor>
 
-    <aside v-if="aiOpen" class="ai-panel">
-      <div class="ai-panel-header">
+    <aside
+      v-if="aiOpen"
+      class="position-fixed top-0 end-0 d-flex flex-column bg-body shadow-lg"
+      style="bottom: var(--dock-height, 0px); width: min(520px, 100vw); z-index: 2000"
+    >
+      <div class="d-flex align-items-center justify-content-between px-3 py-2 bg-dark text-white fw-bold">
         <span>Assistant IA</span>
-        <button class="ai-close" type="button" aria-label="Fermer l'assistant" @click="aiOpen = false">✕</button>
+        <button
+          class="btn-close btn-close-white"
+          type="button"
+          aria-label="Fermer l'assistant"
+          @click="aiOpen = false"
+        ></button>
       </div>
       <LmStudioChat
         ref="chatRef"
-        class="ai-chat"
+        class="flex-grow-1 border-0 rounded-0 overflow-hidden"
+        style="min-height: 0"
         :voice-patch="voicePatch"
         :main-patch="mainPatch"
         @patch-received="handleAiPatchReceived"
       />
     </aside>
-</div>
+  </div>
 </template>
-
-<style scoped>
-
-h1{
-  color: rgb(0, 39, 33);;
-}
-.button {
-  margin-right: 12px;
-  padding: 6px 12px;
-  border: none;
-  background: rgb(1, 122, 102);
-  color: white;
-  font-weight: bold;
-  font-size: large;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: transform 0.1s;
-}
-
-.button.actif {
-  background: #00c9a7;
-  color: white;
-}
-
-.button:hover {
-  transform: scale(1.05);
-}
-
-.button.close-synth {
-  background: #444;
-  margin-left: auto;
-}
-
-.button.clear {
-  background: #c0392b;
-  margin-left: 24px;
-}
-
-.button.toggle-manager {
-  background: #34495e;
-  margin-left: 12px;
-}
-
-.button.toggle-manager.actif {
-  background: #00c9a7;
-}
-
-.button.clear:disabled {
-  background: #aaa;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.top-panel{
-  background: #12332b;
-  border-top:1px solid rgba(255,255,255, .1);
-  padding-top:2px;
-  padding-bottom:2px;
-}
-
-/* =========================
- * Panneau Assistant IA (LmStudioChat)
- * Superposé à droite pour ne pas réduire la surface du patch.
- * ========================= */
-.ai-panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: var(--dock-height, 0px);
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  width: min(520px, 100vw);
-  background: #fff;
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.35);
-}
-
-.ai-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 11px 16px;
-  background: #12332b;
-  color: #fff;
-  font-weight: bold;
-}
-
-.ai-close {
-  border: none;
-  background: transparent;
-  color: #fff;
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.ai-panel .ai-chat {
-  flex: 1;
-  height: auto;
-  max-width: none;
-  margin: 0;
-  border: none;
-  border-radius: 0;
-  min-height: 0;
-}
-</style>

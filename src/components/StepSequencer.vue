@@ -115,34 +115,36 @@ watch(
 </script>
 
 <template>
-  <div class="step-sequencer">
+  <div class="d-flex flex-column gap-3">
     <div>
-      <div class="controls">
-        <button @click="togglePlay">
+      <div class="d-flex gap-3 align-items-center flex-wrap">
+        <button class="btn" :class="playing ? 'btn-danger' : 'btn-success'" @click="togglePlay">
           {{ playing ? 'Stop' : 'Play' }}
         </button>
-        <label>
+        <label class="d-flex align-items-center gap-1 small text-body-secondary">
           BPM:
-          <input v-model.number="BPM" type="number" min="40" max="300" />
+          <input class="form-control form-control-sm" style="width: 60px" v-model.number="BPM" type="number" min="40" max="300" />
         </label>
-        <label>
+        <label class="d-flex align-items-center gap-1 small text-body-secondary">
           Steps:
-          <input v-model.number="stepCount" type="number" min="1" max="64" />
+          <input class="form-control form-control-sm" style="width: 60px" v-model.number="stepCount" type="number" min="1" max="64" />
         </label>
       </div>
 
-      <div class="steps">
+      <div class="d-flex flex-wrap gap-1 mt-3">
         <div
           v-for="(step, i) in steps"
           :key="i"
-          class="step"
-          :class="{ active: step.active, current: i === currentStep }"
+          class="border rounded d-flex flex-column align-items-center gap-1 p-1 user-select-none"
+          :class="{ 'bg-info text-dark': step.active, 'border-danger': i === currentStep }"
+          :style="{ width: '44px', cursor: 'pointer', boxShadow: i === currentStep ? '0 0 0 2px var(--bs-danger)' : 'none' }"
           @click="step.active = !step.active"
         >
-          <span class="step-label">{{ i }}</span>
+          <span class="small opacity-75">{{ i }}</span>
           <input
             v-model.number="step.note"
-            class="step-note"
+            class="form-control form-control-sm p-0 text-center"
+            style="width: 34px; font-size: 12px"
             type="number"
             min="0"
             max="127"
@@ -153,66 +155,3 @@ watch(
     </div>
   </div>
 </template>
-
-<style scoped>
-.step-sequencer {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.controls {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.controls button {
-  padding: 6px 16px;
-  cursor: pointer;
-}
-
-.controls input {
-  width: 60px;
-}
-
-.steps {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.step {
-  width: 44px;
-  padding: 4px;
-  border: 1px solid #999;
-  background: #f0f0f0;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  user-select: none;
-}
-
-.step.active {
-  background: #00c9a7;
-  color: white;
-}
-
-.step.current {
-  border-color: #ff6b6b;
-  box-shadow: 0 0 0 2px #ff6b6b;
-}
-
-.step-label {
-  font-size: 10px;
-  opacity: 0.6;
-}
-
-.step-note {
-  width: 34px;
-  text-align: center;
-  font-size: 12px;
-}
-</style>

@@ -1317,16 +1317,15 @@ defineExpose({
 
 </script>
 
-
 <template>
-  <div class="paper-container" :class="{ fill: fillHeight }">
-    <div class="zoom-controls">
-      <button @click="zoomOut">−</button>
-      <span>{{ Math.round(zoom * 100) }}%</span>
-      <button @click="zoomIn">+</button>
-      <span class="zoom-sep"></span>
+  <div class="d-flex flex-column position-relative" :class="{ 'h-100': fillHeight }">
+    <div class="d-flex align-items-center gap-2 px-2 py-1 small">
+      <button class="btn btn-sm btn-outline-dark px-2 py-0" @click="zoomOut">−</button>
+      <span class="font-monospace">{{ Math.round(zoom * 100) }}%</span>
+      <button class="btn btn-sm btn-outline-dark px-2 py-0" @click="zoomIn">+</button>
+      <span class="vr mx-1" style="height: 18px"></span>
       <button
-        class="clone-btn"
+        class="btn btn-sm btn-outline-dark"
         :disabled="selectedModules.size === 0"
         title="Cloner la sélection (Ctrl+D)"
         @click="cloneSelectedModules"
@@ -1334,180 +1333,63 @@ defineExpose({
         Cloner la sélection
       </button>
     </div>
-    <div ref="paperEl" class="paper" :class="{ fill: fillHeight }"></div>
+    <div
+      ref="paperEl"
+      class="paper w-100 border"
+      :class="{ 'flex-grow-1': fillHeight }"
+      :style="fillHeight ? { minHeight: '300px' } : { height: '700px' }"
+    ></div>
 
     <div
       v-if="rubberRect"
-      class="rubber-band"
+      class="position-absolute border border-primary pe-none"
       :style="{
         left: rubberRect.left + 'px',
         top: rubberRect.top + 'px',
         width: rubberRect.width + 'px',
         height: rubberRect.height + 'px',
+        zIndex: 40,
+        background: 'rgba(var(--bs-primary-rgb), 0.12)',
       }"
     ></div>
 
     <div
       v-if="contextMenu"
       ref="menuRef"
-      class="context-menu"
-      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      class="dropdown-menu show"
+      :style="{
+        left: contextMenu.x + 'px',
+        top: contextMenu.y + 'px',
+        zIndex: 50,
+        minWidth: '180px',
+        maxHeight: '70%',
+        overflowY: 'auto',
+      }"
     >
-      <div v-for="group in menuGroups" :key="group.category" class="ctx-group">
-        <div class="ctx-category">{{ group.label }}</div>
+      <div
+        v-for="(group, gi) in menuGroups"
+        :key="group.category"
+        :class="{ 'border-top mt-1 pt-1': gi > 0 }"
+      >
+        <div class="dropdown-header py-1">{{ group.label }}</div>
         <button
           v-for="mod in group.modules"
           :key="mod.type"
-          class="ctx-item"
+          class="dropdown-item d-flex align-items-center gap-2"
           @click="addFromContextMenu(mod.type)"
         >
-          <span class="ctx-dot" :style="{ backgroundColor: mod.color }"></span>
+          <span
+            class="d-inline-block rounded-circle flex-shrink-0"
+            :style="{ width: '10px', height: '10px', backgroundColor: mod.color }"
+          ></span>
           {{ mod.label }}
         </button>
       </div>
-      <div v-if="superExportEnabled" class="ctx-separator"></div>
-      <button v-if="superExportEnabled" class="ctx-item ctx-action" @click="sendToSuper">
-        <span class="ctx-dot" style="background:#7c4dff"></span>
+      <div v-if="superExportEnabled" class="dropdown-divider"></div>
+      <button v-if="superExportEnabled" class="dropdown-item d-flex align-items-center gap-2 fw-bold" @click="sendToSuper">
+        <span class="d-inline-block rounded-circle flex-shrink-0" style="width: 10px; height: 10px; background: #7c4dff"></span>
         Créer un super-module
       </button>
     </div>
   </div>
 </template>
-
-<style scoped>
-.paper-container {
-  display: flex;
-  flex-direction: column;
-  position: relative;
-}
-
-.paper-container.fill {
-  height: 100%;
-}
-
-.zoom-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
-.zoom-controls button {
-  width: 24px;
-  height: 24px;
-  border: 1px solid #ccc;
-  background: white;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.zoom-sep {
-  width: 1px;
-  height: 18px;
-  background: #ddd;
-  margin: 0 4px;
-}
-
-.zoom-controls .clone-btn {
-  width: auto;
-  padding: 0 10px;
-  font-size: 12px;
-}
-
-.zoom-controls .clone-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.paper {
-  width: 100%;
-  height: 700px;
-  border: 1px solid #ddd;
-}
-
-/* les connexions sont supprimables au clic droit */
-.paper :deep(.joint-link) {
-  cursor: pointer;
-}
-
-.paper.fill {
-  flex: 1;
-  min-height: 300px;
-}
-
-/* sélection rectangle (multi-sélection façon bureau) */
-.rubber-band {
-  position: absolute;
-  z-index: 40;
-  border: 1px solid #3b82f6;
-  background: rgba(59, 130, 246, 0.12);
-  pointer-events: none;
-}
-
-/* =========================
- * CONTEXT MENU
- * ========================= */
-.context-menu {
-  position: absolute;
-  z-index: 50;
-  min-width: 180px;
-  max-height: 70%;
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  padding: 4px 0;
-  font-size: 13px;
-}
-
-.ctx-group + .ctx-group {
-  border-top: 1px solid #eee;
-  margin-top: 4px;
-  padding-top: 4px;
-}
-
-.ctx-category {
-  padding: 2px 10px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #666;
-  background: #fafafa;
-}
-
-.ctx-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 5px 10px;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ctx-item:hover {
-  background: #eef4ff;
-}
-
-.ctx-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-}
-
-.ctx-separator {
-  height: 1px;
-  background: #eee;
-  margin: 4px 0;
-}
-
-.ctx-action {
-  font-weight: bold;
-  color: #7c4dff;
-}
-</style>

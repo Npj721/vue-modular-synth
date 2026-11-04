@@ -102,6 +102,93 @@ const keyBindings = computed(() => {
   return map
 })
 
+/* Géométrie du clavier : les largeurs dépendent du nombre d'octaves, elles
+ * restent donc en style inline (pas de feuille de style personnalisée). */
+function keyStyle(key) {
+  const pressed = activeNotes.value.has(key.midi)
+  const base = {
+    cursor: "pointer",
+    boxSizing: "border-box",
+    touchAction: "none",
+    userSelect: "none",
+  }
+
+  if (key.type === "white") {
+    return {
+      ...base,
+      position: "relative",
+      float: "left",
+      width: `calc(100% / ${props.numOctaves * 7})`,
+      height: "100%",
+      background: pressed
+        ? "linear-gradient(to bottom, #80ccff, #5bb8f5)"
+        : "linear-gradient(to bottom, #f8f8f8, #fff)",
+      border: pressed ? "1px solid #4a9cd6" : "1px solid #bbb",
+      borderTop: "none",
+      borderRight: "1px solid #aaa",
+      borderRadius: "0 0 4px 4px",
+      zIndex: 1,
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "flex-end",
+      alignItems: "center",
+      paddingBottom: "6px",
+      gap: "2px",
+      boxShadow: pressed
+        ? "inset 0 2px 4px rgba(0, 0, 0, 0.15)"
+        : "inset 0 -3px 2px rgba(0, 0, 0, 0.05)",
+    }
+  }
+
+  return {
+    ...base,
+    position: "absolute",
+    left: `calc(${(key.oct * 7 + key.idx + 1) * (100 / (props.numOctaves * 7))}% - 8px)`,
+    width: "16px",
+    height: "70px",
+    background: pressed
+      ? "linear-gradient(to bottom, #5bb8f5, #3a9de0)"
+      : "linear-gradient(to bottom, #333, #111)",
+    border: "1px solid #000",
+    borderTop: "none",
+    borderRadius: "0 0 3px 3px",
+    zIndex: 2,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    paddingBottom: "5px",
+    gap: "1px",
+    boxShadow: pressed
+      ? "inset 0 2px 4px rgba(0, 0, 0, 0.3)"
+      : "2px 2px 4px rgba(0, 0, 0, 0.5)",
+  }
+}
+
+function noteStyle(key) {
+  const pressed = activeNotes.value.has(key.midi)
+  if (key.type === "black") {
+    return {
+      fontSize: "8px",
+      color: pressed ? "#ddeeff" : "#888",
+      pointerEvents: "none",
+      lineHeight: 1,
+    }
+  }
+  return {
+    fontSize: "9px",
+    color: pressed ? "#fff" : "#666",
+    pointerEvents: "none",
+    lineHeight: 1,
+  }
+}
+
+function bindingStyle(key) {
+  return key.type === "black"
+    ? { fontSize: "7px", fontWeight: "bold", color: "#666", pointerEvents: "none", lineHeight: 1 }
+    : { fontSize: "8px", fontWeight: "bold", color: "#999", pointerEvents: "none", lineHeight: 1 }
+}
+
 /* =========================
  * Audio
  * ========================= */
@@ -309,154 +396,34 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="synth-keyboard">
+  <div class="d-flex flex-column gap-3">
     <div
-      class="piano"
-      :style="{ '--num-white-keys': numOctaves * 7 }"
+      style="
+        position: relative;
+        height: 120px;
+        background: #1a1a1a;
+        border-radius: 0 0 6px 6px;
+        padding: 0 4px;
+        user-select: none;
+        touch-action: none;
+      "
     >
       <div
         v-for="key in pianoKeys"
         :key="key.midi"
         :data-midi="key.midi"
-        :class="[
-          'piano-key',
-          key.type,
-          { pressed: activeNotes.has(key.midi) },
-        ]"
-        :style="
-          key.type === 'black'
-            ? {
-                left: `calc(${(key.oct * 7 + key.idx + 1) * (100 / (numOctaves * 7))}% - ${8}px)`,
-              }
-            : {}
-        "
+        :style="keyStyle(key)"
         @pointerdown="onKeyPointerDown(key.midi, $event)"
         @pointermove="onKeyPointerMove(key.midi, $event)"
         @pointerup="onKeyPointerUp"
         @pointercancel="onKeyPointerUp"
         @lostpointercapture="onKeyPointerUp"
       >
-        <span class="key-note">{{ key.note }}</span>
-        <span v-if="keyBindings[key.midi]" class="key-binding">{{
+        <span :style="noteStyle(key)">{{ key.note }}</span>
+        <span v-if="keyBindings[key.midi]" :style="bindingStyle(key)">{{
           keyBindings[key.midi]
         }}</span>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.synth-keyboard {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.piano {
-  position: relative;
-  height: 120px;
-  background: #1a1a1a;
-  border-radius: 0 0 6px 6px;
-  padding: 0 4px;
-  user-select: none;
-  touch-action: none;
-}
-
-.piano-key {
-  cursor: pointer;
-  box-sizing: border-box;
-  /* indispensable pour que les glissements de doigts ne deviennent pas des
-   * défilements de page (et pour que le zoom double-tap n'interfère pas) */
-  touch-action: none;
-}
-
-.piano-key.white {
-  position: relative;
-  float: left;
-  width: calc(100% / var(--num-white-keys));
-  height: 100%;
-  background: linear-gradient(to bottom, #f8f8f8, #fff);
-  border: 1px solid #bbb;
-  border-top: none;
-  border-right: 1px solid #aaa;
-  border-radius: 0 0 4px 4px;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  padding-bottom: 6px;
-  gap: 2px;
-  box-shadow: inset 0 -3px 2px rgba(0, 0, 0, 0.05);
-}
-
-.piano-key.white:hover {
-  background: linear-gradient(to bottom, #f0f0f0, #eee);
-}
-
-.piano-key.white.pressed {
-  background: linear-gradient(to bottom, #80ccff, #5bb8f5);
-  border-color: #4a9cd6;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
-}
-
-.piano-key.black {
-  position: absolute;
-  width: 16px;
-  height: 70px;
-  background: linear-gradient(to bottom, #333, #111);
-  border: 1px solid #000;
-  border-top: none;
-  border-radius: 0 0 3px 3px;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  padding-bottom: 5px;
-  gap: 1px;
-  box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-}
-
-.piano-key.black:hover {
-  background: linear-gradient(to bottom, #444, #222);
-}
-
-.piano-key.black.pressed {
-  background: linear-gradient(to bottom, #5bb8f5, #3a9de0);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.key-note {
-  font-size: 9px;
-  color: #666;
-  pointer-events: none;
-  line-height: 1;
-}
-
-.piano-key.white.pressed .key-note {
-  color: #fff;
-}
-
-.piano-key.black .key-note {
-  color: #888;
-  font-size: 8px;
-}
-
-.piano-key.black.pressed .key-note {
-  color: #ddeeff;
-}
-
-.key-binding {
-  font-size: 8px;
-  font-weight: bold;
-  color: #999;
-  pointer-events: none;
-  line-height: 1;
-}
-
-.piano-key.black .key-binding {
-  color: #666;
-  font-size: 7px;
-}
-</style>

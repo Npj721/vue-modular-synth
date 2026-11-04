@@ -775,409 +775,245 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="graph-env-root">
-    <div class="env-range">
-      <label>Min <input type="number" v-model.number="yMin" :step="step" @change="applyMinMax" /></label>
-      <label>Max <input type="number" v-model.number="yMax" :step="step" @change="applyMinMax" /></label>
-      <span v-if="unit" class="env-unit">{{ unit }}</span>
+  <div class="d-flex flex-column gap-3 w-100 small">
+    <div class="d-flex flex-wrap gap-3 align-items-center">
+      <label class="d-flex align-items-center gap-1 text-body-secondary">
+        Min
+        <input
+          class="form-control form-control-sm"
+          style="width: 90px"
+          type="number"
+          v-model.number="yMin"
+          :step="step"
+          @change="applyMinMax"
+        />
+      </label>
+      <label class="d-flex align-items-center gap-1 text-body-secondary">
+        Max
+        <input
+          class="form-control form-control-sm"
+          style="width: 90px"
+          type="number"
+          v-model.number="yMax"
+          :step="step"
+          @change="applyMinMax"
+        />
+      </label>
+      <span v-if="unit" class="text-body-secondary">{{ unit }}</span>
     </div>
 
-    <div class="env-view-toggle">
-      <button :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'; requestAnimationFrame(draw)">Graphique</button>
-      <button :class="{ active: viewMode === 'table' }" @click="viewMode = 'table'">Tableau</button>
+    <div class="btn-group btn-group-sm align-self-start">
+      <button
+        class="btn"
+        :class="viewMode === 'graph' ? 'btn-primary' : 'btn-outline-dark'"
+        @click="viewMode = 'graph'; requestAnimationFrame(draw)"
+      >Graphique</button>
+      <button
+        class="btn"
+        :class="viewMode === 'table' ? 'btn-primary' : 'btn-outline-dark'"
+        @click="viewMode = 'table'"
+      >Tableau</button>
     </div>
 
-    <div v-show="viewMode === 'graph'">
-      <div class="env-editor">
-      <div class="env-head">
-        <h4>Press (Note On)</h4>
-        <span class="env-phase-status">{{ Math.max(0, phases.press.length - 1) }} stage(s) · {{ Math.round(phaseDuration('press') * 1000) }} ms</span>
-        <div class="env-stretch-btns">
-          <button title="Rétrécir chaque stage (100 ms)" @click="offsetBy('press', -1)">−</button>
-          <button title="Étirer chaque stage (100 ms)" @click="offsetBy('press', 1)">+</button>
-        </div>
-      </div>
-      <div class="env-tools">
-        <span class="env-tools-label">Courbe :</span>
-        <button
-          v-for="tool in ['line','scurve','arc','exp','log']"
-          :key="tool"
-          class="env-tool"
-          :class="{ active: toolMode === tool && currentPhase === 'press' }"
-          @click="currentPhase='press'; selectTool(tool)"
-        >{{ TOOL_LABELS[tool] }}</button>
-        <button class="env-tool clear" @click="clearPhase('press'); commit(); requestAnimationFrame(draw)">Clear</button>
-      </div>
-      <canvas
-        ref="pressCanvas"
-        width="640"
-        height="200"
-        class="env-canvas"
-        @mousedown="onMouseDown($event,'press')"
-        @mousemove="onMouseMove($event,'press')"
-        @mouseup="onMouseUp($event,'press')"
-        @mouseleave="hideTooltip"
-        @contextmenu.prevent
-      ></canvas>
-      <p class="env-hint">Clic : ajouter · Glisser : déplacer · Clic droit : supprimer · Outil courbe : tracer</p>
-    </div>
-
-    <div class="env-editor">
-      <div class="env-head">
-        <h4>Release (Note Off)</h4>
-        <span class="env-phase-status">{{ Math.max(0, phases.release.length - 1) }} stage(s) · {{ Math.round(phaseDuration('release') * 1000) }} ms</span>
-        <div class="env-stretch-btns">
-          <button title="Rétrécir chaque stage (100 ms)" @click="offsetBy('release', -1)">−</button>
-          <button title="Étirer chaque stage (100 ms)" @click="offsetBy('release', 1)">+</button>
-        </div>
-      </div>
-      <div class="env-tools">
-        <span class="env-tools-label">Courbe :</span>
-        <button
-          v-for="tool in ['line','scurve','arc','exp','log']"
-          :key="tool"
-          class="env-tool"
-          :class="{ active: toolMode === tool && currentPhase === 'release' }"
-          @click="currentPhase='release'; selectTool(tool)"
-        >{{ TOOL_LABELS[tool] }}</button>
-        <button class="env-tool clear" @click="clearPhase('release'); commit(); requestAnimationFrame(draw)">Clear</button>
-      </div>
-      <canvas
-        ref="releaseCanvas"
-        width="640"
-        height="200"
-        class="env-canvas"
-        @mousedown="onMouseDown($event,'release')"
-        @mousemove="onMouseMove($event,'release')"
-        @mouseup="onMouseUp($event,'release')"
-        @mouseleave="hideTooltip"
-        @contextmenu.prevent
-      ></canvas>
-      <p class="env-hint">1er point = "current" (ancrage visuel) · Clic : ajouter · Glisser : déplacer · Clic droit : supprimer</p>
-      </div>
-    </div>
-
-    <div v-show="viewMode === 'table'">
-      <div class="env-editor" v-for="cfg in tablePhaseConfigs" :key="cfg.key">
-        <div class="env-head">
-          <h4>{{ cfg.label }}</h4>
-          <span class="env-phase-status">{{ tableData[cfg.key].length }} stage(s)</span>
-          <div class="env-stretch-btns">
-            <button title="Rétrécir chaque stage (1 ms)" @click="offsetBy(cfg.key, -1)">−</button>
-            <button title="Étirer chaque stage (1 ms)" @click="offsetBy(cfg.key, 1)">+</button>
+    <div v-show="viewMode === 'graph'" class="d-flex flex-column gap-3">
+      <div class="border rounded p-2 bg-body-tertiary">
+        <div class="d-flex justify-content-between align-items-center mb-2 gap-2">
+          <h4 class="h6 mb-0">Press (Note On)</h4>
+          <span class="small text-body-secondary">
+            {{ Math.max(0, phases.press.length - 1) }} stage(s) · {{ Math.round(phaseDuration('press') * 1000) }} ms
+          </span>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-dark px-2 py-0" title="Rétrécir chaque stage (100 ms)" @click="offsetBy('press', -1)">−</button>
+            <button class="btn btn-outline-dark px-2 py-0" title="Étirer chaque stage (100 ms)" @click="offsetBy('press', 1)">+</button>
           </div>
         </div>
-        <table class="env-table">
-          <thead>
-            <tr>
-              <th style="width:26px">#</th>
-              <th>From</th>
-              <th>To</th>
-              <th>Durée (s)</th>
-              <th>Courbe</th>
-              <th style="width:36px"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(st, i) in tableData[cfg.key]" :key="i">
-              <td class="env-table-idx">{{ i }}</td>
-              <td>
-                <template v-if="i === 0">
-                  <label class="env-current">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+          <span class="small text-body-secondary">Courbe :</span>
+          <button
+            v-for="tool in ['line','scurve','arc','exp','log']"
+            :key="tool"
+            class="btn btn-sm"
+            :class="toolMode === tool && currentPhase === 'press' ? 'btn-primary' : 'btn-outline-dark'"
+            @click="currentPhase='press'; selectTool(tool)"
+          >{{ TOOL_LABELS[tool] }}</button>
+          <button class="btn btn-sm btn-outline-danger" @click="clearPhase('press'); commit(); requestAnimationFrame(draw)">Clear</button>
+        </div>
+        <canvas
+          ref="pressCanvas"
+          width="640"
+          height="200"
+          class="border rounded w-100 d-block"
+          style="height: auto; background: #111; cursor: crosshair; touch-action: none"
+          @mousedown="onMouseDown($event,'press')"
+          @mousemove="onMouseMove($event,'press')"
+          @mouseup="onMouseUp($event,'press')"
+          @mouseleave="hideTooltip"
+          @contextmenu.prevent
+        ></canvas>
+        <p class="form-text mt-2 mb-0">Clic : ajouter · Glisser : déplacer · Clic droit : supprimer · Outil courbe : tracer</p>
+      </div>
+
+      <div class="border rounded p-2 bg-body-tertiary">
+        <div class="d-flex justify-content-between align-items-center mb-2 gap-2">
+          <h4 class="h6 mb-0">Release (Note Off)</h4>
+          <span class="small text-body-secondary">
+            {{ Math.max(0, phases.release.length - 1) }} stage(s) · {{ Math.round(phaseDuration('release') * 1000) }} ms
+          </span>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-dark px-2 py-0" title="Rétrécir chaque stage (100 ms)" @click="offsetBy('release', -1)">−</button>
+            <button class="btn btn-outline-dark px-2 py-0" title="Étirer chaque stage (100 ms)" @click="offsetBy('release', 1)">+</button>
+          </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+          <span class="small text-body-secondary">Courbe :</span>
+          <button
+            v-for="tool in ['line','scurve','arc','exp','log']"
+            :key="tool"
+            class="btn btn-sm"
+            :class="toolMode === tool && currentPhase === 'release' ? 'btn-primary' : 'btn-outline-dark'"
+            @click="currentPhase='release'; selectTool(tool)"
+          >{{ TOOL_LABELS[tool] }}</button>
+          <button class="btn btn-sm btn-outline-danger" @click="clearPhase('release'); commit(); requestAnimationFrame(draw)">Clear</button>
+        </div>
+        <canvas
+          ref="releaseCanvas"
+          width="640"
+          height="200"
+          class="border rounded w-100 d-block"
+          style="height: auto; background: #111; cursor: crosshair; touch-action: none"
+          @mousedown="onMouseDown($event,'release')"
+          @mousemove="onMouseMove($event,'release')"
+          @mouseup="onMouseUp($event,'release')"
+          @mouseleave="hideTooltip"
+          @contextmenu.prevent
+        ></canvas>
+        <p class="form-text mt-2 mb-0">1er point = "current" (ancrage visuel) · Clic : ajouter · Glisser : déplacer · Clic droit : supprimer</p>
+      </div>
+    </div>
+
+    <div v-show="viewMode === 'table'" class="d-flex flex-column gap-3">
+      <div
+        v-for="cfg in tablePhaseConfigs"
+        :key="cfg.key"
+        class="border rounded p-2 bg-body-tertiary"
+      >
+        <div class="d-flex justify-content-between align-items-center mb-2 gap-2">
+          <h4 class="h6 mb-0">{{ cfg.label }}</h4>
+          <span class="small text-body-secondary">{{ tableData[cfg.key].length }} stage(s)</span>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-dark px-2 py-0" title="Rétrécir chaque stage (1 ms)" @click="offsetBy(cfg.key, -1)">−</button>
+            <button class="btn btn-outline-dark px-2 py-0" title="Étirer chaque stage (1 ms)" @click="offsetBy(cfg.key, 1)">+</button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-2">
+            <thead>
+              <tr>
+                <th style="width: 26px">#</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Durée (s)</th>
+                <th>Courbe</th>
+                <th style="width: 36px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(st, i) in tableData[cfg.key]" :key="i">
+                <td class="text-body-secondary">{{ i }}</td>
+                <td>
+                  <template v-if="i === 0">
+                    <label class="form-check d-flex align-items-center gap-1 small text-body-secondary text-nowrap">
+                      <input
+                        class="form-check-input m-0"
+                        type="checkbox"
+                        :checked="isCurrentFrom(st)"
+                        @change="setStartFrom(cfg.key, $event.target.checked ? 'current' : 'value')"
+                      />
+                      <span>current</span>
+                    </label>
                     <input
-                      type="checkbox"
-                      :checked="isCurrentFrom(st)"
-                      @change="setStartFrom(cfg.key, $event.target.checked ? 'current' : 'value')"
+                      v-if="!isCurrentFrom(st)"
+                      class="form-control form-control-sm"
+                      type="number"
+                      :value="st.from"
+                      :min="yMinVisible"
+                      :max="yMaxVisible"
+                      :step="step"
+                      @input="setStageField(cfg.key, i, 'from', Number($event.target.value))"
                     />
-                    <span>current</span>
-                  </label>
+                  </template>
                   <input
-                    v-if="!isCurrentFrom(st)"
+                    v-else
+                    class="form-control form-control-sm"
                     type="number"
                     :value="st.from"
+                    disabled
+                    title="= fin du stage précédent"
+                  />
+                </td>
+                <td>
+                  <input
+                    class="form-control form-control-sm"
+                    type="number"
+                    :value="st.to"
                     :min="yMinVisible"
                     :max="yMaxVisible"
                     :step="step"
-                    @input="setStageField(cfg.key, i, 'from', Number($event.target.value))"
+                    @input="setStageField(cfg.key, i, 'to', Number($event.target.value))"
                   />
-                </template>
-                <input v-else type="number" :value="st.from" disabled title="= fin du stage précédent" />
-              </td>
-              <td>
-                <input
-                  type="number"
-                  :value="st.to"
-                  :min="yMinVisible"
-                  :max="yMaxVisible"
-                  :step="step"
-                  @input="setStageField(cfg.key, i, 'to', Number($event.target.value))"
-                />
-              </td>
-              <td>
-                <input
-                  type="number"
-                  :value="st.duration"
-                  min="0.0001"
-                  step="0.01"
-                  @input="setStageField(cfg.key, i, 'duration', Math.max(0.0001, Number($event.target.value)))"
-                />
-              </td>
-              <td>
-                <select :value="normalizeCurve(st.curve)" @change="setStageField(cfg.key, i, 'curve', $event.target.value)">
-                  <option v-for="c in ENVELOPE_CURVES" :key="c" :value="c">{{ c }}</option>
-                </select>
-              </td>
-              <td>
-                <button class="env-tool clear" :disabled="tableData[cfg.key].length <= 1" @click="removeStageRow(cfg.key, i)">✕</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <button class="env-tool add" @click="addStageRow(cfg.key)">+ Ajouter un stage</button>
+                </td>
+                <td>
+                  <input
+                    class="form-control form-control-sm"
+                    type="number"
+                    :value="st.duration"
+                    min="0.0001"
+                    step="0.01"
+                    @input="setStageField(cfg.key, i, 'duration', Math.max(0.0001, Number($event.target.value)))"
+                  />
+                </td>
+                <td>
+                  <select
+                    class="form-select form-select-sm"
+                    :value="normalizeCurve(st.curve)"
+                    @change="setStageField(cfg.key, i, 'curve', $event.target.value)"
+                  >
+                    <option v-for="c in ENVELOPE_CURVES" :key="c" :value="c">{{ c }}</option>
+                  </select>
+                </td>
+                <td>
+                  <button
+                    class="btn btn-sm btn-outline-danger"
+                    :disabled="tableData[cfg.key].length <= 1"
+                    @click="removeStageRow(cfg.key, i)"
+                  >✕</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <button class="btn btn-sm btn-outline-primary" @click="addStageRow(cfg.key)">+ Ajouter un stage</button>
       </div>
     </div>
 
-    <div class="env-saves">
-      <label>Nom <input type="text" v-model="presetName" /></label>
-      <button @click="savePreset">Sauver</button>
-      <select :id="presetsKey + '-list'">
+    <div class="d-flex flex-wrap gap-2 align-items-center border-top pt-3">
+      <label class="d-flex align-items-center gap-1 text-body-secondary">
+        Nom
+        <input class="form-control form-control-sm" style="width: 110px" type="text" v-model="presetName" />
+      </label>
+      <button class="btn btn-sm btn-outline-primary" @click="savePreset">Sauver</button>
+      <select class="form-select form-select-sm" style="width: auto" :id="presetsKey + '-list'">
         <option value="">— charger —</option>
         <option v-for="n in presetList" :key="n" :value="n">{{ n }}</option>
       </select>
-      <button @click="loadPreset">Charger</button>
-      <button @click="deletePreset">Supprimer</button>
+      <button class="btn btn-sm btn-outline-primary" @click="loadPreset">Charger</button>
+      <button class="btn btn-sm btn-outline-danger" @click="deletePreset">Supprimer</button>
     </div>
 
-    <div ref="tooltipEl" class="env-tooltip"></div>
+    <div
+      ref="tooltipEl"
+      class="position-fixed z-3 border rounded bg-dark text-success font-monospace small px-2 py-1 pe-none"
+      style="display: none; white-space: nowrap"
+    ></div>
   </div>
 </template>
-
-<style scoped>
-.graph-env-root {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  width: 100%;
-  font-size: 12px;
-}
-.env-range {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-}
-.env-range label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: #bbb;
-}
-.env-range input {
-  width: 90px;
-}
-.env-unit {
-  color: #666;
-}
-.env-view-toggle {
-  display: flex;
-  gap: 6px;
-}
-.env-view-toggle button {
-  padding: 4px 14px;
-  font-size: 12px;
-  background: #333;
-  color: #999;
-  border: 1px solid #555;
-  border-radius: 3px;
-  cursor: pointer;
-}
-.env-view-toggle button.active {
-  background: #00ff88;
-  color: #000;
-  border-color: #00ff88;
-}
-.env-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 8px;
-}
-.env-table th,
-.env-table td {
-  padding: 4px 6px;
-  text-align: left;
-  border-bottom: 1px solid #2a2a2a;
-  font-size: 12px;
-}
-.env-table th {
-  color: #888;
-  font-weight: normal;
-  font-size: 11px;
-}
-.env-table input[type="number"] {
-  width: 100%;
-  box-sizing: border-box;
-  background: #222;
-  color: #fff;
-  border: 1px solid #444;
-  border-radius: 3px;
-  padding: 3px 6px;
-}
-.env-table input[type="number"]:disabled {
-  background: #1b1b1b;
-  color: #777;
-  opacity: 1;
-}
-.env-table select {
-  background: #222;
-  color: #fff;
-  border: 1px solid #444;
-  border-radius: 3px;
-  padding: 3px 6px;
-  width: 100%;
-  box-sizing: border-box;
-}
-.env-table button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-.env-table-idx {
-  color: #666;
-}
-.env-current {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: #aaa;
-  font-size: 11px;
-  white-space: nowrap;
-}
-.env-current input {
-  margin: 0;
-}
-.env-editor {
-  border: 1px solid #2a2a2a;
-  border-radius: 6px;
-  padding: 8px;
-  background: #1b1b1b;
-}
-.env-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.env-head h4 {
-  margin: 0;
-  color: #ccc;
-  font-size: 13px;
-}
-.env-phase-status {
-  color: #666;
-  font-size: 11px;
-}
-.env-stretch-btns {
-  display: flex;
-  gap: 4px;
-}
-.env-stretch-btns button {
-  width: 24px;
-  height: 22px;
-  line-height: 1;
-  padding: 0;
-  font-size: 14px;
-  background: #333;
-  color: #ddd;
-  border: 1px solid #555;
-  border-radius: 3px;
-  cursor: pointer;
-}
-.env-stretch-btns button:hover {
-  background: #444;
-}
-.env-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.env-tools-label {
-  color: #888;
-}
-.env-tool {
-  padding: 2px 10px;
-  font-size: 11px;
-  background: #333;
-  color: #999;
-  border: 1px solid #555;
-  border-radius: 3px;
-  cursor: pointer;
-}
-.env-tool.active {
-  background: #00ff88;
-  color: #000;
-  border-color: #00ff88;
-}
-.env-tool.clear {
-  color: #f88;
-  border-color: #744;
-}
-.env-canvas {
-  width: 100%;
-  height: auto;
-  background: #111;
-  border: 1px solid #333;
-  border-radius: 4px;
-  cursor: crosshair;
-  touch-action: none;
-  display: block;
-}
-.env-hint {
-  color: #777;
-  font-size: 11px;
-  margin: 6px 0 0;
-}
-.env-saves {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  border-top: 1px solid #2a2a2a;
-  padding-top: 10px;
-}
-.env-saves label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: #bbb;
-}
-.env-saves input,
-.env-saves select {
-  background: #222;
-  color: #fff;
-  border: 1px solid #444;
-  border-radius: 3px;
-  padding: 3px 6px;
-}
-.env-saves input {
-  width: 110px;
-}
-.env-saves button {
-  padding: 3px 12px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.env-tooltip {
-  position: fixed;
-  background: rgba(0, 0, 0, 0.88);
-  color: #00ff88;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font: 11px/1.4 monospace;
-  pointer-events: none;
-  display: none;
-  z-index: 100;
-  white-space: nowrap;
-  border: 1px solid #00ff8855;
-}
-</style>

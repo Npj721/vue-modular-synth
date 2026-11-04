@@ -89,23 +89,23 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="multi-sequencer">
-    <div class="controls">
-      <button @click="togglePlay">
+  <div class="d-flex flex-column gap-3">
+    <div class="d-flex gap-3 align-items-center flex-wrap">
+      <button class="btn" :class="playing ? 'btn-danger' : 'btn-success'" @click="togglePlay">
         {{ playing ? 'Stop' : 'Play all' }}
       </button>
-      <label>
+      <label class="d-flex align-items-center gap-1 small text-body-secondary">
         BPM:
-        <input v-model.number="BPM" type="number" min="40" max="300" />
+        <input class="form-control form-control-sm" style="width: 60px" v-model.number="BPM" type="number" min="40" max="300" />
       </label>
-      <label>
+      <label class="d-flex align-items-center gap-1 small text-body-secondary">
         Steps:
-        <input v-model.number="stepCount" type="number" min="1" max="64" />
+        <input class="form-control form-control-sm" style="width: 60px" v-model.number="stepCount" type="number" min="1" max="64" />
       </label>
-      <button class="add" @click="addTrack">+ Piste</button>
+      <button class="btn btn-outline-primary ms-auto" @click="addTrack">+ Piste</button>
     </div>
 
-    <div class="tracks">
+    <div class="d-flex flex-column gap-2">
       <SequencerTrack
         v-for="t in tracks"
         :key="t.id"
@@ -115,54 +115,9 @@ onUnmounted(() => {
         :current-step="playing ? currentStep : -1"
       >
         <template #remove>
-          <button class="remove" @click="removeTrack(t.id)">×</button>
+          <button class="btn btn-sm btn-danger px-2 py-0" @click="removeTrack(t.id)">×</button>
         </template>
       </SequencerTrack>
     </div>
   </div>
 </template>
-
-<style scoped>
-.multi-sequencer {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.controls {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.controls button {
-  padding: 6px 16px;
-  cursor: pointer;
-}
-
-.controls input {
-  width: 60px;
-}
-
-.tracks {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.controls .add {
-  margin-left: auto;
-}
-
-.remove {
-  border: none;
-  background: #c0392b;
-  color: white;
-  border-radius: 4px;
-  width: 22px;
-  height: 22px;
-  cursor: pointer;
-  line-height: 1;
-}
-</style>

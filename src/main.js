@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import './style.css'
+import 'bootswatch/dist/brite/bootstrap.min.css'
 import './styleJointJS.css'
 import App from './App.vue'
 

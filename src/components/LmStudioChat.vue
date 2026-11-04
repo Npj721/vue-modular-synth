@@ -790,15 +790,18 @@ async function scrollToBottom() {
 </script>
 
 <template>
-  <section class="lm-chat">
-    <header class="chat-header">
-      <div class="chat-title-row">
-        <h2>Chat LM Studio</h2>
+  <section
+    class="d-flex flex-column overflow-hidden border rounded-4 bg-body text-body mx-auto w-100"
+    style="height: 650px; max-width: 850px"
+  >
+    <header class="p-3 border-bottom">
+      <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+        <h2 class="h5 mb-0">Chat LM Studio</h2>
 
         <button
           type="button"
-          class="settings-toggle"
-          :class="{ actif: settingsOpen }"
+          class="btn btn-sm"
+          :class="settingsOpen ? 'btn-info' : 'btn-outline-dark'"
           aria-label="Configuration du chat"
           title="Configuration"
           @click="toggleSettings"
@@ -807,10 +810,11 @@ async function scrollToBottom() {
         </button>
       </div>
 
-      <div class="model-manager">
-        <div class="model-filter-row">
+      <div class="d-flex flex-column gap-2">
+        <div>
           <input
             v-model="modelFilter"
+            class="form-control form-control-sm"
             type="search"
             placeholder="Filtrer par nom de modèle..."
             aria-label="Filtrer les modèles"
@@ -818,18 +822,19 @@ async function scrollToBottom() {
           />
         </div>
 
-        <div class="model-table-wrapper">
-          <table class="model-table">
-            <thead>
+        <div class="border rounded overflow-auto" style="max-height: 230px">
+          <table class="table table-sm table-hover align-middle mb-0 small" style="min-width: 620px; table-layout: fixed">
+            <thead class="table-light sticky-top">
               <tr>
                 <th
-                  class="sortable"
-                  :class="{ active: modelSortKey === 'name' }"
+                  class="user-select-none"
+                  :class="modelSortKey === 'name' ? 'text-primary-emphasis' : ''"
+                  style="width: 27%; cursor: pointer"
                   @click="toggleModelSort('name')"
                   title="Trier par nom"
                 >
                   Nom
-                  <span class="sort-indicator">{{
+                  <span class="small text-body-secondary ms-1">{{
                     modelSortKey === "name"
                       ? modelSortDir === "asc"
                         ? "↑"
@@ -837,15 +842,16 @@ async function scrollToBottom() {
                       : "↕"
                   }}</span>
                 </th>
-                <th>Clé</th>
+                <th style="width: 33%">Clé</th>
                 <th
-                  class="sortable numeric"
-                  :class="{ active: modelSortKey === 'size' }"
+                  class="text-end user-select-none"
+                  :class="modelSortKey === 'size' ? 'text-primary-emphasis' : ''"
+                  style="width: 12%; cursor: pointer"
                   @click="toggleModelSort('size')"
                   title="Trier par taille"
                 >
                   Taille (GB)
-                  <span class="sort-indicator">{{
+                  <span class="small text-body-secondary ms-1">{{
                     modelSortKey === "size"
                       ? modelSortDir === "asc"
                         ? "↑"
@@ -853,36 +859,36 @@ async function scrollToBottom() {
                       : "↕"
                   }}</span>
                 </th>
-                <th>Statut</th>
-                <th>Action</th>
+                <th style="width: 12%">Statut</th>
+                <th style="width: 16%">Action</th>
               </tr>
             </thead>
             <tbody>
               <tr
                 v-for="model in filteredSortedModels"
                 :key="model.key"
-                class="model-row"
-                :class="{
-                  selected: selectedModel === model.key,
-                  loaded: isModelLoadedByKey(model.key),
-                }"
+                :class="selectedModel === model.key ? 'table-primary' : ''"
+                style="cursor: pointer"
                 @click="selectModelFromTable(model.key)"
               >
-                <td class="model-name">
+                <td
+                  class="text-truncate"
+                  :class="isModelLoadedByKey(model.key) ? 'fw-semibold' : ''"
+                >
                   {{ model.display_name || model.key }}
                 </td>
-                <td class="model-key">{{ model.key }}</td>
-                <td class="model-size numeric">
+                <td class="text-truncate text-body-secondary">{{ model.key }}</td>
+                <td class="text-end font-monospace">
                   {{ formatModelSize(model.size_bytes) }}
                 </td>
-                <td class="model-status-cell">
-                  <span v-if="isModelLoadedByKey(model.key)" class="badge loaded">Chargé</span>
-                  <span v-else class="badge available">Disponible</span>
+                <td class="text-center text-nowrap">
+                  <span v-if="isModelLoadedByKey(model.key)" class="badge text-bg-success">Chargé</span>
+                  <span v-else class="badge text-bg-light">Disponible</span>
                 </td>
-                <td class="model-actions">
+                <td class="text-center text-nowrap">
                   <button
                     type="button"
-                    class="table-action"
+                    class="btn btn-sm btn-outline-dark"
                     :disabled="loading || chatting || Boolean(reloadingModel)"
                     @click.stop="
                       isModelLoadedByKey(model.key)
@@ -901,7 +907,7 @@ async function scrollToBottom() {
                 </td>
               </tr>
               <tr v-if="!filteredSortedModels.length">
-                <td colspan="5" class="empty-row">
+                <td colspan="5" class="text-center text-body-secondary">
                   {{
                     availableModels.length
                       ? "Aucun modèle ne correspond au filtre."
@@ -914,14 +920,14 @@ async function scrollToBottom() {
         </div>
       </div>
 
-      <p v-if="selectedModel" class="selected-model">
+      <p v-if="selectedModel" class="small text-body-secondary mt-2 mb-0">
         Sélection : {{ currentModel?.display_name || selectedModel }}
         — {{ isModelLoaded ? "chargé" : "non chargé" }}
       </p>
 
       <button
         type="button"
-        class="new-chat-button"
+        class="btn btn-outline-dark btn-sm mt-3"
         :disabled="chatting || loading"
         @click="startNewConversation"
       >
@@ -929,23 +935,25 @@ async function scrollToBottom() {
       </button>
     </header>
 
-    <section v-if="settingsOpen" class="settings-panel">
-      <h3>Configuration</h3>
+    <section v-if="settingsOpen" class="d-flex flex-column gap-2 p-3 border-bottom bg-body-tertiary overflow-auto" style="max-height: 55%">
+      <h3 class="h6 mb-0">Configuration</h3>
 
-      <label class="settings-field">
+      <label class="d-flex flex-column gap-1 small text-body-secondary">
         <span>URL de base (DEFAULT_BASE_URL)</span>
         <input
           v-model="settingsDraft.baseUrl"
+          class="form-control form-control-sm"
           type="url"
           placeholder="http://127.0.0.1:1234"
           @input="settingsSaved = false"
         />
       </label>
 
-      <label class="settings-field">
+      <label class="d-flex flex-column gap-1 small text-body-secondary">
         <span>Modèle par défaut (DEFAULT_MODEL)</span>
         <input
           v-model="settingsDraft.defaultModel"
+          class="form-control form-control-sm"
           type="text"
           list="lm-studio-models"
           placeholder="google/gemma-4-e4b"
@@ -962,10 +970,11 @@ async function scrollToBottom() {
         </datalist>
       </label>
 
-      <label class="settings-field">
+      <label class="d-flex flex-column gap-1 small text-body-secondary">
         <span>Tentatives de correction max (MAX_CORRECTION_ATTEMPTS)</span>
         <input
           v-model.number="settingsDraft.maxCorrectionAttempts"
+          class="form-control form-control-sm"
           type="number"
           min="0"
           max="50"
@@ -974,25 +983,27 @@ async function scrollToBottom() {
         />
       </label>
 
-      <label class="settings-field">
+      <label class="d-flex flex-column gap-1 small text-body-secondary">
         <span>Taille du contexte (context_length)</span>
         <input
           v-model.number="settingsDraft.contextLength"
+          class="form-control form-control-sm"
           type="number"
           min="1"
           step="1"
           @input="settingsSaved = false"
         />
-        <small class="settings-field-hint">
+        <small class="form-text">
           Appliquée au chargement. Utilise « Recharger » dans la liste après
           modification.
         </small>
       </label>
 
-      <label class="settings-field">
+      <label class="d-flex flex-column gap-1 small text-body-secondary">
         <span>Température (temperature)</span>
         <input
           v-model.number="settingsDraft.temperature"
+          class="form-control form-control-sm"
           type="number"
           min="0"
           max="1"
@@ -1001,23 +1012,25 @@ async function scrollToBottom() {
         />
       </label>
 
-      <label class="settings-field">
+      <label class="d-flex flex-column gap-1 small text-body-secondary">
         <span>Max tokens (max_output_tokens)</span>
         <input
           v-model.number="settingsDraft.maxTokens"
+          class="form-control form-control-sm"
           type="number"
           min="-1"
           step="1"
           @input="settingsSaved = false"
         />
-        <small class="settings-field-hint">
+        <small class="form-text">
           −1 = sans limite. Une valeur trop basse peut produire une réponse vide.
         </small>
       </label>
 
-      <div class="settings-actions">
+      <div class="d-flex flex-wrap gap-2">
         <button
           type="button"
+          class="btn btn-sm btn-primary"
           :disabled="chatting || loading"
           @click="saveSettings"
         >
@@ -1026,7 +1039,7 @@ async function scrollToBottom() {
 
         <button
           type="button"
-          class="secondary"
+          class="btn btn-sm btn-outline-dark"
           @click="restoreDefaultSettings"
         >
           Valeurs par défaut
@@ -1034,34 +1047,34 @@ async function scrollToBottom() {
 
         <button
           type="button"
-          class="secondary"
+          class="btn btn-sm btn-outline-dark"
           @click="settingsOpen = false"
         >
           Fermer
         </button>
       </div>
 
-      <p v-if="settingsSaved" class="settings-saved">
+      <p v-if="settingsSaved" class="small text-success-emphasis mb-0">
         Configuration enregistrée dans le localStorage.
       </p>
-      <p class="settings-hint">
+      <p class="form-text mb-0">
         Modifie l'URL du serveur, le modèle proposé à l'ouverture, les
         corrections automatiques et les paramètres d'inférence. Une valeur
         « Max tokens » de −1 retire la limite de génération.
       </p>
     </section>
 
-    <p v-if="error" class="error-message">
+    <p v-if="error" class="alert alert-danger rounded-0 mb-0">
       {{ error }}
     </p>
 
     <div
       ref="chatContainer"
-      class="chat-messages"
+      class="d-flex flex-grow-1 flex-column gap-3 overflow-auto p-3 bg-body-tertiary"
       aria-live="polite"
       aria-label="Conversation"
     >
-      <div v-if="!messages.length" class="empty-chat">
+      <div v-if="!messages.length" class="m-auto text-body-secondary text-center">
         <template v-if="!isModelLoaded">
           Choisis un modèle et charge-le pour commencer.
         </template>
@@ -1073,15 +1086,19 @@ async function scrollToBottom() {
       <div
         v-for="(message, index) in messages"
         :key="index"
-        class="message-row"
-        :class="message.role"
+        class="d-flex w-100"
+        :class="message.role === 'user' ? 'justify-content-end' : 'justify-content-start'"
       >
-        <div class="message">
-          <div class="message-author">
+        <div
+          class="p-3 rounded-3 text-break"
+          style="max-width: 85%; overflow-wrap: anywhere"
+          :class="message.role === 'user' ? 'bg-primary-subtle' : 'bg-body border'"
+        >
+          <div class="small fw-bold mb-1">
             {{ message.role === "user" ? "Toi" : "Assistant" }}
           </div>
 
-          <div class="message-content">
+          <div style="white-space: pre-wrap; line-height: 1.5">
             {{
               message.content ||
               (chatting && index === messages.length - 1
@@ -1093,11 +1110,13 @@ async function scrollToBottom() {
       </div>
     </div>
 
-    <form class="chat-input" @submit.prevent="sendMessage">
+    <form class="d-flex flex-column flex-sm-row align-items-stretch align-items-sm-end gap-2 p-3 border-top" @submit.prevent="sendMessage">
       <textarea
         v-model="input"
+        class="form-control flex-grow-1"
         placeholder="Écris ton message…"
         rows="2"
+        style="min-width: 0; resize: vertical"
         :disabled="!isModelLoaded || chatting"
         @keydown.enter.exact.prevent="sendMessage"
       />
@@ -1105,7 +1124,7 @@ async function scrollToBottom() {
       <button
         v-if="chatting"
         type="button"
-        class="cancel-button"
+        class="btn btn-danger align-self-end"
         aria-label="Annuler la génération"
         @click="cancelResponse"
       >
@@ -1115,6 +1134,7 @@ async function scrollToBottom() {
       <button
         v-else
         type="submit"
+        class="btn btn-primary align-self-end"
         :disabled="!isModelLoaded || !input.trim()"
       >
         Envoyer
@@ -1122,412 +1142,3 @@ async function scrollToBottom() {
     </form>
   </section>
 </template>
-
-<style scoped>
-.lm-chat {
-  display: flex;
-  flex-direction: column;
-  height: 650px;
-  max-width: 850px;
-  margin: 0 auto;
-  overflow: hidden;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  background: #fff;
-  color: #1f2937;
-  font-family: system-ui, sans-serif;
-}
-
-.chat-header {
-  padding: 16px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.chat-header h2 {
-  margin: 0 0 12px;
-  font-size: 1.2rem;
-}
-
-.chat-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.chat-title-row h2 {
-  margin: 0;
-}
-
-.settings-toggle {
-  padding: 5px 10px;
-  font-size: 1.15rem;
-  line-height: 1;
-  background: #4b5563;
-}
-
-.settings-toggle.actif {
-  background: #00a884;
-}
-
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
-  max-height: 55%;
-  overflow-y: auto;
-  border-bottom: 1px solid #e5e7eb;
-  background: #f3f4f6;
-}
-
-.settings-panel h3 {
-  margin: 0;
-  font-size: 1rem;
-}
-
-.settings-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.85rem;
-  color: #374151;
-}
-
-.settings-field input {
-  font: inherit;
-  padding: 8px 10px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: #fff;
-  color: #1f2937;
-}
-
-.settings-field-hint {
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.settings-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.settings-actions .secondary {
-  background: #6b7280;
-}
-
-.settings-saved {
-  margin: 0;
-  font-size: 0.8rem;
-  color: #15803d;
-}
-
-.settings-hint {
-  margin: 0;
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.model-manager {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.model-filter-row input {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: #fff;
-  color: inherit;
-  box-sizing: border-box;
-}
-
-.model-table-wrapper {
-  max-height: 230px;
-  overflow: auto;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: #fff;
-}
-
-.model-table {
-  width: 100%;
-  min-width: 620px;
-  border-collapse: collapse;
-  font-size: 0.78rem;
-  table-layout: fixed;
-}
-
-.model-table th,
-.model-table td {
-  padding: 7px 8px;
-  border-bottom: 1px solid #e5e7eb;
-  text-align: left;
-  vertical-align: middle;
-}
-
-.model-table th:nth-child(1) {
-  width: 27%;
-}
-
-.model-table th:nth-child(2) {
-  width: 33%;
-}
-
-.model-table th:nth-child(3) {
-  width: 12%;
-}
-
-.model-table th:nth-child(4) {
-  width: 12%;
-}
-
-.model-table th:nth-child(5) {
-  width: 16%;
-}
-
-.model-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #e5e7eb;
-  font-weight: 600;
-  color: #374151;
-}
-
-.model-table th.sortable {
-  cursor: pointer;
-  user-select: none;
-}
-
-.model-table th.sortable:hover {
-  background: #d1d5db;
-}
-
-.model-table th.active {
-  color: #1d4ed8;
-}
-
-.sort-indicator {
-  display: inline-block;
-  margin-left: 4px;
-  font-size: 0.72rem;
-  color: #6b7280;
-}
-
-.model-row {
-  cursor: pointer;
-}
-
-.model-row:hover td {
-  background: #f9fafb;
-}
-
-.model-row.selected td {
-  background: #dbeafe;
-}
-
-.model-row.loaded .model-name {
-  font-weight: 600;
-}
-
-.model-name,
-.model-key {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-key {
-  color: #6b7280;
-}
-
-.numeric {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.model-status-cell,
-.model-actions {
-  text-align: center;
-  white-space: nowrap;
-}
-
-.badge {
-  display: inline-block;
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  line-height: 1.4;
-}
-
-.badge.loaded {
-  background: #dcfce7;
-  color: #15803d;
-}
-
-.badge.available {
-  background: #f3f4f6;
-  color: #6b7280;
-}
-
-.table-action {
-  padding: 4px 8px;
-  font-size: 0.72rem;
-}
-
-.table-action:disabled {
-  background: #9ca3af;
-  opacity: 1;
-}
-
-.empty-row {
-  padding: 12px 8px;
-  text-align: center;
-  color: #6b7280;
-}
-
-.selected-model {
-  margin: 8px 0 0;
-  color: #6b7280;
-  font-size: 0.8rem;
-}
-
-button,
-textarea,
-input {
-  font: inherit;
-}
-
-button {
-  padding: 9px 14px;
-  border: 0;
-  border-radius: 6px;
-  background: #2563eb;
-  color: white;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.error-message {
-  margin: 0;
-  padding: 10px 16px;
-  background: #fef2f2;
-  color: #b91c1c;
-  overflow-wrap: anywhere;
-}
-
-.chat-messages {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
-  padding: 20px;
-  background: #f9fafb;
-}
-
-.empty-chat {
-  margin: auto;
-  color: #6b7280;
-  text-align: center;
-}
-
-.message-row {
-  display: flex;
-  width: 100%;
-}
-
-.message-row.user {
-  justify-content: flex-end;
-}
-
-.message-row.assistant {
-  justify-content: flex-start;
-}
-
-.message {
-  max-width: 85%;
-  padding: 12px 14px;
-  border-radius: 12px;
-  overflow-wrap: anywhere;
-}
-
-.user .message {
-  background: #dbeafe;
-  border-bottom-right-radius: 3px;
-}
-
-.assistant .message {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-bottom-left-radius: 3px;
-}
-
-.message-author {
-  margin-bottom: 6px;
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.message-content {
-  white-space: pre-wrap;
-  line-height: 1.5;
-}
-
-.chat-input {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  padding: 14px;
-  border-top: 1px solid #e5e7eb;
-}
-
-.chat-input textarea {
-  flex: 1;
-  min-width: 0;
-  resize: vertical;
-  padding: 10px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  color: inherit;
-  background: white;
-}
-
-.cancel-button {
-  background: #dc2626;
-}
-
-.cancel-button:hover {
-  background: #b91c1c;
-}
-
-@media (max-width: 500px) {
-  .lm-chat {
-    height: 80vh;
-  }
-
-  .chat-input {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .chat-input button {
-    align-self: flex-end;
-  }
-
-  .new-chat-button {
-    margin-top: 12px;
-    background: #4b5563;
-  }
-}
-</style>

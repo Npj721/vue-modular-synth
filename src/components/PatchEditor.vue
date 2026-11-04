@@ -39,6 +39,8 @@ const props = defineProps({
   excludeCategories: { type: Array, default: () => [] },
   // éditeur sous une modale : désactiver les raccourcis clavier du paper
   inactive: { type: Boolean, default: false },
+  // remplir la hauteur du conteneur parent au lieu de 100vh - dock
+  fill: { type: Boolean, default: false },
 })
 const patch = props.patch
 
@@ -398,11 +400,22 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="editor-root">
+  <div
+    class="d-flex flex-row overflow-hidden"
+    :style="{ height: fill ? '100%' : 'calc(100vh - var(--dock-height, 0px))' }"
+  >
     <!-- Main area -->
-    <div class="editor-main" :class="{ 'no-manager': !showPatchManager }">
+    <div class="d-flex flex-grow-1 min-w-0 overflow-hidden">
       <!-- Patch manager (left) -->
-      <aside v-if="showPatchManager" class="editor-patch" :class="{ collapsed: !managerOpen }">
+      <aside
+        v-if="showPatchManager"
+        class="flex-shrink-0 border-end bg-body-tertiary overflow-y-auto"
+        :class="{ 'opacity-0 border-0 overflow-hidden': !managerOpen }"
+        :style="{
+          width: managerOpen ? '260px' : '0px',
+          transition: 'width 0.25s ease, opacity 0.25s ease',
+        }"
+      >
         <PatchManager
           :paperRef="paperRef"
           :patch="patch"
@@ -410,13 +423,12 @@ onMounted(async () => {
         />
       </aside>
 
-      <!-- Center column : le paper occupe ici une hauteur fixe élevée,
-           le panneau de propriétés est une colonne à part (droite) -->
-      <section class="editor-center">
+      <!-- Center column : le paper occupe l'espace restant -->
+      <section class="d-flex flex-column flex-grow-1 min-w-0 min-h-0 overflow-hidden">
         <!-- Paper -->
         <ModulePaper
           ref="paperRef"
-          class="editor-paper"
+          class="flex-grow-1 overflow-hidden"
           :fill-height="paperFillHeight"
           :exclude-categories="[
             ...(allowInterfaceModules ? [] : ['interface']),
@@ -438,102 +450,17 @@ onMounted(async () => {
     </div>
 
     <!-- Properties (colonne dédiée : collée à droite, à côté du paper) -->
-<ModulePropertyPanel
-        v-if="selectedModule()"
-        class="editor-properties"
-        :module="selectedModule()"
-        @param-changed="handleParamChanged"
-        @label-changed="handleLabelChanged"
-        @edit-synth="(mod) => emit('edit-synth', mod)"
-        @load-synth="(mod) => emit('load-synth', mod)"
-        @load-super-synth="(mod) => emit('load-super-synth', mod)"
-        @save-super-synth="(mod) => emit('save-super-synth', mod)"
-      />
+    <ModulePropertyPanel
+      v-if="selectedModule()"
+      class="flex-shrink-0 border-start bg-body-tertiary overflow-y-auto"
+      style="width: 600px; max-width: 60%"
+      :module="selectedModule()"
+      @param-changed="handleParamChanged"
+      @label-changed="handleLabelChanged"
+      @edit-synth="(mod) => emit('edit-synth', mod)"
+      @load-synth="(mod) => emit('load-synth', mod)"
+      @load-super-synth="(mod) => emit('load-super-synth', mod)"
+      @save-super-synth="(mod) => emit('save-super-synth', mod)"
+    />
   </div>
 </template>
-
-<style scoped>
-  .editor-root {
-    display: flex;
-    flex-direction: row;
-    height: calc(100vh - var(--dock-height, 0px));
-    overflow: hidden;
-  }
-
-  /* =========================
-  * MAIN GRID
-  * ========================= */
-  .editor-main {
-    flex: 1;
-    display: grid;
-    grid-template-columns:
-      auto /* patch manager */
-      minmax(720px, 1fr) /* paper : jamais plus petit que 720px */
-      auto; /* properties */
-    overflow: hidden;
-  }
-
-  /* sans patch manager, le canvas prend toute la largeur
-     (sinon il tombe dans la colonne "auto" et rétrécit) */
-  .editor-main.no-manager {
-    grid-template-columns: minmax(720px, 1fr) auto;
-  }
-
-  /* =========================
-  * PATCH MANAGER
-  * ========================= */
-  .editor-patch {
-    width: 260px;
-    border-right: 1px solid #ddd;
-    background: #fafafa;
-    overflow-y: auto;
-    transition: width 0.25s ease, opacity 0.25s ease;
-  }
-
-  .editor-patch.collapsed {
-    width: 0;
-    padding: 0;
-    border: none;
-    overflow: hidden;
-    opacity: 0;
-  }
-
-  /* =========================
-  * PAPER
-  * ========================= */
-  .editor-paper-wrapper {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .editor-paper {
-    flex: 1;
-    background: #fff;
-    overflow: hidden;
-  }
-
-  /* =========================
-  * DEBUG
-  * ========================= */
-  .editor-debug {
-    flex: 0 0 auto;
-    padding: 6px 8px;
-    font-size: 12px;
-    border-top: 1px solid #ddd;
-    background: #fafafa;
-  }
-
-  /* =========================
-  * PROPERTIES
-  * ========================= */
-  .editor-properties {
-    width: 600px;
-    max-width: 60%;
-    flex-shrink: 0;
-    border-left: 1px solid #ddd;
-    background: #fafafa;
-    align-self: stretch;
-    overflow-y: auto;
-  }
-</style>

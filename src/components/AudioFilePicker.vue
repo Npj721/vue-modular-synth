@@ -80,23 +80,39 @@ const clear = async () => {
 </script>
 
 <template>
-  <div class="audio-file-picker">
-    <div v-if="value" class="file-row">
-      <span class="file-name" :title="value">{{ value }}</span>
-      <span class="file-status" :class="status">
+  <div class="audio-file-picker d-flex flex-column gap-2">
+    <div v-if="value" class="file-row d-flex align-items-center gap-2 small">
+      <span
+        class="file-name text-truncate"
+        style="max-width: 160px"
+        :title="value"
+      >{{ value }}</span>
+      <span
+        class="file-status badge"
+        :class="{
+          'text-bg-success': status === 'loaded',
+          'text-bg-warning': status === 'loading',
+          'text-bg-danger': status === 'missing',
+        }"
+      >
         <template v-if="status === 'loading'">◌ chargement…</template>
         <template v-else-if="status === 'loaded'">● chargé</template>
         <template v-else-if="status === 'missing'">○ non retrouvé</template>
       </span>
       <button
         title="Recharger depuis le stockage"
-        class="icon-btn"
+        class="btn btn-sm btn-outline-dark py-0 px-1"
         @click="reload"
       >↻</button>
-      <button title="Effacer" class="icon-btn" @click="clear">✕</button>
+      <button
+        title="Effacer"
+        class="btn btn-sm btn-outline-danger py-0 px-1"
+        @click="clear"
+      >✕</button>
     </div>
 
     <input
+      class="form-control form-control-sm"
       type="file"
       accept="audio/*"
       :disabled="loading"
@@ -104,44 +120,3 @@ const clear = async () => {
     />
   </div>
 </template>
-
-<style scoped>
-.audio-file-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.file-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.file-name {
-  opacity: 0.8;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-status {
-  font-size: 11px;
-  font-weight: bold;
-}
-.file-status.loaded { color: #27ae60; }
-.file-status.loading { color: #f39c12; }
-.file-status.missing { color: #c0392b; }
-
-.icon-btn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 13px;
-  padding: 0 2px;
-  opacity: 0.7;
-}
-.icon-btn:hover { opacity: 1; }
-</style>

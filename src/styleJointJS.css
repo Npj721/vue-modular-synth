@@ -1,5 +1,5 @@
 /* =========================
- * MODULE BASE
+ * MODULE BASE (JointJS SVG)
  * ========================= */
 
 .module-body {
@@ -14,7 +14,7 @@
  * ========================= */
 
 .module-body.is-selected {
-  stroke: #4dabff;
+  stroke: var(--bs-primary);
   stroke-width: 2.5;
 
   /* marching ants */
@@ -22,9 +22,8 @@
   animation: ants 1.2s linear infinite;
 
   /* glow */
-  filter:
-    drop-shadow(0 0 4px rgba(77, 171, 255, 0.6))
-    drop-shadow(0 0 10px rgba(77, 171, 255, 0.35));
+  filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.6))
+    drop-shadow(0 0 10px rgba(var(--bs-primary-rgb), 0.35));
 }
 
 /* =========================
@@ -32,15 +31,15 @@
  * ========================= */
 
 .module-body.is-copy-target {
-  stroke: #00c9a7;
+  stroke: var(--bs-info);
   stroke-width: 3;
-  filter: drop-shadow(0 0 6px rgba(0, 201, 167, 0.55));
+  filter: drop-shadow(0 0 6px rgba(var(--bs-info-rgb), 0.55));
 }
 
 .module-body.is-copy-flash {
-  stroke: #ffd54d;
+  stroke: var(--bs-warning);
   stroke-width: 3;
-  filter: drop-shadow(0 0 8px rgba(255, 213, 77, 0.7));
+  filter: drop-shadow(0 0 8px rgba(var(--bs-warning-rgb), 0.7));
 }
 
 /* =========================
@@ -56,10 +55,15 @@
   }
 }
 
-.paper {
+.joint-paper {
   cursor: default;
 }
 
-.paper.is-panning {
+/* les connexions sont supprimables au clic droit */
+.joint-paper .joint-link {
+  cursor: pointer;
+}
+
+.joint-paper.is-panning {
   cursor: grabbing;
 }

@@ -147,53 +147,74 @@ async function deleteDef(def) {
 </script>
 
 <template>
-  <div class="super-editor">
+  <div
+    class="d-flex flex-column border rounded overflow-hidden"
+    style="height: calc(100vh - var(--dock-height, 0px))"
+  >
     <!-- Barre d'action -->
-    <header class="super-header">
+    <header class="d-flex align-items-center flex-wrap gap-2 p-2 bg-body-tertiary border-bottom">
       <input
         v-model="name"
         placeholder="Nom du super-module (ex: supervoice)"
-        class="super-name"
+        class="form-control form-control-sm"
+        style="width: 240px"
       />
-      <input v-model="color" type="color" class="super-color" />
-      <button class="btn primary" @click="save">Enregistrer</button>
-      <button class="btn" @click="saveAs">Enregistrer sous</button>
-      <button class="btn" @click="newSuper">Nouveau</button>
+      <input
+        v-model="color"
+        type="color"
+        class="form-control form-control-color form-control-sm"
+        style="width: 48px"
+      />
+      <button class="btn btn-sm btn-primary" @click="save">Enregistrer</button>
+      <button class="btn btn-sm btn-outline-dark" @click="saveAs">Enregistrer sous</button>
+      <button class="btn btn-sm btn-outline-dark" @click="newSuper">Nouveau</button>
 
-      <span class="hint">
+      <span class="small text-body-secondary ms-auto">
         Placez des nœuds « Super In » / « Super Out » pour définir l'interface
         du module.
       </span>
     </header>
 
-    <div class="super-main">
+    <div class="d-flex flex-grow-1 min-h-0 overflow-hidden">
       <!-- Liste des super-modules -->
-      <aside class="super-list">
-        <h3>Super-modules</h3>
+      <aside
+        class="flex-shrink-0 border-end bg-body-tertiary p-3 overflow-y-auto"
+        style="width: 220px"
+      >
+        <h3 class="h6 mb-2">Super-modules</h3>
 
-        <ul v-if="defs.length">
+        <ul v-if="defs.length" class="list-group list-group-flush mb-2">
           <li
             v-for="d in defs"
             :key="d.type"
-            :class="{ selected: d.type === editingType }"
+            class="list-group-item d-flex align-items-center gap-2 px-2 py-1"
+            :class="{ active: d.type === editingType }"
+            style="cursor: pointer"
             @click="editDef(d)"
           >
-            <span class="dot" :style="{ background: d.color }"></span>
-            <span class="label">{{ d.label }}</span>
-            <button class="del" title="Supprimer" @click.stop="deleteDef(d)">
+            <span
+              class="d-inline-block rounded-circle flex-shrink-0"
+              :style="{ width: '12px', height: '12px', background: d.color }"
+            ></span>
+            <span class="flex-grow-1 text-truncate">{{ d.label }}</span>
+            <button
+              class="btn btn-sm btn-link text-danger-emphasis p-0 border-0"
+              title="Supprimer"
+              @click.stop="deleteDef(d)"
+            >
               X
             </button>
           </li>
         </ul>
-        <p v-else class="empty">Aucun super-module enregistré.</p>
+        <p v-else class="small text-body-secondary mb-2">Aucun super-module enregistré.</p>
 
-        <p v-if="editingType" class="meta">
+        <p v-if="editingType" class="small text-body-secondary mb-0">
           édition de : <code>{{ editingType }}</code>
         </p>
       </aside>
 
       <!-- Canvas interne -->
-      <section class="super-canvas">
+      <section class="d-flex flex-grow-1 min-w-0 min-h-0 overflow-hidden">
         <PatchEditor
           ref="editorRef"
           :key="editorKey"
@@ -204,174 +225,10 @@ async function deleteDef(def) {
           :initial-patch="initialPatch"
           :super-export-enabled="false"
           :exclude-categories="['event']"
+          class="flex-grow-1 min-w-0"
+          fill
         />
       </section>
     </div>
   </div>
 </template>
-
-<style scoped>
-.super-editor {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  overflow: hidden;
-  /* même gabarit que les éditeurs Voice / Main (PatchEditor = 100vh moins le dock) */
-  height: calc(100vh - var(--dock-height, 0px));
-}
-
-/* =========================
- * HEADER
- * ========================= */
-.super-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  background: #f0f4ff;
-  border-bottom: 1px solid #ddd;
-}
-
-.super-name {
-  width: 240px;
-  padding: 6px 8px;
-}
-
-.super-color {
-  width: 42px;
-  height: 32px;
-  padding: 2px;
-  cursor: pointer;
-}
-
-.btn {
-  padding: 6px 14px;
-  border: 1px solid #bbb;
-  background: white;
-  border-radius: 4px;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-.btn.primary {
-  background: #7c4dff;
-  border-color: #7c4dff;
-  color: white;
-}
-
-.hint {
-  font-size: 12px;
-  color: #666;
-  margin-left: auto;
-}
-
-/* =========================
- * MAIN
- * ========================= */
-.super-main {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 220px 1fr;
-  min-height: 0; /* permet au canvas de remplir sans déborder */
-  overflow: hidden;
-}
-
-/* =========================
- * LISTE
- * ========================= */
-.super-list {
-  border-right: 1px solid #ddd;
-  background: #fafafa;
-  padding: 10px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.super-list h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-}
-
-.super-list ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.super-list li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.super-list li:hover {
-  background: #eee;
-}
-
-.super-list li.selected {
-  background: #e5dbff;
-}
-
-.dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-}
-
-.label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.del {
-  border: none;
-  background: transparent;
-  color: #c0392b;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-.empty,
-.meta {
-  font-size: 12px;
-  color: #777;
-}
-
-.meta code {
-  font-size: 11px;
-}
-
-/* =========================
- * CANVAS
- * ========================= */
-.super-canvas {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-}
-
-/* le PatchEditor imbriqué remplit la cellule (sous la barre d'action) */
-.super-canvas :deep(.editor-root) {
-  flex: 1;
-  height: 100%;
-  min-width: 0;
-}
-
-/* colonne centrale : paper extensible + panel de propriétés en dessous */
-.super-canvas :deep(.editor-center) {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.super-canvas :deep(.editor-main) {
-  min-height: 0;
-}
-</style>

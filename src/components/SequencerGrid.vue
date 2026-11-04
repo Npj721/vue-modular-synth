@@ -31,6 +31,26 @@ const totalSteps = computed(() => Math.max(1, Math.round(Number(props.stepCount)
 const gridWidth = computed(() => totalSteps.value * CELL_W)
 const gridHeight = computed(() => (NOTE_MAX - NOTE_MIN + 1) * ROW_H)
 
+/* Lignes verticales de la grille : mineures à chaque pas, majeures tous les
+ * 4 pas. Couleurs issues du thème Bootstrap courant. */
+const gridBackground = computed(() => {
+  const minor = "rgba(var(--bs-body-color-rgb), 0.12)"
+  const major = "rgba(var(--bs-body-color-rgb), 0.26)"
+  return [
+    `repeating-linear-gradient(90deg, ${minor} 0 1px, transparent 1px ${CELL_W}px)`,
+    `repeating-linear-gradient(90deg, ${major} 0 1px, transparent 1px ${CELL_W * 4}px)`,
+  ].join(", ")
+})
+
+/* Styles de ligne partagés par la colonne de notes et la grille. */
+const rowStyle = (row) => ({
+  height: `${ROW_H}px`,
+  boxSizing: "border-box",
+  borderBottom: "1px solid var(--bs-border-color-translucent)",
+  backgroundColor: row.black ? "rgba(var(--bs-body-color-rgb), 0.04)" : undefined,
+  borderTop: row.isC ? "1px solid rgba(var(--bs-body-color-rgb), 0.25)" : undefined,
+})
+
 const noteName = (note) => {
   const safe = Math.max(NOTE_MIN, Math.min(NOTE_MAX, Math.round(Number(note))))
   return `${NOTE_NAMES[safe % 12]}${Math.floor(safe / 12) - 1}`
@@ -140,24 +160,45 @@ watch(
 </script>
 
 <template>
-  <div ref="scrollEl" class="seq-scroll">
-    <div class="seq-content">
-      <div class="seq-header">
-        <div class="seq-header-spacer">note</div>
-        <div class="seq-header-steps" :style="{ width: gridWidth + 'px' }">
+  <div
+    ref="scrollEl"
+    class="border rounded overflow-auto bg-body"
+    style="height: 340px; min-height: 180px; max-height: 70vh; resize: vertical; box-sizing: border-box"
+  >
+    <div style="width: max-content; min-width: 100%">
+      <div
+        class="d-flex border-bottom bg-body-tertiary"
+        style="position: sticky; top: 0; z-index: 4; width: max-content"
+      >
+        <div
+          class="d-flex align-items-center justify-content-center border-end bg-body-tertiary text-body-secondary text-uppercase user-select-none"
+          style="position: sticky; left: 0; z-index: 5; width: 38px; min-width: 38px; height: 44px; box-sizing: border-box; font-size: 9px; letter-spacing: 0.04em"
+        >note</div>
+        <div class="d-flex" :style="{ width: gridWidth + 'px' }">
           <div
             v-for="i in totalSteps"
             :key="i"
-            class="seq-header-step"
+            class="d-flex flex-column align-items-center justify-content-between border-end user-select-none"
             :class="{
-              active: stepStates[i - 1]?.active,
-              current: i - 1 === currentStep,
+              'bg-warning-subtle': stepStates[i - 1]?.active,
+              'bg-warning': i - 1 === currentStep,
+            }"
+            :style="{
+              width: CELL_W + 'px',
+              minWidth: CELL_W + 'px',
+              height: '44px',
+              padding: '2px 0 3px',
+              boxSizing: 'border-box',
+              fontSize: '9px',
+              color: i - 1 === currentStep ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)',
+              borderRightColor: i % 4 === 0 ? 'var(--bs-secondary-border-subtle)' : 'var(--bs-border-color)',
             }"
             :title="`Pas ${i}`"
           >
-            <span class="seq-step-number">{{ i }}</span>
+            <span class="font-monospace">{{ i }}</span>
             <div
-              class="seq-velocity"
+              class="position-relative overflow-hidden rounded"
+              style="width: 10px; height: 24px; background: var(--bs-secondary-bg); cursor: ns-resize; touch-action: none"
               :title="`Vélocité du pas ${i} : ${Math.round((stepStates[i - 1]?.velocity ?? 1) * 100)} %`"
               @pointerdown="onVelocityDown($event, i - 1)"
               @pointermove="onVelocityMove($event, i - 1)"
@@ -165,14 +206,15 @@ watch(
               @pointercancel="stopVelocityDrag"
             >
               <div
-                class="seq-velocity-fill"
+                class="position-absolute bottom-0 start-0 end-0 bg-warning"
                 :style="{ height: (stepStates[i - 1]?.velocity ?? 1) * 100 + '%' }"
               ></div>
             </div>
           </div>
           <button
             type="button"
-            class="seq-header-add"
+            class="btn btn-warning rounded-0 fw-bold border-start"
+            style="width: 28px; min-width: 28px; height: 44px; font-size: 18px"
             title="Ajouter un pas"
             @click="emit('add-step')"
           >
@@ -181,50 +223,77 @@ watch(
         </div>
       </div>
 
-      <div class="seq-body">
-        <div class="seq-keys" :style="{ height: gridHeight + 'px' }">
+      <div class="d-flex" style="width: max-content">
+        <div
+          class="bg-body border-end"
+          :style="{
+            position: 'sticky',
+            left: 0,
+            zIndex: 3,
+            width: '38px',
+            minWidth: '38px',
+            boxSizing: 'border-box',
+            height: gridHeight + 'px',
+          }"
+        >
           <div
             v-for="row in noteRows"
             :key="row.note"
-            class="seq-key"
-            :class="{ black: row.black, c: row.isC }"
+            class="d-flex align-items-center justify-content-end user-select-none"
+            :class="{
+              'bg-body-secondary text-body-tertiary': row.black,
+              'fw-semibold text-body': row.isC,
+            }"
+            :style="{ ...rowStyle(row), paddingRight: '4px', fontSize: '9px' }"
           >
             {{ row.name }}
           </div>
         </div>
 
         <div
-          class="seq-grid"
-          :style="{ width: gridWidth + 'px', height: gridHeight + 'px' }"
+          class="position-relative"
+          :style="{
+            width: gridWidth + 'px',
+            height: gridHeight + 'px',
+            cursor: 'crosshair',
+            backgroundImage: gridBackground,
+            backgroundColor: 'var(--bs-body-bg)',
+          }"
           @click="onGridClick"
         >
           <div
             v-for="row in noteRows"
             :key="row.note"
-            class="seq-row"
-            :class="{ black: row.black, c: row.isC }"
+            :style="rowStyle(row)"
           ></div>
 
           <div
             v-if="currentStep >= 0 && currentStep < totalSteps"
-            class="seq-current-col"
+            class="position-absolute top-0 bottom-0 pe-none"
             :style="{
               left: currentStep * CELL_W + 'px',
               width: CELL_W + 'px',
+              zIndex: 1,
+              backgroundColor: 'rgba(var(--bs-danger-rgb), 0.12)',
             }"
           ></div>
 
           <div
             v-for="note in activeNotes"
             :key="note.index"
-            class="seq-note"
-            :class="{ current: note.index === currentStep }"
+            class="position-absolute rounded pe-none"
             :style="{
               left: note.index * CELL_W + 1 + 'px',
               top: noteTop(note.note) + 1 + 'px',
               width: CELL_W - 2 + 'px',
               height: ROW_H - 2 + 'px',
               opacity: 0.45 + note.velocity * 0.55,
+              zIndex: 2,
+              boxSizing: 'border-box',
+              border: `1px solid ${note.index === currentStep ? 'var(--bs-danger)' : 'var(--bs-warning)'}`,
+              background: note.index === currentStep
+                ? 'linear-gradient(var(--bs-danger), var(--bs-danger))'
+                : 'linear-gradient(var(--bs-warning), var(--bs-warning))',
             }"
             :title="`Pas ${note.index + 1} · ${noteName(note.note)} · vélocité ${Math.round(note.velocity * 100)} %`"
           ></div>
@@ -233,241 +302,3 @@ watch(
     </div>
   </div>
 </template>
-
-<style scoped>
-.seq-scroll {
-  --cell-w: 26px;
-  --row-h: 16px;
-  --key-w: 38px;
-
-  height: 340px;
-  min-height: 180px;
-  max-height: 70vh;
-  overflow: auto;
-  resize: vertical;
-  border: 1px solid #e0c9a6;
-  border-radius: 4px;
-  background: #fff;
-  box-sizing: border-box;
-}
-
-.seq-content {
-  width: max-content;
-  min-width: 100%;
-}
-
-/* ---------- En-tête : numéros de pas + vélocités ---------- */
-
-.seq-header {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  display: flex;
-  width: max-content;
-  background: #fdf6ea;
-  border-bottom: 1px solid #e0c9a6;
-}
-
-.seq-header-spacer {
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--key-w);
-  min-width: var(--key-w);
-  height: 44px;
-  box-sizing: border-box;
-  background: #fdf6ea;
-  border-right: 1px solid #e0c9a6;
-  color: #b08a55;
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.seq-header-steps {
-  display: flex;
-}
-
-.seq-header-step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  width: var(--cell-w);
-  min-width: var(--cell-w);
-  height: 44px;
-  padding: 2px 0 3px;
-  box-sizing: border-box;
-  border-right: 1px solid #ead7b8;
-  color: #8a6a3a;
-  font-size: 9px;
-  user-select: none;
-}
-
-.seq-header-step:nth-child(4n) {
-  border-right-color: #d8b98b;
-}
-
-.seq-header-step.active {
-  background: #ffe9c4;
-}
-
-.seq-header-step.current {
-  background: #f7c9a3;
-  box-shadow: inset 0 0 0 1px #e67e22;
-}
-
-.seq-step-number {
-  font-variant-numeric: tabular-nums;
-}
-
-.seq-velocity {
-  position: relative;
-  width: 10px;
-  height: 24px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: #f0e0c8;
-  cursor: ns-resize;
-  touch-action: none;
-}
-
-.seq-velocity-fill {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  background: #e29a2d;
-}
-
-.seq-header-add {
-  width: 28px;
-  min-width: 28px;
-  height: 44px;
-  border: 0;
-  border-left: 1px solid #e0c9a6;
-  background: #f7e2c0;
-  color: #b9770e;
-  font-size: 18px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.seq-header-add:hover {
-  background: #ffe9c4;
-}
-
-/* ---------- Colonne des notes ---------- */
-
-.seq-body {
-  display: flex;
-  width: max-content;
-}
-
-.seq-keys {
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  width: var(--key-w);
-  min-width: var(--key-w);
-  box-sizing: border-box;
-  background: #fff;
-  border-right: 1px solid #e0c9a6;
-}
-
-.seq-key {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  height: var(--row-h);
-  padding-right: 4px;
-  box-sizing: border-box;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  background: #fff;
-  color: #555;
-  font-size: 9px;
-  user-select: none;
-  font-variant-numeric: tabular-nums;
-}
-
-.seq-key.black {
-  background: #f1f1f1;
-  color: #888;
-}
-
-.seq-key.c {
-  border-top: 1px solid #d8b98b;
-  font-weight: 600;
-  color: #333;
-}
-
-/* ---------- Grille ---------- */
-
-.seq-grid {
-  position: relative;
-  background: #fcfaf6;
-  cursor: crosshair;
-}
-
-.seq-row {
-  height: var(--row-h);
-  box-sizing: border-box;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-.seq-row.black {
-  background: rgba(0, 0, 0, 0.035);
-}
-
-.seq-row.c {
-  border-top: 1px solid rgba(160, 120, 60, 0.35);
-}
-
-/* Lignes verticales de la grille, par-dessus les lignes horizontales. */
-.seq-grid::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background-image:
-    repeating-linear-gradient(
-      90deg,
-      rgba(80, 60, 30, 0.12) 0 1px,
-      transparent 1px var(--cell-w)
-    ),
-    repeating-linear-gradient(
-      90deg,
-      rgba(80, 60, 30, 0.26) 0 1px,
-      transparent 1px calc(var(--cell-w) * 4)
-    );
-}
-
-.seq-current-col {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: rgba(231, 76, 60, 0.12);
-}
-
-.seq-note {
-  position: absolute;
-  z-index: 2;
-  box-sizing: border-box;
-  border: 1px solid #c67d0d;
-  border-radius: 3px;
-  background: linear-gradient(#f6b94f, #e79a1f);
-  pointer-events: none;
-}
-
-.seq-note.current {
-  border-color: #c0392b;
-  background: linear-gradient(#f07a6a, #e74c3c);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
-}
-</style>

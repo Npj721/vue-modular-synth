@@ -1032,25 +1032,26 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="module" class="property-panel">
-    <h3>{{ module.type }} Parameters</h3>
-    <div class="module-label">
+  <div v-if="module" class="h-100 p-3 bg-body-tertiary overflow-auto">
+    <h3 class="h6 text-capitalize border-bottom pb-2 mb-3 mt-0">{{ module.type }} Parameters</h3>
+    <div class="d-flex flex-column gap-1 mb-3">
       <input
         v-model="label"
+        class="form-control form-control-sm"
         type="text"
         placeholder="Label du module (ex: lead)"
         @input="emitLabel"
       />
-      <span v-if="label" class="hint">utilisé comme préfixe des paramètres exposés</span>
+      <span v-if="label" class="form-text">utilisé comme préfixe des paramètres exposés</span>
     </div>
 
     <!-- Module clavier : source d'événements du SynthPatch -->
-    <div v-if="module.type === 'keyboard'" class="synth-module-block">
-      <div class="synth-module-title">
+    <div v-if="module.type === 'keyboard'" class="d-flex flex-column gap-2 p-2 mb-3 border rounded bg-body-tertiary">
+      <div class="d-flex flex-column gap-1">
         <strong>{{ params.name || module.label || "Keyboard" }}</strong>
-        <span class="hint">source d'événements</span>
+        <span class="form-text">source d'événements</span>
       </div>
-      <p class="hint">
+      <p class="form-text mb-0">
         Le clavier à l'écran et le clavier physique du PC envoient leurs notes
         aux synthés dont l'entrée Events est reliée à ce module. Une même
         sortie peut alimenter plusieurs synthés. Pour un clavier MIDI, ajoutez
@@ -1061,22 +1062,23 @@ onBeforeUnmount(() => {
     <!-- Module Pitch : transpose les événements qui le traversent -->
     <div
       v-if="module.type === 'pitch'"
-      class="synth-module-block pitch-module-block"
+      class="d-flex flex-column gap-2 p-2 mb-3 border border-success-subtle rounded bg-success-subtle"
     >
-      <div class="synth-module-title">
+      <div class="d-flex flex-column gap-1">
         <strong>{{ params.name || module.label || "Pitch" }}</strong>
-        <span class="hint">transpose les events</span>
+        <span class="form-text">transpose les events</span>
       </div>
-      <p class="hint">
+      <p class="form-text mb-0">
         Câblez une source Events (clavier, MIDI, séquenceur…) sur l'entrée
         Events, puis la sortie Events vers le Synth ou SuperSynth à piloter.
         Chaque note reçue est transposée du décalage ci-dessous. Plusieurs
         modules Pitch peuvent être chaînés : les décalages se cumulent.
       </p>
 
-      <div class="pitch-offset-row">
+      <div class="d-flex align-items-center gap-2">
         <input
-          class="pitch-slider"
+          class="form-range flex-grow-1"
+          style="min-width: 120px"
           type="range"
           min="-48"
           max="48"
@@ -1084,18 +1086,18 @@ onBeforeUnmount(() => {
           :value="pitchOffset"
           @input="setPitchOffset($event.target.value)"
         />
-        <span class="pitch-value">{{ pitchOffsetLabel }}</span>
+        <span class="small fw-semibold text-success-emphasis text-end font-monospace" style="min-width: 94px">{{ pitchOffsetLabel }}</span>
       </div>
 
-      <div class="pitch-buttons">
-        <button type="button" title="Descendre d'une octave" @click="nudgePitch(-12)">−12</button>
-        <button type="button" title="Descendre d'un demi-ton" @click="nudgePitch(-1)">−1</button>
-        <button type="button" class="pitch-reset" title="Aucun décalage" @click="setPitchOffset(0)">0</button>
-        <button type="button" title="Monter d'un demi-ton" @click="nudgePitch(1)">+1</button>
-        <button type="button" title="Monter d'une octave" @click="nudgePitch(12)">+12</button>
+      <div class="d-flex flex-wrap gap-1">
+        <button type="button" class="btn btn-sm btn-outline-success" title="Descendre d'une octave" @click="nudgePitch(-12)">−12</button>
+        <button type="button" class="btn btn-sm btn-outline-success" title="Descendre d'un demi-ton" @click="nudgePitch(-1)">−1</button>
+        <button type="button" class="btn btn-sm btn-outline-dark" title="Aucun décalage" @click="setPitchOffset(0)">0</button>
+        <button type="button" class="btn btn-sm btn-outline-success" title="Monter d'un demi-ton" @click="nudgePitch(1)">+1</button>
+        <button type="button" class="btn btn-sm btn-outline-success" title="Monter d'une octave" @click="nudgePitch(12)">+12</button>
       </div>
 
-      <p class="hint">
+      <p class="form-text mb-0">
         Exemple : avec +2, une note 60 reçue est jouée en 62 par le synthé.
         Retirez le câble direct source → synthé si vous ne voulez entendre que
         la version transposée.
@@ -1105,37 +1107,38 @@ onBeforeUnmount(() => {
     <!-- Module MIDI : un appareil MIDI = une source d'événements -->
     <div
       v-if="module.type === 'midi'"
-      class="synth-module-block midi-module-block"
+      class="d-flex flex-column gap-2 p-2 mb-3 border border-info-subtle rounded bg-info-subtle"
     >
-      <div class="synth-module-title">
+      <div class="d-flex flex-column gap-1">
         <strong>{{ params.name || module.label || "MIDI Keyboard" }}</strong>
-        <span class="hint">source d'événements</span>
+        <span class="form-text">source d'événements</span>
       </div>
 
-      <div class="midi-module-controls">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
         <button
           type="button"
-          class="midi-enable-btn"
+          class="btn btn-sm btn-primary"
           :disabled="!midiState.supported || midiState.requested"
           @click="requestMidiAccess"
         >
           {{ midiState.requested ? "MIDI activé" : "Activer MIDI" }}
         </button>
         <span
-          class="midi-module-status"
-          :class="{ ok: midiState.devices.length > 0 }"
+          class="small"
+          :class="midiState.devices.length > 0 ? 'text-success-emphasis' : 'text-body-secondary'"
         >
           {{ midiStatusText }}
         </span>
       </div>
 
-      <div v-if="midiState.error" class="midi-module-error">
+      <div v-if="midiState.error" class="alert alert-danger py-1 px-2 small mb-0">
         {{ midiState.error }}
       </div>
 
-      <label v-if="midiState.devices.length" class="midi-module-device">
+      <label v-if="midiState.devices.length" class="d-flex flex-column gap-1 small text-body-secondary">
         Appareil
         <select
+          class="form-select form-select-sm"
           :value="params.device"
           @change="emitChange('device', $event.target.value)"
         >
@@ -1145,22 +1148,22 @@ onBeforeUnmount(() => {
           </option>
         </select>
       </label>
-      <p v-else-if="midiState.requested" class="hint">
+      <p v-else-if="midiState.requested" class="form-text mb-0">
         Aucun appareil MIDI détecté. Branchez un clavier puis rouvrez ce panneau.
       </p>
-      <p v-else-if="midiState.supported" class="hint">
+      <p v-else-if="midiState.supported" class="form-text mb-0">
         Activez MIDI pour lister les appareils disponibles.
       </p>
-      <p v-else class="hint">
+      <p v-else class="form-text mb-0">
         Le Web MIDI API n'est pas disponible dans ce navigateur. Utilisez Chrome
         ou Edge.
       </p>
 
-      <p v-if="midiDeviceMissing" class="midi-module-error">
+      <p v-if="midiDeviceMissing" class="alert alert-warning py-1 px-2 small mb-0">
         L'appareil sélectionné n'est plus disponible.
       </p>
 
-      <p class="hint">
+      <p class="form-text mb-0">
         Chaque module MIDI représente un appareil. Câblez sa sortie Events vers
         l'entrée Events des synthés à piloter.
       </p>
@@ -1169,26 +1172,28 @@ onBeforeUnmount(() => {
     <!-- Module séquenceur : source d'événements du SynthPatch -->
     <div
       v-if="module.type === 'sequencer'"
-      class="synth-module-block sequencer-module-block"
+      class="d-flex flex-column gap-2 p-2 mb-3 border border-warning-subtle rounded bg-warning-subtle"
     >
-      <div class="synth-module-title">
+      <div class="d-flex flex-column gap-1">
         <strong>{{ params.name || module.label || "Sequencer" }}</strong>
-        <span class="hint">source d'événements</span>
+        <span class="form-text">source d'événements</span>
       </div>
 
-      <div class="sequencer-controls">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
         <button
           type="button"
-          class="sequencer-play"
-          :class="{ playing: sequencerPlaying }"
+          class="btn btn-sm"
+          :class="sequencerPlaying ? 'btn-danger' : 'btn-warning'"
           @click="toggleSequencerPlay"
         >
           {{ sequencerPlaying ? "Stop" : "Play" }}
         </button>
-        <label>
+        <label class="d-flex align-items-center gap-1 small text-body-secondary">
           BPM
           <input
             v-model.number="params.bpm"
+            class="form-control form-control-sm"
+            style="width: 58px"
             type="number"
             min="40"
             max="300"
@@ -1196,17 +1201,20 @@ onBeforeUnmount(() => {
             @input="emitChange('bpm', params.bpm)"
           />
         </label>
-        <div class="sequencer-step-count">
+        <div class="d-flex align-items-center gap-1 small text-body-secondary">
           <span>Pas</span>
           <button
             type="button"
-            class="sequencer-count-btn"
+            class="btn btn-sm btn-outline-warning px-2 py-0"
+            style="width: 24px; height: 26px; line-height: 1"
             title="Retirer un pas"
             @click="addSequencerStep(-1)"
           >
             −
           </button>
           <input
+            class="form-control form-control-sm"
+            style="width: 58px"
             :value="params.stepCount"
             type="number"
             min="1"
@@ -1216,7 +1224,8 @@ onBeforeUnmount(() => {
           />
           <button
             type="button"
-            class="sequencer-count-btn"
+            class="btn btn-sm btn-outline-warning px-2 py-0"
+            style="width: 24px; height: 26px; line-height: 1"
             title="Ajouter un pas"
             @click="addSequencerStep(1)"
           >
@@ -1234,7 +1243,7 @@ onBeforeUnmount(() => {
         @add-step="addSequencerStep(1)"
       />
 
-      <p class="hint">
+      <p class="form-text mb-0">
         Cliquez sur une cellule pour poser (ou déplacer) la note du pas.
         Cliquez sur la note active pour la retirer. Le curseur vertical au-dessus
         de chaque pas règle sa vélocité. Les notes partent sur la sortie Events :
@@ -1243,22 +1252,22 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Nœud Synth : accès à l'éditeur voice/main interne -->
-    <div v-if="module.type === 'synth'" class="synth-module-block">
-      <div class="synth-module-title">
+    <div v-if="module.type === 'synth'" class="d-flex flex-column gap-2 p-2 mb-3 border border-primary-subtle rounded bg-primary-subtle">
+      <div class="d-flex flex-column gap-1">
         <strong>{{ params.name || module.label || "Synth" }}</strong>
-        <span class="hint">nœud Synth du SynthPatch</span>
+        <span class="form-text">nœud Synth du SynthPatch</span>
       </div>
-      <button type="button" class="synth-open-btn" @click="emit('edit-synth', module)">
+      <button type="button" class="btn btn-sm btn-primary" @click="emit('edit-synth', module)">
         Ouvrir le synthé (Voice / Main)
       </button>
       <button
         type="button"
-        class="synth-secondary-btn"
+        class="btn btn-sm btn-outline-dark"
         @click="emit('load-synth', module)"
       >
         Charger un synthé…
       </button>
-      <p class="hint">
+      <p class="form-text mb-0">
         Ce nœud expose une entrée audio principale et une sortie. Les notes
         jouées lui sont envoyées indépendamment des autres Synth.
       </p>
@@ -1267,34 +1276,34 @@ onBeforeUnmount(() => {
     <!-- Nœud SuperSynth : SynthPatch réutilisable, éditable récursivement -->
     <div
       v-if="module.type === 'superSynth'"
-      class="synth-module-block super-synth-module-block"
+      class="d-flex flex-column gap-2 p-2 mb-3 border border-primary-subtle rounded bg-primary-subtle"
     >
-      <div class="synth-module-title">
+      <div class="d-flex flex-column gap-1">
         <strong>{{ params.name || module.label || "SuperSynth" }}</strong>
-        <span class="hint">SuperSynth réutilisable</span>
+        <span class="form-text">SuperSynth réutilisable</span>
       </div>
       <button
         type="button"
-        class="synth-open-btn"
+        class="btn btn-sm btn-primary"
         @click="emit('edit-synth', module)"
       >
         Ouvrir le SuperSynth (Voice / Main)
       </button>
       <button
         type="button"
-        class="synth-secondary-btn"
+        class="btn btn-sm btn-outline-dark"
         @click="emit('load-super-synth', module)"
       >
         Charger un SuperSynth…
       </button>
       <button
         type="button"
-        class="synth-secondary-btn"
+        class="btn btn-sm btn-outline-dark"
         @click="emit('save-super-synth', module)"
       >
         Enregistrer dans la bibliothèque
       </button>
-      <p class="hint">
+      <p class="form-text mb-0">
         Ce nœud contient un SynthPatch complet (synthés internes + couche main).
         Les notes reçues sont propagées à tous ses synthés internes.
       </p>
@@ -1303,35 +1312,47 @@ onBeforeUnmount(() => {
     <!-- Visualiseur pseudo-3D de la table (module wavetableS uniquement) :
          les frames fuient vers un point de fuite, la frame en cours de
          lecture est surlignée en clair avec sa ligne de temps. -->
-    <div v-if="module.type === 'wavetableS'" class="wavetable-3d-viewer">
-      <h4>Table d'ondes</h4>
-      <canvas ref="viewer" class="wavetable-3d-canvas"></canvas>
-      <div class="wavetable-3d-meta">
-        <span class="wavetable-3d-frame" :class="{ off: !scanActive }">
-          frame <strong>{{ currentFrame }}</strong>
+    <div
+      v-if="module.type === 'wavetableS'"
+      class="mb-3 pb-3 border-bottom"
+      style="border-bottom-style: dashed !important"
+    >
+      <h4 class="h6 mb-2">Table d'ondes</h4>
+      <canvas ref="viewer" class="d-block w-100 rounded" style="height: 230px; background: #0a1016"></canvas>
+      <div class="d-flex justify-content-between align-items-baseline small text-body-secondary mt-1">
+        <span :class="{ 'opacity-50': !scanActive }">
+          frame <strong class="text-success-emphasis font-monospace">{{ currentFrame }}</strong>
           <template v-if="rowFrameCount > 1"> / {{ rowFrameCount - 1 }}</template>
-          <em>{{ scanActive ? "lecture" : "arrêt" }}</em>
+          <em class="fst-normal text-warning-emphasis">{{ scanActive ? "lecture" : "arrêt" }}</em>
         </span>
-        <span class="wavetable-3d-count">
+        <span class="font-monospace">
           {{ wavetableRows.length }} ligne(s)
         </span>
       </div>
     </div>
 
-    <div v-for="(def, key) in visibleParamDefs" :key="key" class="param-row" :class="{ 'param-envelope': def.type === 'envelope' || def.type === 'json', 'param-code': def.type === 'code' }">
-      <label>{{ key }}</label>  
+    <div
+      v-for="(def, key) in visibleParamDefs"
+      :key="key"
+      class="d-flex align-items-center gap-2 mb-2"
+      :class="{ 'flex-column align-items-stretch': def.type === 'envelope' || def.type === 'json' || def.type === 'code' }"
+    >
+      <label class="small text-body-secondary">{{ key }}</label>
       <!-- Number slider -->
       <input v-if="def.type === 'number'"
+             class="form-control form-control-sm"
+             style="width: 90px"
              type="number"
              :min="def.min"
              :max="def.max"
              :step="def.step"
              v-model.number="params[key]"
              @input="emitChange(key, params[key])" />
-      <span v-if="def.type === 'number'">{{ params[key] }}<template v-if="def.unit"> {{ def.unit }}</template></span>
+      <span v-if="def.type === 'number'" class="small font-monospace">{{ params[key] }}<template v-if="def.unit"> {{ def.unit }}</template></span>
 
       <!-- Enum dropdown -->
       <select v-else-if="def.type === 'enum'"
+              class="form-select form-select-sm"
               v-model="params[key]"
               @change="emitChange(key, params[key])">
         <option v-for="v in def.values" :key="v" :value="v">{{ v }}</option>
@@ -1339,6 +1360,7 @@ onBeforeUnmount(() => {
 
       <!-- String text input -->
       <input v-else-if="def.type === 'string'"
+             class="form-control form-control-sm"
              type="text"
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
@@ -1348,7 +1370,8 @@ onBeforeUnmount(() => {
            (cf. codeDrafts plus haut) -->
       <template v-else-if="def.type === 'code'">
         <textarea
-          class="code-editor"
+          class="form-control font-monospace"
+          style="min-height: 220px; font-size: 12px; line-height: 1.45; tab-size: 2; resize: vertical"
           spellcheck="false"
           autocomplete="off"
           autocapitalize="off"
@@ -1359,17 +1382,17 @@ onBeforeUnmount(() => {
           @keydown="onCodeKeydown(key, $event)"
           @blur="commitCode(key)"
         ></textarea>
-        <div class="code-actions">
-          <button type="button" @click="commitCode(key)">Valider (Ctrl+Entrée)</button>
-          <button type="button" @click="resetCode(key)">Code par défaut</button>
-          <span class="hint">
+        <div class="d-flex align-items-center flex-wrap gap-2 mt-2">
+          <button type="button" class="btn btn-sm btn-outline-dark" @click="commitCode(key)">Valider (Ctrl+Entrée)</button>
+          <button type="button" class="btn btn-sm btn-outline-dark" @click="resetCode(key)">Code par défaut</button>
+          <span class="form-text mb-0">
             compilé au chargement du patch — rejouez une note ou rechargez le patch
           </span>
         </div>
         <span
           v-if="module.type === 'waveshaper' && key === 'curve' && curveStatus"
-          class="code-status"
-          :class="curveStatus?.ok ? 'ok' : 'err'">
+          class="d-block mt-1 small font-monospace"
+          :class="curveStatus?.ok ? 'text-success-emphasis' : 'text-danger-emphasis'">
           {{ curveStatus?.message }}
         </span>
       </template>
@@ -1377,26 +1400,28 @@ onBeforeUnmount(() => {
       <!-- JSON (ex: wavetable) : bouton + résumé ici, le textarea géant n'est
            rendu QUE dans la modale (jamais en dur dans le panneau) -->
       <template v-else-if="def.type === 'json'">
-        <div class="json-field">
-          <button class="json-button" @click="openJsonModal(key)">
+        <div class="d-flex flex-column gap-1 w-100">
+          <button class="btn btn-sm btn-outline-dark w-100" @click="openJsonModal(key)">
             Charger / éditer le JSON…
           </button>
-          <span class="hint hint-block" v-if="key === 'options'">
-            <code>{ "ranges": { "p1": [1, 16] } }</code> — plage de valeur de p1
+          <span class="form-text mb-0" v-if="key === 'options'">
+            <code class="font-monospace">{ "ranges": { "p1": [1, 16] } }</code> — plage de valeur de p1
             (−10..+10 par défaut). Recompile le code au prochain chargement.
           </span>
           <span
             v-if="jsonStatusView(key).pending || jsonStatusView(key).message"
-            class="json-status"
-            :class="jsonStatusView(key).pending ? 'pending' : jsonStatusView(key).ok ? 'ok' : 'err'">
+            class="small font-monospace"
+            :class="jsonStatusView(key).pending ? 'text-body-secondary fst-italic' : jsonStatusView(key).ok ? 'text-success-emphasis' : 'text-danger-emphasis'">
             {{ jsonStatusView(key).message }}
           </span>
           <!-- Amplificateur : multiplie def.jsonKeys et réécrit le JSON -->
           <div
             v-if="isWaveParam(def)"
-            class="amp-row">
-            <label>Amplifier ×</label>
+            class="d-flex align-items-center gap-2 small">
+            <label class="text-nowrap">Amplifier ×</label>
             <input
+              class="form-control form-control-sm"
+              style="width: 64px"
               type="number"
               v-model.number="ampFactor"
               min="0.01"
@@ -1404,7 +1429,7 @@ onBeforeUnmount(() => {
               placeholder="1"
             />
             <button
-              class="amp-apply"
+              class="btn btn-sm btn-outline-success"
               :disabled="!(ampFactor > 0)"
               @click="applyAmp(def, key)">
               appliquer
@@ -1415,6 +1440,7 @@ onBeforeUnmount(() => {
 
       <!-- Boolean checkbox -->
       <input v-else-if="def.type === 'boolean'"
+             class="form-check-input m-0"
              type="checkbox"
              v-model="params[key]"
              @change="emitChange(key, params[key])" />
@@ -1436,8 +1462,9 @@ onBeforeUnmount(() => {
         :presets-key="'env:' + module.type"
         @update="val => updateEnveloppe(key, val)"
       />
-      <label v-if="def.type === 'envelope'" class="param-loop">
+      <label v-if="def.type === 'envelope'" class="form-check d-flex align-items-center gap-2 small mb-2 user-select-none">
         <input
+          class="form-check-input m-0"
           type="checkbox"
           :checked="!!(params.stages && params.stages.loop)"
           @change="toggleLoop"
@@ -1453,8 +1480,8 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Éditeur de plage de lecture pour les samples (module FX) -->
-    <div v-if="module.type === 'fx'" class="sample-region-editor">
-      <h4>Plage de lecture</h4>
+    <div v-if="module.type === 'fx'" class="mt-3 pt-3 border-top" style="border-top-style: dashed !important">
+      <h4 class="h6 mb-2">Plage de lecture</h4>
       <SampleWaveformEditor
         :buffer-key="params.buffer || null"
         :start="Number(params.start) || 0"
@@ -1466,31 +1493,32 @@ onBeforeUnmount(() => {
     <!-- Presets des modules à code : sauvegarde / rechargement de la config
          complète (code DSP / courbe + paramètres) sous un nom, persistée en
          IndexedDB (cf. useWorkletPresets) -->
-    <div v-if="activePresetStore" class="worklet-presets">
-      <h4>Presets</h4>
-      <div class="worklet-preset-save">
+    <div v-if="activePresetStore" class="mt-3 pt-3 border-top" style="border-top-style: dashed !important">
+      <h4 class="h6 mb-2">Presets</h4>
+      <div class="d-flex gap-2 mb-2">
         <input
           v-model="presetName"
+          class="form-control form-control-sm"
           type="text"
           placeholder="Nom du preset"
           @keydown.enter="saveCurrentPreset"
         />
-        <button type="button" @click="saveCurrentPreset">Sauver la config</button>
+        <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" @click="saveCurrentPreset">Sauver la config</button>
       </div>
-      <ul v-if="presetList.length" class="worklet-preset-list">
-        <li v-for="p in presetList" :key="p.name">
-          <span class="worklet-preset-name" :title="p.name">{{ p.name }}</span>
-          <span class="worklet-preset-date">{{ formatPresetDate(p.savedAt) }}</span>
-          <button type="button" @click="applyPreset(p.name)">Charger</button>
+      <ul v-if="presetList.length" class="list-unstyled d-flex flex-column gap-1 mb-0">
+        <li v-for="p in presetList" :key="p.name" class="d-flex align-items-center gap-2 small">
+          <span class="flex-grow-1 text-truncate" :title="p.name">{{ p.name }}</span>
+          <span class="small text-body-secondary font-monospace text-nowrap">{{ formatPresetDate(p.savedAt) }}</span>
+          <button type="button" class="btn btn-sm btn-outline-dark" @click="applyPreset(p.name)">Charger</button>
           <button
             type="button"
-            class="worklet-preset-delete"
+            class="btn btn-sm btn-outline-danger"
             title="Supprimer"
             @click="deletePreset(p.name)">✕</button>
         </li>
       </ul>
-      <span v-else class="hint">aucun preset sauvegardé pour l'instant</span>
-      <span v-if="presetStatus" class="hint worklet-preset-status">{{ presetStatus }}</span>
+      <span v-else class="form-text">aucun preset sauvegardé pour l'instant</span>
+      <span v-if="presetStatus" class="d-block mt-1 form-text text-success-emphasis">{{ presetStatus }}</span>
     </div>
 
     <!-- Modale d'édition du JSON des wavetables : seul endroit où le gros
@@ -1501,764 +1529,50 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div
         v-if="jsonModalKey != null"
-        class="json-modal-backdrop"
+        class="modal d-block"
+        tabindex="-1"
+        style="background: rgba(0, 0, 0, 0.45)"
         @click.self="closeJsonModal">
-        <div class="json-modal">
-          <div class="json-modal-head">
-            <strong>{{ jsonModalKey }}</strong>
-            <button
-              class="json-modal-close"
-              title="Fermer (Esc)"
-              @click="closeJsonModal">✕</button>
-          </div>
-          <div
-            class="json-modal-status"
-            :class="jsonDraftStatus.pending ? 'pending' : jsonDraftStatus.ok ? 'ok' : 'err'">
-            {{ jsonDraftStatus.message }}
-          </div>
-          <textarea
-            class="json-modal-textarea"
-            spellcheck="false"
-            :value="jsonDraft"
-            @input="onJsonDraftInput"
-            @keydown.esc="closeJsonModal"></textarea>
-          <div class="json-modal-actions">
-            <span class="json-modal-count">
-              {{ jsonDraft.length.toLocaleString('fr-FR') }} caractères
-            </span>
-            <button @click="closeJsonModal">Annuler</button>
-            <button
-              class="json-modal-apply"
-              :disabled="jsonDraftStatus.pending || !jsonDraftStatus.ok"
-              @click="applyJsonModal">
-              Charger
-            </button>
+        <div class="modal-dialog modal-xl modal-dialog-scrollable" style="height: min(88vh, 720px)">
+          <div class="modal-content h-100">
+            <div class="modal-header py-2">
+              <strong class="modal-title font-monospace">{{ jsonModalKey }}</strong>
+              <button
+                type="button"
+                class="btn-close"
+                title="Fermer (Esc)"
+                @click="closeJsonModal"></button>
+            </div>
+            <div class="modal-body d-flex flex-column gap-2 overflow-hidden">
+              <div
+                class="small font-monospace"
+                :class="jsonDraftStatus.pending ? 'text-body-secondary fst-italic' : jsonDraftStatus.ok ? 'text-success-emphasis' : 'text-danger-emphasis'">
+                {{ jsonDraftStatus.message }}
+              </div>
+              <textarea
+                class="form-control font-monospace flex-grow-1"
+                style="font-size: 12px; line-height: 1.4; resize: none"
+                spellcheck="false"
+                :value="jsonDraft"
+                @input="onJsonDraftInput"
+                @keydown.esc="closeJsonModal"></textarea>
+            </div>
+            <div class="modal-footer py-2">
+              <span class="me-auto small text-body-secondary font-monospace">
+                {{ jsonDraft.length.toLocaleString('fr-FR') }} caractères
+              </span>
+              <button type="button" class="btn btn-sm btn-outline-dark" @click="closeJsonModal">Annuler</button>
+              <button
+                type="button"
+                class="btn btn-sm btn-success"
+                :disabled="jsonDraftStatus.pending || !jsonDraftStatus.ok"
+                @click="applyJsonModal">
+                Charger
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </Teleport>
   </div>
 </template>
-
-<style scoped>
-.property-panel {
-  height: 100%;
-  padding: 12px;
-  background-color: #f9f9f9;
-  overflow-y: auto;
-  box-sizing: border-box;
-}
-
-.property-panel h3 {
-  margin-top: 0;
-  font-size: 14px;
-  text-transform: capitalize;
-  border-bottom: 1px solid #ddd;
-  padding-bottom: 8px;
-}
-
-.module-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 12px;
-}
-
-.module-label input {
-  padding: 5px 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 13px;
-}
-
-.module-label .hint {
-  font-size: 11px;
-  color: #888;
-}
-
-.synth-module-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  margin-bottom: 12px;
-  border: 1px solid #d5c2e8;
-  border-radius: 6px;
-  background: #f8f3fc;
-}
-
-.synth-module-title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.synth-module-title .hint,
-.synth-module-block .hint {
-  font-size: 11px;
-  color: #777;
-  margin: 0;
-}
-
-.synth-open-btn {
-  padding: 7px 10px;
-  border: 1px solid #8e44ad;
-  border-radius: 4px;
-  background: #8e44ad;
-  color: #fff;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.synth-open-btn:hover {
-  background: #7a3a96;
-}
-
-.synth-secondary-btn {
-  padding: 6px 10px;
-  border: 1px solid #b9a3cc;
-  border-radius: 4px;
-  background: #fff;
-  color: #5b2c6f;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.synth-secondary-btn:hover {
-  background: #f0e6f7;
-}
-
-.super-synth-module-block {
-  border-color: #b9a3cc;
-  background: #f5eefb;
-}
-
-/* ---------- MIDI (source d'événements) ---------- */
-
-.midi-module-block {
-  border-color: #7fb3d5;
-  background: #eef6fc;
-}
-
-.midi-module-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.midi-enable-btn {
-  padding: 6px 14px;
-  border: 1px solid #2c7be5;
-  border-radius: 4px;
-  background: #4d96ff;
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.midi-enable-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.midi-module-status {
-  color: #777;
-  font-size: 12px;
-}
-
-.midi-module-status.ok {
-  color: #00a86b;
-}
-
-.midi-module-device {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: #555;
-}
-
-.midi-module-device select {
-  padding: 5px 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-}
-
-.midi-module-error {
-  color: #c0392b;
-  font-size: 12px;
-  margin: 0;
-}
-
-/* ---------- Séquenceur (source d'événements) ---------- */
-
-.sequencer-module-block {
-  border-color: #f0b35a;
-  background: #fdf6ea;
-}
-
-.sequencer-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.sequencer-controls label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: #555;
-}
-
-.sequencer-controls input {
-  width: 58px;
-  padding: 4px 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-}
-
-.sequencer-play {
-  padding: 6px 14px;
-  border: 1px solid #d68910;
-  border-radius: 4px;
-  background: #f39c12;
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.sequencer-play.playing {
-  background: #c0392b;
-  border-color: #a93226;
-}
-
-.sequencer-step-count {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: #555;
-}
-
-.sequencer-step-count input {
-  width: 58px;
-  padding: 4px 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-}
-
-.sequencer-count-btn {
-  width: 24px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid #d68910;
-  border-radius: 4px;
-  background: #fff;
-  color: #b9770e;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.sequencer-count-btn:hover {
-  background: #ffe9c4;
-}
-
-/* ---------- Pitch (transformation d'événements) ---------- */
-
-.pitch-module-block {
-  border-color: #1abc9c;
-  background: #eafaf6;
-}
-
-.pitch-offset-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.pitch-slider {
-  flex: 1;
-  min-width: 120px;
-}
-
-.pitch-value {
-  min-width: 94px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #117a65;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.pitch-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.pitch-buttons button {
-  padding: 4px 10px;
-  border: 1px solid #1abc9c;
-  border-radius: 4px;
-  background: #fff;
-  color: #117a65;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.pitch-buttons button:hover {
-  background: #d1f2eb;
-}
-
-.pitch-buttons .pitch-reset {
-  border-color: #b8c2c0;
-  color: #555;
-}
-
-.json-button {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.json-button:hover {
-  background: #f0f0f0;
-}
-
-.json-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.json-modal {
-  width: min(92vw, 900px);
-  height: min(88vh, 720px);
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.json-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.json-modal-close {
-  border: none;
-  background: none;
-  font-size: 16px;
-  cursor: pointer;
-  color: #666;
-}
-
-.json-modal-status {
-  font-size: 11px;
-  font-family: monospace;
-  min-height: 15px;
-}
-
-.json-modal-status.pending {
-  color: #7f8c8d;
-  font-style: italic;
-}
-
-.json-modal-status.ok {
-  color: #27ae60;
-}
-
-.json-modal-status.err {
-  color: #c0392b;
-}
-
-.json-modal-textarea {
-  flex: 1;
-  width: 100%;
-  font-family: monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  padding: 8px;
-  box-sizing: border-box;
-  resize: none;
-}
-
-.json-modal-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.json-modal-count {
-  margin-right: auto;
-  font-size: 11px;
-  color: #888;
-  font-family: monospace;
-}
-
-.json-modal-actions button {
-  padding: 6px 14px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.json-modal-actions .json-modal-apply {
-  background: #2c7a4b;
-  border-color: #2c7a4b;
-  color: #fff;
-}
-
-.json-modal-actions .json-modal-apply:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.json-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-}
-
-.hint-block {
-  font-size: 10px;
-  line-height: 1.35;
-  color: #8a8f98;
-}
-
-.hint-block code {
-  font-family: monospace;
-  color: #b9bec7;
-}
-
-.json-status {
-  font-size: 11px;
-  font-family: monospace;
-}
-
-.json-status.ok {
-  color: #27ae60;
-}
-
-.json-status.err {
-  color: #c0392b;
-}
-
-.json-status.pending {
-  color: #7f8c8d;
-  font-style: italic;
-}
-
-.amp-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #333;
-}
-
-.amp-row label {
-  min-width: max-content;
-}
-
-.amp-row input {
-  width: 64px;
-  padding: 4px 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.amp-apply {
-  border: 1px solid #2E8B57;
-  background: rgba(46, 139, 87, 0.1);
-  color: #2c6e4f;
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 3px 8px;
-  cursor: pointer;
-}
-
-.amp-apply:hover:not(:disabled) {
-  background: rgba(46, 139, 87, 0.2);
-}
-
-.amp-apply:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.param-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-
-.param-envelope {
-  flex-direction: column;
-  align-items: stretch;
-  width: 100%;
-}
-.param-envelope > label {
-  align-self: flex-start;
-}
-
-.param-code {
-  flex-direction: column;
-  align-items: stretch;
-  width: 100%;
-  margin-bottom: 14px;
-}
-.param-code > label {
-  align-self: flex-start;
-}
-
-.code-editor {
-  width: 100%;
-  min-height: 220px;
-  padding: 8px;
-  box-sizing: border-box;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.45;
-  tab-size: 2;
-  resize: vertical;
-  border: 1px solid #c9c9c9;
-  border-radius: 3px;
-  background: #fbfbf8;
-  color: #222;
-}
-.code-editor:focus {
-  outline: none;
-  border-color: #e8a33d;
-  background: #fff;
-}
-
-.code-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
-.code-actions button {
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  border: 1px solid #c9c9c9;
-  border-radius: 3px;
-  background: #fff;
-}
-.code-actions button:hover {
-  background: #f1f1f1;
-}
-.code-actions .hint {
-  font-size: 11px;
-  color: #777;
-}
-
-.code-status {
-  display: block;
-  margin-top: 4px;
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.code-status.ok {
-  color: #27ae60;
-}
-.code-status.err {
-  color: #c0392b;
-}
-
-.param-loop {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #333;
-  margin-bottom: 8px;
-  user-select: none;
-  cursor: pointer;
-}
-
-.sample-region-editor {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px dashed #ddd;
-}
-
-.worklet-presets {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px dashed #ddd;
-}
-
-.worklet-presets h4 {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: #555;
-}
-
-.worklet-preset-save {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.worklet-preset-save input {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.worklet-preset-save button {
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  border: 1px solid #c9c9c9;
-  border-radius: 3px;
-  background: #fff;
-  white-space: nowrap;
-}
-
-.worklet-preset-save button:hover {
-  background: #f1f1f1;
-}
-
-.worklet-preset-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.worklet-preset-list li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.worklet-preset-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.worklet-preset-date {
-  font-size: 10px;
-  color: #999;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.worklet-preset-list button {
-  padding: 2px 8px;
-  font-size: 11px;
-  cursor: pointer;
-  border: 1px solid #c9c9c9;
-  border-radius: 3px;
-  background: #fff;
-}
-
-.worklet-preset-list button:hover {
-  background: #f1f1f1;
-}
-
-.worklet-preset-delete {
-  color: #c0392b;
-}
-
-.worklet-preset-status {
-  display: block;
-  margin-top: 6px;
-  color: #2c6e4f;
-}
-.sample-region-editor h4 {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: #555;
-}
-
-.wavetable-3d-viewer {
-  margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px dashed #ddd;
-}
-
-.wavetable-3d-viewer h4 {
-  margin: 0 0 6px;
-  font-size: 12px;
-  color: #555;
-}
-
-.wavetable-3d-canvas {
-  display: block;
-  width: 100%;
-  height: 230px;
-  border-radius: 6px;
-  background: #0a1016;
-}
-
-.wavetable-3d-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 11px;
-  color: #777;
-  margin-top: 4px;
-}
-
-.wavetable-3d-frame strong {
-  color: #3f8f7b;
-  font-variant-numeric: tabular-nums;
-}
-
-.wavetable-3d-frame em {
-  font-style: normal;
-  color: #b8860b;
-}
-
-.wavetable-3d-frame.off em {
-  color: #999;
-}
-
-.wavetable-3d-count {
-  font-family: monospace;
-}
-
-</style>
