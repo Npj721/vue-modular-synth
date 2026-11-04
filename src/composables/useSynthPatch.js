@@ -438,7 +438,8 @@ export function createSuperSynthDefinition(patch, name = "SuperSynth") {
         (m) =>
           m.type === "keyboard" ||
           m.type === "midi" ||
-          m.type === "sequencer"
+          m.type === "sequencer" ||
+          m.type === "pitch"
       )
       .map((m) => m.id)
   )

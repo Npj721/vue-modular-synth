@@ -117,8 +117,18 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
   /** Notes actuellement tenues (pour les enveloppes globales de la couche voice). */
   const activeNoteKeys = new Set()
 
-  /** sourceModuleId -> Set<targetModuleId> : câbles d'événements de la couche voice. */
-  let eventRoutes = new Map()
+  /**
+   * voiceKey source -> [{ id, note, voiceKey }] : notes réellement déclenchées
+   * sur chaque cible. On relâche exactement ces notes au noteOff, même si le
+   * routage ou le pitch a changé entre-temps.
+   */
+  const routedNotes = new Map()
+
+  /** fromModuleId -> Set<toModuleId> : câbles d'événements de la couche voice. */
+  let eventAdjacency = new Map()
+
+  /** moduleId -> module (couche voice), pour appliquer les transpositions. */
+  let voiceModulesById = new Map()
 
   let mainHost = null
   let voiceHost = null
@@ -143,37 +153,104 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
     return c?.from?.port === "out:events" && c?.to?.port === "in:events"
   }
 
-  /** Reconstruit la table source -> synthés ciblés depuis le graphe voice. */
+  /** Reconstruit le graphe des câbles d'événements de la couche voice. */
   function syncEventRoutes() {
-    const routes = new Map()
+    const adjacency = new Map()
     for (const c of normalized.voice.connections ?? []) {
       if (!isEventConnection(c)) continue
       const fromId = c.from?.id
       const toId = c.to?.id
       if (!fromId || !toId) continue
-      let targets = routes.get(fromId)
+      let targets = adjacency.get(fromId)
       if (!targets) {
         targets = new Set()
-        routes.set(fromId, targets)
+        adjacency.set(fromId, targets)
       }
       targets.add(toId)
     }
-    eventRoutes = routes
+    eventAdjacency = adjacency
+    voiceModulesById = new Map(
+      (normalized.voice.modules ?? []).map((m) => [m.id, m])
+    )
+  }
+
+  /** Décalage (demi-tons) appliqué par un module de transformation d'events. */
+  function eventPitchOffset(module) {
+    if (module?.type !== "pitch") return 0
+    const value = Number(module.params?.pitch)
+    if (!Number.isFinite(value)) return 0
+    return Math.max(-48, Math.min(48, Math.round(value)))
   }
 
   /**
-   * Cibles d'une source d'événements.
+   * Cibles d'une source d'événements, avec le pitch cumulé des modules
+   * traversés (ex: keyboard -> pitch +2 -> synth => { id, offset: 2 }).
+   *
    * - `null` : source inconnue / ancien appel -> diffusion à tous les synthés
    *   (comportement historique, préserve les anciens patches).
-   * - Set vide : la source existe mais n'est câblée à aucun synthé -> silence.
+   * - tableau vide : la source existe mais n'est câblée à aucun synthé.
    */
   function eventTargets(sourceId) {
     if (!sourceId) return null
-    const known = (normalized.voice.modules ?? []).some(
-      (m) => m.id === sourceId
-    )
-    if (!known) return null
-    return eventRoutes.get(sourceId) ?? new Set()
+    if (!voiceModulesById.has(sourceId)) return null
+
+    const result = []
+    const seen = new Set()
+    const stack = [{ id: sourceId, offset: 0, depth: 0 }]
+
+    while (stack.length) {
+      const current = stack.pop()
+      // Garde-fou : évite une boucle infinie si des modules Events forment
+      // un cycle (rien n'interdit pitch.out -> pitch.in dans le paper).
+      if (current.depth >= 32) continue
+
+      for (const toId of eventAdjacency.get(current.id) ?? []) {
+        const module = voiceModulesById.get(toId)
+        if (!module) continue
+
+        const offset = Math.max(
+          -96,
+          Math.min(96, current.offset + eventPitchOffset(module))
+        )
+        const stateKey = `${toId}:${offset}`
+        if (seen.has(stateKey)) continue
+        seen.add(stateKey)
+
+        if (module.type === "synth" || module.type === "superSynth") {
+          result.push({ id: toId, offset })
+        } else {
+          // Module de transformation (pitch, futurs modules Events) : la
+          // note continue de traverser le graphe.
+          stack.push({ id: toId, offset, depth: current.depth + 1 })
+        }
+      }
+    }
+    return result
+  }
+
+  /** Routage effectif d'une note : cibles explicites ou diffusion globale. */
+  function resolveEventRoutes(sourceId) {
+    const targets = eventTargets(sourceId)
+    if (targets) return targets
+    return [
+      ...[...synthRecords.keys()].map((id) => ({ id, offset: 0 })),
+      ...[...superRecords.keys()].map((id) => ({ id, offset: 0 })),
+    ]
+  }
+
+  function routedVoiceKey(baseKey, offset) {
+    return offset === 0 ? baseKey : `${baseKey}:pitch:${offset}`
+  }
+
+  function releaseRoutedNotes(routes) {
+    for (const route of routes) {
+      const synth = synthRecords.get(route.id)
+      if (synth) {
+        synth.engine.noteOff(route.note, route.voiceKey)
+        continue
+      }
+      superRecords.get(route.id)?.child.noteOff(route.note, route.voiceKey)
+    }
   }
 
   function ensureBoundaryGains() {
@@ -502,50 +579,84 @@ function createSynthPatchInstance({ getPatch, context, outputNode }) {
   async function noteOn(note, velocity, track, voiceKey, sourceId = null) {
     await init()
 
+    const baseKey = voiceKey ?? note
+
     // Enveloppes globales de la couche voice : le graphe est persistant, donc
     // on les relance explicitement à chaque note.
-    activeNoteKeys.add(voiceKey ?? note)
+    activeNoteKeys.add(baseKey)
     voiceHost?.retriggerMainEnvelopes(velocity ?? 1)
 
     // Une source câblée ne pilote que les synthés connectés à sa sortie
-    // Events. Sans source (anciens appels), on conserve la diffusion globale.
-    const targets = eventTargets(sourceId)
+    // Events, en traversant les modules de transformation (Pitch). Sans
+    // source (anciens appels), on conserve la diffusion globale.
+    const routes = resolveEventRoutes(sourceId)
 
+    // Si la même voix est rejouée sans noteOff (ex: note repeat), on relâche
+    // d'abord les notes réellement déclenchées la fois précédente.
+    const previous = routedNotes.get(baseKey)
+    if (previous) releaseRoutedNotes(previous)
+
+    const applied = []
     const jobs = []
-    for (const [id, record] of synthRecords) {
-      if (targets && !targets.has(id)) continue
-      const dest = track ? connectTrackGain(track, record) : null
-      jobs.push(record.engine.noteOn(note, velocity, dest, voiceKey))
-    }
-    for (const [id, record] of superRecords) {
-      if (targets && !targets.has(id)) continue
-      // Un SuperSynth propage la note à tous ses synthés internes.
-      jobs.push(record.child.noteOn(note, velocity, track, voiceKey))
+    for (const route of routes) {
+      const pitchedNote = Math.max(0, Math.min(127, note + route.offset))
+      const routeKey = routedVoiceKey(baseKey, route.offset)
+      applied.push({ id: route.id, note: pitchedNote, voiceKey: routeKey })
+
+      const synth = synthRecords.get(route.id)
+      if (synth) {
+        const dest = track ? connectTrackGain(track, synth) : null
+        jobs.push(
+          synth.engine.noteOn(pitchedNote, velocity, dest, routeKey)
+        )
+        continue
+      }
+
+      const superRecord = superRecords.get(route.id)
+      if (superRecord) {
+        // Un SuperSynth propage la note à tous ses synthés internes.
+        jobs.push(
+          superRecord.child.noteOn(pitchedNote, velocity, track, routeKey)
+        )
+      }
     }
 
+    routedNotes.set(baseKey, applied)
     await Promise.all(jobs)
   }
 
   function noteOff(note, voiceKey, sourceId = null) {
-    const targets = eventTargets(sourceId)
+    const baseKey = voiceKey ?? note
+    const applied = routedNotes.get(baseKey)
 
-    for (const [id, record] of synthRecords) {
-      if (targets && !targets.has(id)) continue
-      record.engine.noteOff(note, voiceKey)
-    }
-    for (const [id, record] of superRecords) {
-      if (targets && !targets.has(id)) continue
-      record.child.noteOff(note, voiceKey)
+    if (applied) {
+      releaseRoutedNotes(applied)
+      routedNotes.delete(baseKey)
+    } else {
+      // Filet de sécurité : aucune trace de noteOn (ex: patch rechargé entre
+      // les deux) -> on utilise le routage courant.
+      const routes = resolveEventRoutes(sourceId)
+      for (const route of routes) {
+        const pitchedNote = Math.max(0, Math.min(127, note + route.offset))
+        const routeKey = routedVoiceKey(baseKey, route.offset)
+        const synth = synthRecords.get(route.id)
+        if (synth) {
+          synth.engine.noteOff(pitchedNote, routeKey)
+          continue
+        }
+        superRecords.get(route.id)?.child.noteOff(pitchedNote, routeKey)
+      }
     }
 
     // Ne relâche l'enveloppe globale que lorsque la dernière note est levée.
-    activeNoteKeys.delete(voiceKey ?? note)
+    activeNoteKeys.delete(baseKey)
     if (activeNoteKeys.size === 0) {
       voiceHost?.releaseMainEnvelopes()
     }
   }
 
   function stopAll() {
+    routedNotes.clear()
     activeNoteKeys.clear()
     voiceHost?.releaseMainEnvelopes()
     for (const record of synthRecords.values()) record.engine.stopAll()

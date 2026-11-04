@@ -96,7 +96,7 @@ const CATEGORY_LABELS = {
   interface: 'Interface',
   super: 'Super Modules',
   synth: 'Synths',
-  event: 'Event Sources',
+  event: 'Event Modules',
   code: 'Code',
 };
 

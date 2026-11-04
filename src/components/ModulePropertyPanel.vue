@@ -219,6 +219,13 @@ const visibleParamDefs = computed(() => {
     )
   }
 
+  // Le module Pitch a un éditeur dédié (boutons + curseur).
+  if (type === "pitch") {
+    return Object.fromEntries(
+      Object.entries(paramDefs).filter(([key]) => key !== "pitch")
+    )
+  }
+
   // Le module MIDI a un sélecteur d'appareil dédié.
   if (type === "midi") {
     return Object.fromEntries(
@@ -323,6 +330,31 @@ const onSequencerVelocityChange = ({ index, value }) => {
   setSequencerVelocity(index, value)
 }
 
+/* =========================================================
+ * PITCH (module de transformation d'events)
+ * ========================================================= */
+
+const pitchOffset = computed(() =>
+  Math.round(clampSequencerNumber(params.pitch, -48, 48, 0))
+)
+
+const pitchOffsetLabel = computed(() => {
+  const value = pitchOffset.value
+  const sign = value > 0 ? "+" : ""
+  const plural = Math.abs(value) > 1 ? "s" : ""
+  return `${sign}${value} demi-ton${plural}`
+})
+
+const setPitchOffset = (value) => {
+  const next = Math.round(clampSequencerNumber(value, -48, 48, 0))
+  params.pitch = next
+  emitChange("pitch", next)
+}
+
+const nudgePitch = (delta) => {
+  setPitchOffset(pitchOffset.value + delta)
+}
+
 const baseParamDef = (key) => {
   const def = props.module ? getModuleByType(props.module.type) : null
   return def?.params?.[key] ?? null
@@ -405,6 +437,7 @@ const emitChange = (key, value) => {
   const eventOnly =
     (props.module?.type === "sequencer" &&
       (key === "steps" || key === "bpm" || key === "stepCount")) ||
+    (props.module?.type === "pitch" && key === "pitch") ||
     (props.module?.type === "midi" && key === "device")
   if (eventOnly && previous !== value) {
     markEventOnlyPatchChange()
@@ -1022,6 +1055,50 @@ onBeforeUnmount(() => {
         aux synthés dont l'entrée Events est reliée à ce module. Une même
         sortie peut alimenter plusieurs synthés. Pour un clavier MIDI, ajoutez
         un module MIDI.
+      </p>
+    </div>
+
+    <!-- Module Pitch : transpose les événements qui le traversent -->
+    <div
+      v-if="module.type === 'pitch'"
+      class="synth-module-block pitch-module-block"
+    >
+      <div class="synth-module-title">
+        <strong>{{ params.name || module.label || "Pitch" }}</strong>
+        <span class="hint">transpose les events</span>
+      </div>
+      <p class="hint">
+        Câblez une source Events (clavier, MIDI, séquenceur…) sur l'entrée
+        Events, puis la sortie Events vers le Synth ou SuperSynth à piloter.
+        Chaque note reçue est transposée du décalage ci-dessous. Plusieurs
+        modules Pitch peuvent être chaînés : les décalages se cumulent.
+      </p>
+
+      <div class="pitch-offset-row">
+        <input
+          class="pitch-slider"
+          type="range"
+          min="-48"
+          max="48"
+          step="1"
+          :value="pitchOffset"
+          @input="setPitchOffset($event.target.value)"
+        />
+        <span class="pitch-value">{{ pitchOffsetLabel }}</span>
+      </div>
+
+      <div class="pitch-buttons">
+        <button type="button" title="Descendre d'une octave" @click="nudgePitch(-12)">−12</button>
+        <button type="button" title="Descendre d'un demi-ton" @click="nudgePitch(-1)">−1</button>
+        <button type="button" class="pitch-reset" title="Aucun décalage" @click="setPitchOffset(0)">0</button>
+        <button type="button" title="Monter d'un demi-ton" @click="nudgePitch(1)">+1</button>
+        <button type="button" title="Monter d'une octave" @click="nudgePitch(12)">+12</button>
+      </div>
+
+      <p class="hint">
+        Exemple : avec +2, une note 60 reçue est jouée en 62 par le synthé.
+        Retirez le câble direct source → synthé si vous ne voulez entendre que
+        la version transposée.
       </p>
     </div>
 
@@ -1690,6 +1767,58 @@ onBeforeUnmount(() => {
 
 .sequencer-count-btn:hover {
   background: #ffe9c4;
+}
+
+/* ---------- Pitch (transformation d'événements) ---------- */
+
+.pitch-module-block {
+  border-color: #1abc9c;
+  background: #eafaf6;
+}
+
+.pitch-offset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pitch-slider {
+  flex: 1;
+  min-width: 120px;
+}
+
+.pitch-value {
+  min-width: 94px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #117a65;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pitch-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pitch-buttons button {
+  padding: 4px 10px;
+  border: 1px solid #1abc9c;
+  border-radius: 4px;
+  background: #fff;
+  color: #117a65;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pitch-buttons button:hover {
+  background: #d1f2eb;
+}
+
+.pitch-buttons .pitch-reset {
+  border-color: #b8c2c0;
+  color: #555;
 }
 
 .json-button {

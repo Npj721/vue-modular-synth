@@ -1197,6 +1197,46 @@ const catalog = reactive({
       },
     },
 
+    /* Transformation d'événements : reçoit des notes et les réémet
+     * transposées. Câblé entre une source Events (clavier, MIDI, séquenceur)
+     * et un ou plusieurs Synth / SuperSynth. Plusieurs modules Pitch peuvent
+     * être chaînés : les décalages se cumulent. */
+    pitch: {
+      label: "Pitch",
+      color: "#1ABC9C",
+      category: "event",
+      singleton: false,
+
+      ports: {
+        inputs: [
+          {
+            id: "events",
+            label: "Events",
+            kind: "event",
+            role: "eventIn",
+            multiple: true,
+          },
+        ],
+        outputs: [
+          {
+            id: "events",
+            label: "Events",
+            kind: "event",
+            role: "eventOut",
+            multiple: true,
+          },
+        ],
+      },
+
+      params: {
+        name: { type: "string", default: "Pitch" },
+        pitch: {
+          ...num(-48, 48, 1, 0),
+          unit: "demi-tons",
+        },
+      },
+    },
+
     input: {
       label: "Input",
       color: "#222222",
